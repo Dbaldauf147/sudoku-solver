@@ -16,7 +16,7 @@ answer.
     7 can only go here*" (hidden single).
   - **Hint** finds the next cell you can logically prove, explains it (and
     names the technique — naked/hidden single, pointing pair, box/line
-    reduction, naked pair), and offers to place it for you.
+    reduction, naked pair, hidden pair, X-wing), and offers to place it for you.
   - **Candidates** toggles pencil marks in every empty cell.
   - Wrong entries are flagged with the reason they can't work — without
     spoiling the answer. **Check entries** and **Reveal solution** are there
@@ -27,8 +27,24 @@ answer.
 
   The coaching and saved library are entirely client-side, so they work
   **without an API key** — only the optional screenshot import calls Claude.
-  Saved puzzles live in the browser's `localStorage` (per device); a future
-  enhancement could sync them via a database for cross-device access.
+
+- **`api/games.js`** — optional cross-device sync for the saved library,
+  backed by a Redis store. When a store is connected the library syncs across
+  devices; when it isn't, the front end silently falls back to the browser's
+  `localStorage` (per device), so nothing breaks either way.
+
+### Cross-device sync (optional)
+
+To sync saved puzzles across devices, connect a Redis store:
+
+1. In Vercel → your project → **Storage → Create / Connect Database** → choose
+   **Upstash Redis** (Marketplace).
+2. Connecting it injects `KV_REST_API_URL` and `KV_REST_API_TOKEN` (the Upstash
+   integration also sets `UPSTASH_REDIS_REST_*`; `api/games.js` accepts either).
+3. **Redeploy** so the function picks up the new variables.
+
+The library is stored as a single shared collection (no per-user auth), which
+is fine for a personal tool — add auth before sharing it broadly.
 - **`api/parse-sudoku-image.js`** — a Vercel serverless function that forwards
   the screenshot to Claude Vision and returns the parsed grid as a `9×9` array
   of numbers (`0` = empty).

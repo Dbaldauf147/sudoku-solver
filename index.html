@@ -460,6 +460,79 @@
         return null;
       }
 
+      function hiddenPair(M, grid) {
+        for (const u of UNITS) {
+          const empties = u.cells.filter(([r, c]) => grid[r][c] === 0);
+          const spots = {};
+          for (let n = 1; n <= 9; n++)
+            spots[n] = empties.filter(([r, c]) => M[r][c].has(n));
+          for (let a = 1; a <= 9; a++)
+            for (let b = a + 1; b <= 9; b++) {
+              if (spots[a].length !== 2 || spots[b].length !== 2) continue;
+              const key = (cells) => cells.map(([r, c]) => r * 9 + c).sort().join();
+              if (key(spots[a]) !== key(spots[b])) continue;
+              const elims = [];
+              for (const [r, c] of spots[a])
+                for (const n of M[r][c])
+                  if (n !== a && n !== b) elims.push([r, c, n]);
+              if (elims.length) {
+                const [c1, c2] = spots[a];
+                return { elims, highlight: [c1, c2],
+                  reason: `${loc(c1[0], c1[1])} and ${loc(c2[0], c2[1])} are the only cells in ${u.name} that can hold ${a} or ${b}, so those two cells must be ${a}/${b} and their other candidates are removed.`,
+                  tech: "Hidden pair" };
+              }
+            }
+        }
+        return null;
+      }
+      function xWing(M, grid) {
+        for (let n = 1; n <= 9; n++) {
+          // Row-based: two rows where n sits in the same two columns.
+          const byCols = {};
+          for (let r = 0; r < 9; r++) {
+            const cols = [];
+            for (let c = 0; c < 9; c++) if (grid[r][c] === 0 && M[r][c].has(n)) cols.push(c);
+            if (cols.length === 2) (byCols[cols.join()] ||= []).push(r);
+          }
+          for (const k in byCols)
+            if (byCols[k].length >= 2) {
+              const [c1, c2] = k.split(",").map(Number);
+              const [r1, r2] = byCols[k];
+              const elims = [];
+              for (let r = 0; r < 9; r++)
+                if (r !== r1 && r !== r2)
+                  for (const c of [c1, c2])
+                    if (grid[r][c] === 0 && M[r][c].has(n)) elims.push([r, c, n]);
+              if (elims.length)
+                return { elims, highlight: [[r1, c1], [r1, c2], [r2, c1], [r2, c2]],
+                  reason: `X-wing on ${n}: rows ${r1 + 1} and ${r2 + 1} both pin ${n} to columns ${c1 + 1} and ${c2 + 1}, so ${n} is removed from those columns in every other row.`,
+                  tech: "X-wing" };
+            }
+          // Column-based: two columns where n sits in the same two rows.
+          const byRows = {};
+          for (let c = 0; c < 9; c++) {
+            const rows = [];
+            for (let r = 0; r < 9; r++) if (grid[r][c] === 0 && M[r][c].has(n)) rows.push(r);
+            if (rows.length === 2) (byRows[rows.join()] ||= []).push(c);
+          }
+          for (const k in byRows)
+            if (byRows[k].length >= 2) {
+              const [r1, r2] = k.split(",").map(Number);
+              const [c1, c2] = byRows[k];
+              const elims = [];
+              for (let c = 0; c < 9; c++)
+                if (c !== c1 && c !== c2)
+                  for (const r of [r1, r2])
+                    if (grid[r][c] === 0 && M[r][c].has(n)) elims.push([r, c, n]);
+              if (elims.length)
+                return { elims, highlight: [[r1, c1], [r2, c1], [r1, c2], [r2, c2]],
+                  reason: `X-wing on ${n}: columns ${c1 + 1} and ${c2 + 1} both pin ${n} to rows ${r1 + 1} and ${r2 + 1}, so ${n} is removed from those rows in every other column.`,
+                  tech: "X-wing" };
+            }
+        }
+        return null;
+      }
+
       function applyElims(M, elims) {
         const N = cloneMap(M);
         for (const [r, c, n] of elims) N[r][c].delete(n);
@@ -473,7 +546,7 @@
         if (s) return { kind: "place", ...s, highlight: [[s.r, s.c]],
           reason: `${s.tech}: ${s.reason}` };
 
-        for (const tech of [lockedCandidates, nakedPair]) {
+        for (const tech of [lockedCandidates, nakedPair, hiddenPair, xWing]) {
           const e = tech(M, grid);
           if (!e) continue;
           const M2 = applyElims(M, e.elims);
@@ -701,6 +774,33 @@
       function persistGames(games) {
         localStorage.setItem(STORE_KEY, JSON.stringify(games));
       }
+
+      // Cloud sync (optional): if a Redis store is connected, /api/games works
+      // and the library syncs across devices; otherwise we stay on localStorage.
+      let cloudOn = false;
+      async function cloudGet() {
+        const r = await fetch("/api/games");
+        if (r.status === 501) { cloudOn = false; return null; }
+        if (!r.ok) throw new Error("sync unavailable");
+        cloudOn = true;
+        return (await r.json()).games || [];
+      }
+      function cloudPut(games) {
+        if (!cloudOn) return;
+        fetch("/api/games", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ games }),
+        }).catch(() => {});
+      }
+      async function initLibrary() {
+        try {
+          const cloud = await cloudGet();
+          if (cloud) persistGames(cloud); // cloud is source of truth when present
+        } catch { /* fall back to whatever is in localStorage */ }
+        renderLibrary();
+      }
+      const syncNote = () => (cloudOn ? " and synced across your devices" : " on this device");
       function renderLibrary() {
         const games = loadGames();
         libraryEl.hidden = games.length === 0;
@@ -734,8 +834,9 @@
         };
         games.unshift(game);
         persistGames(games);
+        cloudPut(games);
         renderLibrary();
-        showExplain("Puzzle saved", `Saved as ${game.source} · ${game.difficulty}. Load it anytime from the saved list below.`, "ok");
+        showExplain("Puzzle saved", `Saved as ${game.source} · ${game.difficulty}${syncNote()}. Load it anytime from the saved list below.`, "ok");
       });
 
       document.getElementById("load").addEventListener("click", () => {
@@ -752,11 +853,12 @@
       document.getElementById("delete").addEventListener("click", () => {
         const games = loadGames().filter((g) => g.id !== savedEl.value);
         persistGames(games);
+        cloudPut(games);
         renderLibrary();
         showExplain("Puzzle deleted", "Removed from your saved list.", "info");
       });
 
-      renderLibrary();
+      initLibrary();
 
       // --- Image import → Claude Vision (optional) ---
       document.getElementById("file").addEventListener("change", async (e) => {
