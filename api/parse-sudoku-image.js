@@ -48,9 +48,22 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return res
-      .status(500)
-      .json({ error: "Server is missing ANTHROPIC_API_KEY" });
+    // Diagnostic (names/length only, never values) to tell apart the common
+    // causes: variable undefined (not attached to this deployment) vs. an
+    // empty/mis-pasted value.
+    return res.status(500).json({
+      error: "Server is missing ANTHROPIC_API_KEY",
+      diagnostic: {
+        defined: Object.prototype.hasOwnProperty.call(
+          process.env,
+          "ANTHROPIC_API_KEY"
+        ),
+        length: (process.env.ANTHROPIC_API_KEY || "").length,
+        anthropicVars: Object.keys(process.env).filter((k) =>
+          /ANTHROPIC/i.test(k)
+        ),
+      },
+    });
   }
 
   const { image, media_type = "image/png" } = req.body || {};
