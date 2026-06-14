@@ -1,14 +1,27 @@
 # sudoku-solver
 
-Import a screenshot of a Sudoku puzzle and solve it — Claude Vision reads the
-grid, you fix any misreads, and a backtracking solver finishes it.
+A Sudoku **coach**: enter a puzzle (or import a screenshot) and solve it
+yourself, one step at a time. Every move is checked and explained — naming the
+actual technique — so you learn the reasoning instead of just getting the
+answer.
 
 ## How it works
 
-- **`index.html`** — a zero-dependency static front end. It reads the imported
-  image, sends it to the API, renders an editable 9×9 grid, and runs an
-  in-browser backtracking solver. Solved cells are highlighted so you can tell
-  them apart from the givens.
+- **`index.html`** — a zero-dependency static front end that houses all the
+  Sudoku logic:
+  - **Start solving** locks your clues and computes the (unique) solution.
+  - **Type a number** in any cell and it tells you immediately whether it's
+    right and *why* — e.g. "*R3C5 can only be 7 — every other digit already
+    appears in its row, column, or box*" (naked single), or "*within this box,
+    7 can only go here*" (hidden single).
+  - **Hint** finds the next cell you can logically prove, explains it, and
+    offers to place it for you.
+  - Wrong entries are flagged with the reason they can't work — without
+    spoiling the answer. **Check entries** and **Reveal solution** are there
+    when you want them.
+
+  The coaching is entirely client-side, so it works **without an API key** —
+  only the optional screenshot import calls Claude.
 - **`api/parse-sudoku-image.js`** — a Vercel serverless function that forwards
   the screenshot to Claude Vision and returns the parsed grid as a `9×9` array
   of numbers (`0` = empty).
