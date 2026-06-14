@@ -17,6 +17,7 @@
         --user: #6ea8fe;
         --ok: #4ade80;
         --bad: #ff6b6b;
+        --pencil: #7c8696;
       }
       * { box-sizing: border-box; }
       body {
@@ -35,6 +36,18 @@
       .controls.solving { display: none; }
       body.solving .controls.setup { display: none; }
       body.solving .controls.solving { display: flex; }
+      .saverow { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; align-items: center; }
+      body.solving .setup-extra { display: none; }
+      select, input#source {
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px 12px;
+        font-size: 0.95rem;
+      }
+      input#source { flex: 1; min-width: 120px; }
+      .library select { flex: 1; min-width: 160px; }
       button, label.file {
         background: var(--panel);
         color: var(--text);
@@ -45,6 +58,7 @@
         cursor: pointer;
       }
       button.primary { background: var(--accent); border-color: var(--accent); color: #0b1020; font-weight: 600; }
+      button.toggle.on { background: #243150; border-color: var(--accent); color: var(--text); }
       button:disabled { opacity: 0.5; cursor: not-allowed; }
       label.file input { display: none; }
 
@@ -58,22 +72,40 @@
         border-radius: 6px;
         overflow: hidden;
       }
-      .cell {
-        background: var(--panel);
+      .cell { position: relative; background: var(--panel); }
+      .cell.hint { background: #243150; box-shadow: inset 0 0 0 2px var(--accent); }
+      .cell.peer { background: #1e2433; }
+      .cell-input {
+        position: absolute; inset: 0;
+        width: 100%; height: 100%;
+        background: transparent;
         border: none;
         color: var(--user);
         font-size: clamp(1rem, 5vw, 1.6rem);
         text-align: center;
-        width: 100%;
-        height: 100%;
         outline: none;
+        z-index: 2;
       }
-      .cell:focus { background: #1f2430; }
-      .cell.given { color: var(--given); font-weight: 700; }
-      .cell.user { color: var(--user); }
-      .cell.wrong { color: var(--bad); }
-      .cell.solved { color: var(--user); }
-      .cell.hint { background: #243150; box-shadow: inset 0 0 0 2px var(--accent); }
+      .cell-input:focus { background: #1f2430; }
+      .cell-input.given { color: var(--given); font-weight: 700; }
+      .cell-input.user { color: var(--user); }
+      .cell-input.wrong { color: var(--bad); }
+      .cell-input.solved { color: var(--user); }
+      .pencil {
+        position: absolute; inset: 0;
+        display: none;
+        grid-template-columns: repeat(3, 1fr);
+        grid-template-rows: repeat(3, 1fr);
+        font-size: clamp(0.45rem, 1.7vw, 0.62rem);
+        line-height: 1;
+        color: var(--pencil);
+        pointer-events: none;
+        z-index: 1;
+      }
+      body.candidates .cell:not(.has-value) .pencil { display: grid; }
+      .pencil span { display: flex; align-items: center; justify-content: center; }
+      .pencil span.mark { color: var(--accent); font-weight: 700; }
+
       .cell[data-col="2"], .cell[data-col="5"] { box-shadow: inset -2px 0 0 var(--thick); }
       .cell[data-row="2"], .cell[data-row="5"] { box-shadow: inset 0 -2px 0 var(--thick); }
       .cell[data-col="2"][data-row="2"], .cell[data-col="2"][data-row="5"],
@@ -96,6 +128,7 @@
       .explain.info { border-left-color: var(--muted); }
       .explain .title { font-weight: 600; margin: 0 0 6px; }
       .explain .body { color: var(--muted); line-height: 1.5; margin: 0; }
+      .explain .tech { color: var(--accent); font-weight: 600; }
       .explain button { margin-top: 12px; padding: 7px 14px; font-size: 0.9rem; }
       footer { margin-top: 18px; color: var(--muted); font-size: 0.8rem; line-height: 1.5; }
     </style>
@@ -105,8 +138,8 @@
       <h1>Sudoku Coach</h1>
       <p class="sub">
         Enter a puzzle (or import a screenshot), then solve it yourself — one
-        step at a time. Every move is checked and explained, so you learn the
-        reasoning, not just the answer.
+        step at a time. Every move is checked and explained, with pencil-mark
+        candidates and hints that name the technique.
       </p>
 
       <div class="controls setup">
@@ -118,8 +151,25 @@
         <button id="clear">Clear</button>
       </div>
 
+      <div class="saverow setup-extra">
+        <select id="difficulty" title="Difficulty">
+          <option value="Easy">Easy</option>
+          <option value="Medium" selected>Medium</option>
+          <option value="Hard">Hard</option>
+        </select>
+        <input id="source" placeholder="Source" value="NYT" />
+        <button id="save">Save puzzle</button>
+      </div>
+
+      <div class="saverow setup-extra library" hidden>
+        <select id="saved" title="Saved puzzles"></select>
+        <button id="load">Load</button>
+        <button id="delete">Delete</button>
+      </div>
+
       <div class="controls solving">
         <button id="hint" class="primary">Hint</button>
+        <button id="cands" class="toggle">Candidates</button>
         <button id="check">Check entries</button>
         <button id="reveal">Reveal solution</button>
         <button id="edit">Edit puzzle</button>
@@ -136,51 +186,71 @@
       </div>
 
       <footer>
-        Givens are shown in white and locked. Your entries turn green when
-        correct, red when they can't work. Press <strong>Hint</strong> any time
-        you're stuck.
+        Givens are white and locked. Your entries turn green when correct, red
+        when they can't work. Toggle <strong>Candidates</strong> for pencil
+        marks, or press <strong>Hint</strong> for the next provable step —
+        including pairs and locked-candidate techniques, not just singles.
       </footer>
     </main>
 
     <script>
       const boardEl = document.getElementById("board");
       const explainEl = document.getElementById("explain");
-      const cells = [];
+      const inputs = [];   // input elements (values + text color)
+      const cellEls = [];  // container elements (highlights + pencil)
+      const pencils = [];  // pencil-mark <span> arrays
       let solving = false;
-      let solution = null; // 9x9 once the puzzle is locked
-      let givens = Array.from({ length: 9 }, () => Array(9).fill(false));
+      let solution = null;
+      let givens = blank(false);
       let lastHint = null;
+
+      function blank(v) { return Array.from({ length: 9 }, () => Array(9).fill(v)); }
 
       // --- Build the grid ---
       for (let r = 0; r < 9; r++) {
-        cells[r] = [];
+        inputs[r] = []; cellEls[r] = []; pencils[r] = [];
         for (let c = 0; c < 9; c++) {
+          const cell = document.createElement("div");
+          cell.className = "cell";
+          cell.dataset.row = r; cell.dataset.col = c;
+
+          const pencil = document.createElement("div");
+          pencil.className = "pencil";
+          const spans = [];
+          for (let n = 1; n <= 9; n++) {
+            const s = document.createElement("span");
+            pencil.appendChild(s);
+            spans.push(s);
+          }
+
           const input = document.createElement("input");
-          input.className = "cell";
+          input.className = "cell-input";
           input.inputMode = "numeric";
           input.maxLength = 1;
-          input.dataset.row = r;
-          input.dataset.col = c;
+          input.dataset.row = r; input.dataset.col = c;
           input.addEventListener("input", () => {
             input.value = input.value.replace(/[^1-9]/g, "").slice(0, 1);
-            input.classList.remove("hint");
+            clearPeers();
             if (solving && !givens[r][c]) handleMove(r, c);
+            renderPencils();
           });
-          boardEl.appendChild(input);
-          cells[r][c] = input;
+
+          cell.append(pencil, input);
+          boardEl.appendChild(cell);
+          inputs[r][c] = input;
+          cellEls[r][c] = cell;
+          pencils[r][c] = spans;
         }
       }
 
       // --- Grid helpers ---
       function readGrid() {
-        return cells.map((row) =>
-          row.map((cell) => (cell.value ? Number(cell.value) : 0))
-        );
+        return inputs.map((row) => row.map((i) => (i.value ? Number(i.value) : 0)));
       }
       function writeGrid(grid) {
         for (let r = 0; r < 9; r++)
           for (let c = 0; c < 9; c++)
-            cells[r][c].value = grid[r][c] ? String(grid[r][c]) : "";
+            inputs[r][c].value = grid[r][c] ? String(grid[r][c]) : "";
       }
       function clone(g) { return g.map((r) => r.slice()); }
 
@@ -235,9 +305,7 @@
               if (g[r][c] === 0) {
                 for (let n = 1; n <= 9; n++)
                   if (isValid(g, r, c, n)) {
-                    g[r][c] = n;
-                    bt();
-                    g[r][c] = 0;
+                    g[r][c] = n; bt(); g[r][c] = 0;
                     if (count >= limit) return;
                   }
                 return;
@@ -247,94 +315,200 @@
         return count;
       }
 
-      // Working grid = givens + only the user entries that are actually correct,
-      // so candidate reasoning stays consistent even if a guess is wrong.
+      // Working grid = givens + only the correct user entries.
       function progressGrid() {
-        const g = Array.from({ length: 9 }, () => Array(9).fill(0));
+        const g = blank(0);
         for (let r = 0; r < 9; r++)
           for (let c = 0; c < 9; c++) {
-            const v = Number(cells[r][c].value) || 0;
+            const v = Number(inputs[r][c].value) || 0;
             if (givens[r][c]) g[r][c] = v;
             else if (solution && v === solution[r][c]) g[r][c] = v;
           }
         return g;
       }
 
-      // --- Explanation engine (returns plain-English reasoning) ---
+      // ===================== Reasoning engine =====================
       function loc(r, c) { return `R${r + 1}C${c + 1}`; }
+      function boxCells(r, c) {
+        const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3, out = [];
+        for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) out.push([br + i, bc + j]);
+        return out;
+      }
+      function boxIndex(r, c) { return Math.floor(r / 3) * 3 + Math.floor(c / 3) + 1; }
 
-      function nakedSingleReason(grid, r, c, n) {
-        const cand = candidates(grid, r, c);
-        if (cand.length === 1 && cand[0] === n)
-          return `${loc(r, c)} can only be ${n}: every other digit (1–9 except ${n}) already appears somewhere in this cell's row, column, or 3×3 box, so ${n} is the one value left.`;
+      // All 27 units as {kind, name, cells}.
+      function allUnits() {
+        const U = [];
+        for (let r = 0; r < 9; r++)
+          U.push({ kind: "row", name: `row ${r + 1}`, cells: Array.from({ length: 9 }, (_, c) => [r, c]) });
+        for (let c = 0; c < 9; c++)
+          U.push({ kind: "column", name: `column ${c + 1}`, cells: Array.from({ length: 9 }, (_, r) => [r, c]) });
+        for (let b = 0; b < 9; b++) {
+          const br = Math.floor(b / 3) * 3, bc = (b % 3) * 3;
+          U.push({ kind: "box", name: `box ${b + 1}`, cells: boxCells(br, bc) });
+        }
+        return U;
+      }
+      const UNITS = allUnits();
+
+      // candidate map from a grid
+      function candMap(grid) {
+        const M = blank(null);
+        for (let r = 0; r < 9; r++)
+          for (let c = 0; c < 9; c++)
+            M[r][c] = grid[r][c] ? new Set() : new Set(candidates(grid, r, c));
+        return M;
+      }
+      function cloneMap(M) { return M.map((row) => row.map((s) => new Set(s))); }
+
+      // --- Singles (with plain-English reasons) ---
+      function findNakedSingle(M, grid) {
+        for (let r = 0; r < 9; r++)
+          for (let c = 0; c < 9; c++)
+            if (grid[r][c] === 0 && M[r][c].size === 1) {
+              const n = [...M[r][c]][0];
+              return { r, c, n, tech: "Naked single",
+                reason: `${loc(r, c)} can only be ${n}: every other digit already appears in its row, column, or 3×3 box.` };
+            }
         return null;
       }
-      function hiddenSingleReason(grid, r, c, n) {
-        const units = [
-          ["row", Array.from({ length: 9 }, (_, i) => [r, i])],
-          ["column", Array.from({ length: 9 }, (_, i) => [i, c])],
-          ["3×3 box", boxCells(r, c)],
-        ];
-        for (const [name, list] of units) {
-          let spots = 0;
-          for (const [rr, cc] of list)
-            if (grid[rr][cc] === 0 && candidates(grid, rr, cc).includes(n)) spots++;
-          if (spots === 1)
-            return `Within this ${name}, ${n} can only go in ${loc(r, c)} — every other empty cell in the ${name} is already blocked from being ${n} by its own row, column, or box.`;
+      function findHiddenSingle(M, grid) {
+        for (const u of UNITS)
+          for (let n = 1; n <= 9; n++) {
+            const spots = u.cells.filter(([r, c]) => grid[r][c] === 0 && M[r][c].has(n));
+            if (spots.length === 1) {
+              const [r, c] = spots[0];
+              if (M[r][c].size > 1)
+                return { r, c, n, tech: "Hidden single",
+                  reason: `Within ${u.name}, ${n} can only go in ${loc(r, c)} — every other empty cell there is blocked from being ${n}.` };
+            }
+          }
+        return null;
+      }
+
+      // --- Elimination techniques: return {elims:[[r,c,n]], reason, highlight:[[r,c]]} ---
+      function lockedCandidates(M, grid) {
+        // Pointing: in a box, a digit confined to one row/col -> remove from rest of that line.
+        for (let b = 0; b < 9; b++) {
+          const br = Math.floor(b / 3) * 3, bc = (b % 3) * 3;
+          const cells = boxCells(br, bc);
+          for (let n = 1; n <= 9; n++) {
+            const has = cells.filter(([r, c]) => grid[r][c] === 0 && M[r][c].has(n));
+            if (has.length < 2) continue;
+            const rows = new Set(has.map(([r]) => r)), cols = new Set(has.map(([, c]) => c));
+            if (rows.size === 1) {
+              const r = [...rows][0];
+              const elims = [];
+              for (let c = 0; c < 9; c++)
+                if (Math.floor(c / 3) * 3 !== bc && grid[r][c] === 0 && M[r][c].has(n)) elims.push([r, c, n]);
+              if (elims.length) return { elims, highlight: has,
+                reason: `In box ${b + 1}, ${n} can only appear in row ${r + 1}, so ${n} is removed from the rest of row ${r + 1}.`,
+                tech: "Pointing pair" };
+            }
+            if (cols.size === 1) {
+              const c = [...cols][0];
+              const elims = [];
+              for (let r = 0; r < 9; r++)
+                if (Math.floor(r / 3) * 3 !== br && grid[r][c] === 0 && M[r][c].has(n)) elims.push([r, c, n]);
+              if (elims.length) return { elims, highlight: has,
+                reason: `In box ${b + 1}, ${n} can only appear in column ${c + 1}, so ${n} is removed from the rest of column ${c + 1}.`,
+                tech: "Pointing pair" };
+            }
+          }
+        }
+        // Claiming: in a row/col, a digit confined to one box -> remove from rest of box.
+        for (const u of UNITS) {
+          if (u.kind === "box") continue;
+          for (let n = 1; n <= 9; n++) {
+            const has = u.cells.filter(([r, c]) => grid[r][c] === 0 && M[r][c].has(n));
+            if (has.length < 2) continue;
+            const boxes = new Set(has.map(([r, c]) => boxIndex(r, c)));
+            if (boxes.size === 1) {
+              const [hr, hc] = has[0];
+              const elims = [];
+              for (const [r, c] of boxCells(hr, hc))
+                if (!u.cells.some(([ur, uc]) => ur === r && uc === c) && grid[r][c] === 0 && M[r][c].has(n))
+                  elims.push([r, c, n]);
+              if (elims.length) return { elims, highlight: has,
+                reason: `In ${u.name}, ${n} only fits inside box ${boxIndex(hr, hc)}, so ${n} is removed from the rest of that box.`,
+                tech: "Box/line reduction" };
+            }
+          }
         }
         return null;
       }
-      function boxCells(r, c) {
-        const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3, out = [];
-        for (let i = 0; i < 3; i++)
-          for (let j = 0; j < 3; j++) out.push([br + i, bc + j]);
-        return out;
-      }
-      function reasonFor(grid, r, c, n) {
-        return (
-          nakedSingleReason(grid, r, c, n) ||
-          hiddenSingleReason(grid, r, c, n) ||
-          `${n} matches the puzzle's unique solution. There isn't a single-cell proof for it yet — it becomes forced once a few neighboring cells are filled in.`
-        );
-      }
-
-      function findHint(grid) {
-        // Prefer naked singles (easiest to see), then hidden singles.
-        for (let r = 0; r < 9; r++)
-          for (let c = 0; c < 9; c++)
-            if (grid[r][c] === 0) {
-              const cand = candidates(grid, r, c);
-              if (cand.length === 1)
-                return { r, c, n: cand[0], reason: nakedSingleReason(grid, r, c, cand[0]) };
-            }
-        for (let r = 0; r < 9; r++)
-          for (let c = 0; c < 9; c++)
-            if (grid[r][c] === 0)
-              for (const n of candidates(grid, r, c)) {
-                const reason = hiddenSingleReason(grid, r, c, n);
-                if (reason) return { r, c, n, reason };
+      function nakedPair(M, grid) {
+        for (const u of UNITS) {
+          const twos = u.cells.filter(([r, c]) => grid[r][c] === 0 && M[r][c].size === 2);
+          for (let i = 0; i < twos.length; i++)
+            for (let j = i + 1; j < twos.length; j++) {
+              const [r1, c1] = twos[i], [r2, c2] = twos[j];
+              const a = [...M[r1][c1]], b = M[r2][c2];
+              if (a.length === 2 && a.every((x) => b.has(x))) {
+                const elims = [];
+                for (const [r, c] of u.cells) {
+                  if ((r === r1 && c === c1) || (r === r2 && c === c2)) continue;
+                  if (grid[r][c] !== 0) continue;
+                  for (const n of a) if (M[r][c].has(n)) elims.push([r, c, n]);
+                }
+                if (elims.length) return { elims, highlight: [[r1, c1], [r2, c2]],
+                  reason: `${loc(r1, c1)} and ${loc(r2, c2)} in ${u.name} can only hold {${a.join(", ")}}, so those two digits are removed from the rest of the ${u.kind}.`,
+                  tech: "Naked pair" };
               }
-        // Nothing provable by singles — fall back to the solution with a note.
-        for (let r = 0; r < 9; r++)
-          for (let c = 0; c < 9; c++)
-            if (grid[r][c] === 0)
-              return {
-                r, c, n: solution[r][c],
-                reason: `This one needs a more advanced technique than a simple single. The answer is ${solution[r][c]} — fill it and the easier deductions will open up again.`,
-              };
+            }
+        }
         return null;
       }
 
-      // --- UI feedback ---
-      function showExplain(title, body, kind = "info", action) {
+      function applyElims(M, elims) {
+        const N = cloneMap(M);
+        for (const [r, c, n] of elims) N[r][c].delete(n);
+        return N;
+      }
+
+      // --- Master hint finder ---
+      function findHint(grid) {
+        const M = candMap(grid);
+        let s = findNakedSingle(M, grid) || findHiddenSingle(M, grid);
+        if (s) return { kind: "place", ...s, highlight: [[s.r, s.c]],
+          reason: `${s.tech}: ${s.reason}` };
+
+        for (const tech of [lockedCandidates, nakedPair]) {
+          const e = tech(M, grid);
+          if (!e) continue;
+          const M2 = applyElims(M, e.elims);
+          const after = findNakedSingle(M2, grid) || findHiddenSingle(M2, grid);
+          if (after)
+            return { kind: "place", r: after.r, c: after.c, n: after.n,
+              tech: e.tech, highlight: e.highlight.concat([[after.r, after.c]]),
+              reason: `${e.tech}: ${e.reason} That leaves ${loc(after.r, after.c)} = ${after.n} (${after.tech.toLowerCase()}).` };
+          return { kind: "eliminate", tech: e.tech, highlight: e.highlight,
+            reason: `${e.tech}: ${e.reason} Update your candidate marks accordingly, then look again.` };
+        }
+
+        // Fallback: no human technique we implement applies — reveal from solution.
+        for (let r = 0; r < 9; r++)
+          for (let c = 0; c < 9; c++)
+            if (grid[r][c] === 0)
+              return { kind: "place", r, c, n: solution[r][c], tech: "Advanced",
+                highlight: [[r, c]],
+                reason: `This needs a technique beyond the ones I explain (e.g. an X-wing or a chain). The answer is ${solution[r][c]} — place it and the simpler steps reopen.` };
+        return null;
+      }
+
+      // ===================== UI =====================
+      function showExplain(title, body, kind = "info", action, tech) {
         explainEl.className = "explain " + kind;
         explainEl.innerHTML = "";
         const t = document.createElement("p");
-        t.className = "title";
-        t.textContent = title;
+        t.className = "title"; t.textContent = title;
         const b = document.createElement("p");
         b.className = "body";
-        b.textContent = body;
+        if (tech) {
+          const span = document.createElement("span");
+          span.className = "tech"; span.textContent = tech + " — ";
+          b.append(span, document.createTextNode(body));
+        } else b.textContent = body;
         explainEl.append(t, b);
         if (action) {
           const btn = document.createElement("button");
@@ -344,25 +518,61 @@
         }
       }
 
+      function clearPeers() {
+        for (const row of cellEls) for (const el of row) el.classList.remove("hint", "peer");
+      }
+
+      function renderPencils() {
+        const grid = solving ? progressGrid() : readGrid();
+        for (let r = 0; r < 9; r++)
+          for (let c = 0; c < 9; c++) {
+            const has = !!inputs[r][c].value;
+            cellEls[r][c].classList.toggle("has-value", has);
+            const spans = pencils[r][c];
+            if (has || givens[r][c] || !solving) {
+              for (const s of spans) { s.textContent = ""; s.className = ""; }
+              continue;
+            }
+            const cand = candidates(grid, r, c);
+            for (let n = 1; n <= 9; n++) {
+              spans[n - 1].textContent = cand.includes(n) ? String(n) : "";
+              spans[n - 1].className = "";
+            }
+          }
+      }
+
       function handleMove(r, c) {
-        cells[r][c].classList.remove("user", "wrong", "hint");
-        const raw = cells[r][c].value;
+        inputs[r][c].classList.remove("user", "wrong");
+        const raw = inputs[r][c].value;
         if (!raw) { showExplain("Cell cleared", "Keep going — enter a value or press Hint.", "info"); return; }
         const n = Number(raw);
         const grid = progressGrid();
-        grid[r][c] = 0; // evaluate as if this cell were still empty
+        grid[r][c] = 0;
         if (n === solution[r][c]) {
-          cells[r][c].classList.add("user");
-          showExplain(`✓ ${loc(r, c)} = ${n} is correct`, reasonFor(grid, r, c, n), "ok");
+          inputs[r][c].classList.add("user");
+          const M = candMap(grid);
+          const reason = describeCorrect(M, grid, r, c, n);
+          showExplain(`✓ ${loc(r, c)} = ${n} is correct`, reason.body, "ok", null, reason.tech);
           checkComplete();
         } else {
-          cells[r][c].classList.add("wrong");
+          inputs[r][c].classList.add("wrong");
           const cand = candidates(grid, r, c);
           const body = cand.includes(n)
-            ? `${n} doesn't break any rule right now, but it isn't what this cell resolves to — placing it would make the rest of the puzzle impossible. Press Hint to see a cell you can actually prove.`
+            ? `${n} doesn't break a rule yet, but it isn't what this cell resolves to — it would make the rest of the puzzle impossible. Press Hint for a cell you can prove.`
             : `${n} already appears in ${loc(r, c)}'s row, column, or 3×3 box, so it can't go here.`;
           showExplain(`✗ ${loc(r, c)} = ${n} won't work`, body, "bad");
         }
+      }
+      function describeCorrect(M, grid, r, c, n) {
+        if (M[r][c].size === 1)
+          return { tech: "Naked single", body: `the other eight digits all already appear in ${loc(r, c)}'s row, column, or box, leaving ${n}.` };
+        for (const u of UNITS)
+          if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
+            const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && M[rr][cc].has(n));
+            if (spots.length === 1)
+              return { tech: "Hidden single", body: `${n} can't go in any other empty cell of ${u.name}, so it must be here.` };
+          }
+        return { tech: null, body: `${n} matches the puzzle's unique solution. There isn't a single-cell proof yet — it follows once a few neighbors are filled, or from a more advanced technique.` };
       }
 
       function checkComplete() {
@@ -378,52 +588,58 @@
         const grid = readGrid();
         const filled = grid.flat().filter(Boolean).length;
         if (filled < 17) {
-          showExplain("Need more clues", "Enter the puzzle's given numbers first (a proper Sudoku has at least 17).", "bad");
+          showExplain("Need more clues", "Enter the puzzle's givens first (a proper Sudoku has at least 17).", "bad");
           return;
         }
         if (hasConflict(grid)) {
-          showExplain("That puzzle has a conflict", "Two of the same digit share a row, column, or box. Fix it before solving.", "bad");
+          showExplain("That puzzle has a conflict", "Two of the same digit share a row, column, or box. Fix it first.", "bad");
           return;
         }
         const sol = clone(grid);
-        if (!solve(sol)) {
-          showExplain("No solution", "This grid can't be solved as entered. Double-check the clues.", "bad");
-          return;
-        }
+        if (!solve(sol)) { showExplain("No solution", "This grid can't be solved as entered. Re-check the clues.", "bad"); return; }
         solution = sol;
         const variants = countSolutions(grid, 2);
         for (let r = 0; r < 9; r++)
           for (let c = 0; c < 9; c++) {
             givens[r][c] = grid[r][c] !== 0;
-            cells[r][c].readOnly = givens[r][c];
-            cells[r][c].classList.toggle("given", givens[r][c]);
-            cells[r][c].classList.remove("user", "wrong", "hint");
+            inputs[r][c].readOnly = givens[r][c];
+            inputs[r][c].classList.toggle("given", givens[r][c]);
+            inputs[r][c].classList.remove("user", "wrong");
           }
         solving = true;
         document.body.classList.add("solving");
-        showExplain(
-          "Puzzle locked — start solving",
+        clearPeers();
+        renderPencils();
+        showExplain("Puzzle locked — start solving",
           variants > 1
-            ? "Heads up: this grid has more than one solution, so it isn't a proper puzzle. I'll coach you toward one of them. Fill a cell or press Hint."
-            : "Fill in a cell and I'll tell you if it's right and why. Stuck? Press Hint for the next provable step.",
-          "info"
-        );
+            ? "Heads up: this grid has more than one solution, so it isn't a proper puzzle. I'll coach toward one. Fill a cell or press Hint."
+            : "Fill a cell and I'll say if it's right and why. Toggle Candidates for pencil marks, or press Hint for the next provable step.",
+          "info");
+      });
+
+      document.getElementById("cands").addEventListener("click", (e) => {
+        document.body.classList.toggle("candidates");
+        e.target.classList.toggle("on", document.body.classList.contains("candidates"));
+        renderPencils();
       });
 
       document.getElementById("hint").addEventListener("click", () => {
         const grid = progressGrid();
         const hint = findHint(grid);
         if (!hint) { showExplain("Nothing left to place", "The grid is complete.", "ok"); return; }
-        cells.forEach((row) => row.forEach((c) => c.classList.remove("hint")));
-        cells[hint.r][hint.c].classList.add("hint");
-        lastHint = hint;
-        showExplain(`Hint: ${loc(hint.r, hint.c)} = ${hint.n}`, hint.reason, "hint", {
-          label: `Place ${hint.n} in ${loc(hint.r, hint.c)}`,
-          onClick: () => {
-            cells[hint.r][hint.c].value = String(hint.n);
-            handleMove(hint.r, hint.c);
-          },
-        });
+        clearPeers();
+        for (const [r, c] of hint.highlight) cellEls[r][c].classList.add("peer");
+        if (hint.kind === "place") {
+          cellEls[hint.r][hint.c].classList.remove("peer");
+          cellEls[hint.r][hint.c].classList.add("hint");
+          lastHint = hint;
+          showExplain(`Hint: ${loc(hint.r, hint.c)} = ${hint.n}`, hint.reason, "hint", {
+            label: `Place ${hint.n} in ${loc(hint.r, hint.c)}`,
+            onClick: () => { inputs[hint.r][hint.c].value = String(hint.n); handleMove(hint.r, hint.c); renderPencils(); },
+          }, hint.tech);
+        } else {
+          showExplain("Hint: eliminate candidates", hint.reason, "hint", null, hint.tech);
+        }
       });
 
       document.getElementById("check").addEventListener("click", () => {
@@ -431,16 +647,16 @@
         for (let r = 0; r < 9; r++)
           for (let c = 0; c < 9; c++) {
             if (givens[r][c]) continue;
-            const v = Number(cells[r][c].value) || 0;
+            const v = Number(inputs[r][c].value) || 0;
             if (!v) continue;
             filled++;
             const bad = v !== solution[r][c];
-            cells[r][c].classList.toggle("wrong", bad);
-            cells[r][c].classList.toggle("user", !bad);
+            inputs[r][c].classList.toggle("wrong", bad);
+            inputs[r][c].classList.toggle("user", !bad);
             if (bad) wrong++;
           }
         if (!filled) showExplain("Nothing to check yet", "Place some numbers first.", "info");
-        else if (wrong) showExplain(`${wrong} cell${wrong > 1 ? "s" : ""} off`, "The cells in red don't match the solution. Clear them and try Hint.", "bad");
+        else if (wrong) showExplain(`${wrong} cell${wrong > 1 ? "s" : ""} off`, "The cells in red don't match the solution. Clear them, then try Hint.", "bad");
         else showExplain("All good so far", `Every one of your ${filled} entries is correct. Keep going!`, "ok");
       });
 
@@ -448,32 +664,99 @@
         writeGrid(solution);
         for (let r = 0; r < 9; r++)
           for (let c = 0; c < 9; c++)
-            if (!givens[r][c]) {
-              cells[r][c].classList.remove("wrong", "hint");
-              cells[r][c].classList.add("solved");
-            }
+            if (!givens[r][c]) { inputs[r][c].classList.remove("wrong"); inputs[r][c].classList.add("solved"); }
+        clearPeers();
+        renderPencils();
         showExplain("Full solution revealed", "Here's the completed grid. Press Edit puzzle to start over.", "info");
       });
 
       document.getElementById("edit").addEventListener("click", resetToEdit);
       document.getElementById("clear").addEventListener("click", () => {
-        for (const row of cells) for (const cell of row) cell.value = "";
+        for (const row of inputs) for (const i of row) i.value = "";
         resetToEdit();
       });
 
       function resetToEdit() {
-        solving = false;
-        solution = null;
-        lastHint = null;
-        givens = Array.from({ length: 9 }, () => Array(9).fill(false));
+        solving = false; solution = null; lastHint = null;
+        givens = blank(false);
         document.body.classList.remove("solving");
-        for (const row of cells)
-          for (const cell of row) {
-            cell.readOnly = false;
-            cell.classList.remove("given", "user", "wrong", "hint", "solved");
-          }
+        clearPeers();
+        for (const row of inputs)
+          for (const i of row) { i.readOnly = false; i.classList.remove("given", "user", "wrong", "solved"); }
+        renderPencils();
         showExplain("Enter your puzzle", "Type the givens or import a screenshot, then press Start solving.", "info");
       }
+
+      // --- Saved puzzle library (localStorage) ---
+      const STORE_KEY = "sudoku-coach:games";
+      const difficultyEl = document.getElementById("difficulty");
+      const sourceEl = document.getElementById("source");
+      const savedEl = document.getElementById("saved");
+      const libraryEl = document.querySelector(".library");
+
+      function loadGames() {
+        try { return JSON.parse(localStorage.getItem(STORE_KEY)) || []; }
+        catch { return []; }
+      }
+      function persistGames(games) {
+        localStorage.setItem(STORE_KEY, JSON.stringify(games));
+      }
+      function renderLibrary() {
+        const games = loadGames();
+        libraryEl.hidden = games.length === 0;
+        savedEl.innerHTML = "";
+        for (const g of games) {
+          const opt = document.createElement("option");
+          opt.value = g.id;
+          const date = new Date(g.savedAt).toLocaleDateString();
+          opt.textContent = `${g.source} · ${g.difficulty} · ${date}`;
+          savedEl.appendChild(opt);
+        }
+      }
+
+      document.getElementById("save").addEventListener("click", () => {
+        const grid = readGrid();
+        if (grid.flat().filter(Boolean).length < 17) {
+          showExplain("Nothing to save yet", "Import or type a puzzle's givens first (a proper Sudoku has at least 17).", "bad");
+          return;
+        }
+        if (hasConflict(grid)) {
+          showExplain("Can't save that", "The puzzle has a duplicate in a row, column, or box. Fix it first.", "bad");
+          return;
+        }
+        const games = loadGames();
+        const game = {
+          id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()),
+          grid,
+          difficulty: difficultyEl.value,
+          source: (sourceEl.value || "Unknown").trim() || "Unknown",
+          savedAt: Date.now(),
+        };
+        games.unshift(game);
+        persistGames(games);
+        renderLibrary();
+        showExplain("Puzzle saved", `Saved as ${game.source} · ${game.difficulty}. Load it anytime from the saved list below.`, "ok");
+      });
+
+      document.getElementById("load").addEventListener("click", () => {
+        const game = loadGames().find((g) => g.id === savedEl.value);
+        if (!game) return;
+        resetToEdit();
+        writeGrid(game.grid);
+        difficultyEl.value = game.difficulty;
+        sourceEl.value = game.source;
+        renderPencils();
+        showExplain("Puzzle loaded", `${game.source} · ${game.difficulty}. Press Start solving when ready.`, "info");
+      });
+
+      document.getElementById("delete").addEventListener("click", () => {
+        const games = loadGames().filter((g) => g.id !== savedEl.value);
+        persistGames(games);
+        renderLibrary();
+        showExplain("Puzzle deleted", "Removed from your saved list.", "info");
+      });
+
+      renderLibrary();
 
       // --- Image import → Claude Vision (optional) ---
       document.getElementById("file").addEventListener("change", async (e) => {
@@ -494,9 +777,14 @@
             body: JSON.stringify({ image: base64, media_type: file.type || "image/png" }),
           });
           const data = await res.json();
-          if (!res.ok) throw new Error(data.error || "Failed to read image");
+          if (!res.ok) {
+            let msg = data.error || "Failed to read image";
+            if (data.diagnostic)
+              msg += ` (key defined: ${data.diagnostic.defined}, length: ${data.diagnostic.length}, matching vars: ${(data.diagnostic.anthropicVars || []).join(", ") || "none"})`;
+            throw new Error(msg);
+          }
           writeGrid(data.grid);
-          showExplain("Grid imported", "Check for any misread digits, fix them, then press Start solving.", "info");
+          showExplain("Grid imported", "Check for misread digits, fix them, then press Start solving.", "info");
         } catch (err) {
           showExplain("Couldn't read the image", (err.message || "Unknown error") + " — you can still type the puzzle in by hand.", "bad");
         } finally {

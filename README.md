@@ -14,14 +14,21 @@ answer.
     right and *why* — e.g. "*R3C5 can only be 7 — every other digit already
     appears in its row, column, or box*" (naked single), or "*within this box,
     7 can only go here*" (hidden single).
-  - **Hint** finds the next cell you can logically prove, explains it, and
-    offers to place it for you.
+  - **Hint** finds the next cell you can logically prove, explains it (and
+    names the technique — naked/hidden single, pointing pair, box/line
+    reduction, naked pair), and offers to place it for you.
+  - **Candidates** toggles pencil marks in every empty cell.
   - Wrong entries are flagged with the reason they can't work — without
     spoiling the answer. **Check entries** and **Reveal solution** are there
     when you want them.
+  - **Save puzzle** stores the current grid with its **difficulty**
+    (Easy/Medium/Hard) and **source** (defaults to NYT, editable for other
+    sources). Saved puzzles are listed below the grid to load or delete.
 
-  The coaching is entirely client-side, so it works **without an API key** —
-  only the optional screenshot import calls Claude.
+  The coaching and saved library are entirely client-side, so they work
+  **without an API key** — only the optional screenshot import calls Claude.
+  Saved puzzles live in the browser's `localStorage` (per device); a future
+  enhancement could sync them via a database for cross-device access.
 - **`api/parse-sudoku-image.js`** — a Vercel serverless function that forwards
   the screenshot to Claude Vision and returns the parsed grid as a `9×9` array
   of numbers (`0` = empty).
