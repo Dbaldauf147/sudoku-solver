@@ -20,11 +20,12 @@ answer.
   - A **number pad** (1–9 plus **✕** to clear) with **Normal** and
     **Candidate** modes — Candidate mode toggles your own pencil marks;
     **Auto notes** fills every empty cell with its possible digits.
-  - A **timer** runs while you solve, and every move is logged with the time
-    since your last choice and the technique that justifies it. The clock
-    **auto-pauses when you switch away** from the tab (and there's a manual
-    **Pause**), so idle time doesn't skew your stats. **Undo** (or Ctrl/⌘-Z)
-    steps back through your entries.
+  - A **timer** runs while you solve, a live **error count** tracks wrong
+    entries, and every move is logged with the time since your last choice and
+    the technique that justifies it. The clock **auto-pauses when you switch
+    away** from the tab (and there's a manual **Pause**), so idle time doesn't
+    skew your stats. **Undo** (or Ctrl/⌘-Z) steps back through your entries.
+    Once a digit is placed nine times its number-pad key is crossed out.
   - **Stats** opens a deep-dive: solve times and accuracy **per difficulty**,
     a "where you spend time" breakdown of typical (median) time **per
     technique** so you can see what trips you up, and a per-game timeline that

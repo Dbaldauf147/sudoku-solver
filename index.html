@@ -90,10 +90,12 @@
 
       .pad { margin-top: 14px; }
       .modes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; align-items: center; }
-      .modes .timer { margin-left: auto; }
+      .modes .meters { margin-left: auto; display: flex; gap: 8px; }
+      #errors { color: var(--bad); }
       .keys { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
       .keys button { padding: 14px 0; font-size: 1.15rem; }
       .keys button.clear { color: var(--bad); }
+      .keys button.done { text-decoration: line-through; opacity: 0.4; }
 
       .explain {
         margin-top: 16px; background: var(--panel); border: 1px solid var(--line);
@@ -186,7 +188,10 @@
         <div class="modes">
           <button id="modeNormal" class="on">Normal</button>
           <button id="modeCandidate">Candidate</button>
-          <span class="timer">⏱ <b id="timer">0:00</b></span>
+          <span class="meters">
+            <span class="timer">⏱ <b id="timer">0:00</b></span>
+            <span class="timer">✗ <b id="errors">0</b></span>
+          </span>
         </div>
         <div class="keys" id="keys"></div>
       </div>
@@ -232,6 +237,7 @@
       const explainEl = document.getElementById("explain");
       const statsEl = document.getElementById("stats");
       const timerEl = document.getElementById("timer");
+      const errorsEl = document.getElementById("errors");
       const inputs = [], cellEls = [], pencils = [], marks = [];
       let solving = false, solution = null, givens = blank(false), lastHint = null;
       let selected = null, entryMode = "normal", pendingTech = null;
@@ -263,10 +269,17 @@
 
       // ---- number pad ----
       const keysEl = document.getElementById("keys");
+      const keyButtons = [];
       for (let n = 1; n <= 9; n++) {
         const b = document.createElement("button");
         b.textContent = n; b.onclick = () => applyDigit(n);
         keysEl.appendChild(b);
+        keyButtons[n] = b;
+      }
+      function updatePad() {
+        const counts = Array(10).fill(0);
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { const v = Number(inputs[r][c].value) || 0; if (v) counts[v]++; }
+        for (let n = 1; n <= 9; n++) keyButtons[n].classList.toggle("done", counts[n] >= 9);
       }
       const clr = document.createElement("button");
       clr.textContent = "✕"; clr.className = "clear"; clr.title = "Clear cell"; clr.onclick = applyClear;
@@ -570,6 +583,7 @@
           if (has || givens[r][c]) { for (const s of spans) s.textContent = ""; continue; }
           for (let n = 1; n <= 9; n++) spans[n - 1].textContent = marks[r][c].has(n) ? String(n) : "";
         }
+        updatePad();
       }
 
       function describeCorrect(M, grid, r, c, n) {
@@ -596,6 +610,7 @@
         } else {
           inputs[r][c].classList.add("wrong");
           tech = "Mistake";
+          if (session) { session.errors = (session.errors || 0) + 1; errorsEl.textContent = session.errors; }
           const body = candidates(grid, r, c).includes(n)
             ? `${n} doesn't break a rule yet, but it isn't what this cell resolves to — it would make the puzzle impossible later. Press Hint for a cell you can prove.`
             : `${n} already appears in ${loc(r, c)}'s row, column, or 3×3 box, so it can't go here.`;
@@ -685,8 +700,8 @@
         solving = true; setMode("normal");
         document.body.classList.add("solving");
         clearHighlights(); renderPencils();
-        undoStack = [];
-        session = { difficulty: document.getElementById("difficulty").value, source: (document.getElementById("source").value || "Unknown").trim(), startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, moves: [] };
+        undoStack = []; errorsEl.textContent = "0";
+        session = { difficulty: document.getElementById("difficulty").value, source: (document.getElementById("source").value || "Unknown").trim(), startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, moves: [] };
         startTimer();
         const first = (() => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) return [r, c]; return [0, 0]; })();
         select(first[0], first[1]);
@@ -769,7 +784,7 @@
         session = null; clearInterval(timerId); timerId = null; undoStack = [];
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal");
         document.body.classList.remove("solving"); clearHighlights(); closeStats();
-        pauseModal.hidden = true; timerEl.textContent = "0:00";
+        pauseModal.hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].classList.remove("given", "wrong", "solved"); marks[r][c].clear(); }
         renderPencils();
         showExplain("Enter your puzzle", "Type the givens or import a screenshot, then press Start solving.", "info");
@@ -834,6 +849,7 @@
         "Box/line reduction": "#f59e0b", "Naked pair": "#a78bfa", "Hidden pair": "#a78bfa", "X-wing": "#ec4899",
         "Advanced": "#94a3b8", "Other": "#94a3b8", "Mistake": "#ff6b6b" };
       function median(arr) { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+      function errorsIn(g) { return typeof g.errors === "number" ? g.errors : g.moves.filter((m) => !m.correct).length; }
       function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
       document.getElementById("statsBtn").addEventListener("click", () => {
         if (statsEl.hidden) { renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
@@ -852,10 +868,12 @@
           const times = solved.map((g) => g.totalMs);
           const moves = gs.flatMap((g) => g.moves);
           const acc = moves.length ? Math.round((moves.filter((m) => m.correct).length / moves.length) * 100) : 0;
+          const totalErrors = gs.reduce((a, g) => a + errorsIn(g), 0);
           summary += `<div class="card"><b>${d}</b> · ${gs.length} game${gs.length > 1 ? "s" : ""} (${solved.length} solved)<br>
             <span class="k">avg solve</span> ${times.length ? fmtTime(times.reduce((a, b) => a + b, 0) / times.length) : "—"} ·
             <span class="k">best</span> ${times.length ? fmtTime(Math.min(...times)) : "—"} ·
-            <span class="k">accuracy</span> ${acc}%</div>`;
+            <span class="k">accuracy</span> ${acc}% ·
+            <span class="k">errors</span> ${totalErrors} (${(totalErrors / gs.length).toFixed(1)}/game)</div>`;
         }
 
         // by technique (typical time per move)
@@ -895,7 +913,7 @@
         const dd = document.getElementById("deepDive"); if (!g) { dd.innerHTML = ""; return; }
         const maxDt = Math.max(1, ...g.moves.map((m) => m.dt));
         const slow = Math.max(maxDt * 0.6, median(g.moves.map((m) => m.dt)) * 2.5);
-        let html = `<div class="card">${g.moves.length} moves · ${fmtTime(g.totalMs)} total · ${g.solved ? "solved" : "revealed"}</div>`;
+        let html = `<div class="card">${g.moves.length} moves · ${fmtTime(g.totalMs)} total · ${errorsIn(g)} error${errorsIn(g) === 1 ? "" : "s"} · ${g.solved ? "solved" : "revealed"}</div>`;
         g.moves.forEach((m, i) => {
           const color = TECH_COLORS[m.tech] || "#94a3b8";
           const w = Math.round((m.dt / maxDt) * 100);
