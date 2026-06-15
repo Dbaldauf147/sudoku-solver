@@ -8,7 +8,7 @@
       :root {
         --bg: #ffffff; --panel: #f3f4f6; --line: #d7dbe2; --thick: #9aa3b2;
         --text: #1d2330; --muted: #5b6472; --accent: #2563eb; --given: #0b1020;
-        --user: #2563eb; --ok: #16a34a; --bad: #dc2626; --pencil: #aab0bb;
+        --user: #2563eb; --ok: #16a34a; --bad: #dc2626; --pencil: #6b7280;
         --sel: #dbe7ff;
       }
       * { box-sizing: border-box; }
@@ -40,6 +40,15 @@
         align-items: center; gap: 10px; margin-bottom: 14px; }
       .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
       .tabs button, .tabs label.file { padding: 8px 13px; font-size: 0.9rem; }
+      .menu { position: relative; }
+      #gear { font-size: 1.15rem; padding: 8px 12px; line-height: 1; }
+      .dropdown { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
+        display: flex; flex-direction: column; min-width: 180px;
+        background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
+        box-shadow: 0 16px 40px rgba(17, 20, 28, 0.2); overflow: hidden; }
+      .dropdown[hidden] { display: none; }
+      .dropdown button { border: none; border-radius: 0; text-align: left; background: transparent; padding: 11px 14px; }
+      .dropdown button:hover { background: var(--panel); }
       .timer { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums;
         font-size: 1.1rem; background: var(--panel); border: 1px solid var(--line);
         border-radius: 8px; padding: 6px 12px; }
@@ -134,10 +143,18 @@
     <main>
       <div class="topbar">
         <div class="tabs">
-          <button id="statsBtn">Stats</button>
           <label class="file">Import screenshot<input id="file" type="file" accept="image/*" /></label>
           <button id="start" class="primary">Start solving</button>
           <button id="clear">Clear</button>
+        </div>
+        <div class="menu">
+          <button id="gear" aria-label="Menu" title="Menu">⚙</button>
+          <div id="gearMenu" class="dropdown" hidden>
+            <button id="statsBtn">Stats</button>
+            <button id="check">Check entries</button>
+            <button id="reveal">Reveal solution</button>
+            <button id="edit">Edit puzzle</button>
+          </div>
         </div>
       </div>
 
@@ -161,9 +178,6 @@
         <button id="undo">Undo</button>
         <button id="autonotes">Auto notes</button>
         <button id="pause">Pause</button>
-        <button id="check">Check entries</button>
-        <button id="reveal">Reveal solution</button>
-        <button id="edit">Edit puzzle</button>
       </div>
 
       <div id="board" class="board"></div>
@@ -172,7 +186,7 @@
         <div class="modes">
           <button id="modeNormal" class="on">Normal</button>
           <button id="modeCandidate">Candidate</button>
-          <span class="timer">⏱ <b id="timer">0:00</b> · <span id="timerDiff">—</span></span>
+          <span class="timer">⏱ <b id="timer">0:00</b></span>
         </div>
         <div class="keys" id="keys"></div>
       </div>
@@ -195,6 +209,16 @@
         </div>
       </div>
 
+      <div id="pauseModal" class="overlay" hidden>
+        <div class="modal">
+          <h2>Game paused</h2>
+          <p>The timer is stopped and the board is hidden. Resume when you're ready.</p>
+          <div class="actions">
+            <button id="resumeBtn" class="primary">Resume</button>
+          </div>
+        </div>
+      </div>
+
       <footer>
         Tap a cell, then a number (or type). <strong>Candidate</strong> mode
         toggles pencil marks; <strong>✕</strong> clears. Givens lock in white;
@@ -208,7 +232,6 @@
       const explainEl = document.getElementById("explain");
       const statsEl = document.getElementById("stats");
       const timerEl = document.getElementById("timer");
-      const timerDiffEl = document.getElementById("timerDiff");
       const inputs = [], cellEls = [], pencils = [], marks = [];
       let solving = false, solution = null, givens = blank(false), lastHint = null;
       let selected = null, entryMode = "normal", pendingTech = null;
@@ -258,6 +281,11 @@
       }
 
       document.addEventListener("keydown", (e) => {
+        const pm = document.getElementById("pauseModal");
+        if (pm && !pm.hidden) {
+          if (e.key === "Enter" || e.key === "Escape") document.getElementById("resumeBtn").click();
+          return;
+        }
         const m = document.getElementById("modal");
         if (m && !m.hidden) {
           if (e.key === "Enter") document.getElementById("modalStart").click();
@@ -594,7 +622,6 @@
         return now - session.startedAt - session.pausedMs - (session.pauseStart ? now - session.pauseStart : 0);
       }
       function startTimer() {
-        timerDiffEl.textContent = session.difficulty;
         timerEl.textContent = "0:00";
         clearInterval(timerId);
         timerId = setInterval(() => { timerEl.textContent = fmtTime(activeElapsed()); }, 500);
@@ -604,26 +631,24 @@
         if (manual) session.manualPaused = true;
         session.pauseStart = Date.now();
         clearInterval(timerId); timerId = null;
-        timerDiffEl.textContent = session.difficulty + " · paused";
-        document.getElementById("pause").textContent = "Resume";
       }
       function resumeTimer(manual) {
         if (!session || !session.pauseStart) return;
         if (!manual && session.manualPaused) return; // don't auto-resume a manual pause
         session.pausedMs += Date.now() - session.pauseStart;
         session.pauseStart = null; session.manualPaused = false;
-        timerDiffEl.textContent = session.difficulty;
-        document.getElementById("pause").textContent = "Pause";
         startTimer();
       }
+      const pauseModal = document.getElementById("pauseModal");
       document.addEventListener("visibilitychange", () => {
         if (!solving || !session) return;
         document.hidden ? pauseTimer(false) : resumeTimer(false);
       });
       document.getElementById("pause").addEventListener("click", () => {
-        if (!session) return;
-        session.pauseStart ? resumeTimer(true) : pauseTimer(true);
+        if (!session) return showExplain("Not solving", "Start a puzzle before pausing.", "info");
+        pauseTimer(true); pauseModal.hidden = false;
       });
+      document.getElementById("resumeBtn").addEventListener("click", () => { pauseModal.hidden = true; resumeTimer(true); });
       function recordMove(r, c, n, correct, tech) {
         if (!session) return;
         const t = activeElapsed(), dt = t - session.lastT; session.lastT = t;
@@ -678,6 +703,13 @@
       document.getElementById("modalCancel").addEventListener("click", () => { hideModal(); showExplain("Take your time", "Fix anything that looks off, then press Start solving when you're ready.", "info"); });
       modal.addEventListener("click", (e) => { if (e.target === modal) hideModal(); });
 
+      // Gear dropdown
+      const gearMenu = document.getElementById("gearMenu");
+      function closeMenu() { gearMenu.hidden = true; }
+      document.getElementById("gear").addEventListener("click", (e) => { e.stopPropagation(); gearMenu.hidden = !gearMenu.hidden; });
+      gearMenu.addEventListener("click", () => closeMenu());
+      document.addEventListener("click", (e) => { if (!gearMenu.hidden && !e.target.closest(".menu")) closeMenu(); });
+
       document.getElementById("undo").addEventListener("click", undo);
 
       document.getElementById("autonotes").addEventListener("click", () => {
@@ -707,6 +739,8 @@
       });
 
       document.getElementById("check").addEventListener("click", () => {
+        closeStats();
+        if (!solving) return showExplain("Not solving yet", "Start a puzzle, then I can check your entries.", "info");
         let wrong = 0, filled = 0;
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
           if (givens[r][c]) continue; const v = Number(inputs[r][c].value) || 0; if (!v) continue;
@@ -718,6 +752,8 @@
       });
 
       document.getElementById("reveal").addEventListener("click", () => {
+        closeStats();
+        if (!solving) return showExplain("Not solving yet", "Start a puzzle first.", "info");
         finalizeSession(false);
         writeGrid(solution);
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) { inputs[r][c].classList.remove("wrong"); inputs[r][c].classList.add("solved"); }
@@ -730,9 +766,8 @@
       function resetToEdit() {
         session = null; clearInterval(timerId); timerId = null; undoStack = [];
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal");
-        document.body.classList.remove("solving"); clearHighlights();
-        document.getElementById("pause").textContent = "Pause";
-        timerEl.textContent = "0:00"; timerDiffEl.textContent = "—";
+        document.body.classList.remove("solving"); clearHighlights(); closeStats();
+        pauseModal.hidden = true; timerEl.textContent = "0:00";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].classList.remove("given", "wrong", "solved"); marks[r][c].clear(); }
         renderPencils();
         showExplain("Enter your puzzle", "Type the givens or import a screenshot, then press Start solving.", "info");
@@ -789,9 +824,10 @@
         "Box/line reduction": "#f59e0b", "Naked pair": "#a78bfa", "Hidden pair": "#a78bfa", "X-wing": "#ec4899",
         "Advanced": "#94a3b8", "Other": "#94a3b8", "Mistake": "#ff6b6b" };
       function median(arr) { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+      function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
       document.getElementById("statsBtn").addEventListener("click", () => {
         if (statsEl.hidden) { renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
-        else { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; }
+        else closeStats();
       });
       function renderStats() {
         const games = lsGet(STATS_KEY);
