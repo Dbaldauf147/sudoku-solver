@@ -143,6 +143,11 @@
       .trow { cursor: pointer; }
       .trow:hover { background: var(--panel); }
       .hintline { color: var(--muted); font-size: 0.8rem; margin: 6px 0 0; }
+      .spark { display: flex; align-items: flex-end; gap: 3px; height: 48px; margin: 8px 0 6px; }
+      .spark .sbar { flex: 1 1 0; min-width: 3px; border-radius: 2px 2px 0 0; min-height: 4px; }
+      .trend.up { color: var(--bad); font-weight: 600; }
+      .trend.down { color: var(--ok); font-weight: 600; }
+      .trend.flat { color: var(--muted); }
 
       .miniboard { display: grid; grid-template-columns: repeat(9, 1fr); width: 100%; max-width: 290px;
         margin: 0 auto 14px; aspect-ratio: 1; background: var(--thick); border: 2px solid var(--thick);
@@ -947,6 +952,34 @@
         "Advanced": "#94a3b8", "Other": "#94a3b8", "Mistake": "#ff6b6b" };
       function median(arr) { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
       function errorsIn(g) { return typeof g.errors === "number" ? g.errors : g.moves.filter((m) => !m.correct).length; }
+      // ---- over-time trends ----
+      function sparkBars(points, color) {
+        // points: [{ v:number, label:string }] in chronological order (oldest → newest)
+        const max = Math.max(1, ...points.map((p) => p.v));
+        const bars = points.map((p) => `<span class="sbar" title="${esc(p.label)}" style="height:${Math.max(8, Math.round((p.v / max) * 100))}%;background:${color}"></span>`).join("");
+        return `<div class="spark">${bars}</div>`;
+      }
+      function trendNote(vals) {
+        // compares the average of the earlier half against the later half (lower time = improving)
+        if (vals.length < 2) return `<span class="trend flat">need a couple games for a trend</span>`;
+        const half = Math.max(1, Math.floor(vals.length / 2));
+        const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+        const early = avg(vals.slice(0, half)), late = avg(vals.slice(-half));
+        if (!early) return "";
+        const pct = Math.round(((late - early) / early) * 100);
+        if (pct <= -5) return `<span class="trend down">▼ ${Math.abs(pct)}% faster</span>`;
+        if (pct >= 5) return `<span class="trend up">▲ ${pct}% slower</span>`;
+        return `<span class="trend flat">steady</span>`;
+      }
+      function techGameSeries(chron, tech) {
+        // one point per game that used the technique: the median time between choices for that technique
+        const pts = [];
+        for (const g of chron) {
+          const dts = g.moves.filter((m) => m.tech === tech).map((m) => m.dt);
+          if (dts.length) { const med = median(dts); pts.push({ v: med, label: `${new Date(g.startedAt).toLocaleDateString()} · ${fmtDt(med)}` }); }
+        }
+        return pts;
+      }
 
       // ---- visual technique examples (shown from the stats technique table) ----
       const TECH_EXAMPLES = {
@@ -1034,6 +1067,19 @@
             <span class="k">errors</span> ${totalErrors} (${(totalErrors / gs.length).toFixed(1)}/game)</div>`;
         }
 
+        // solve time over time — per difficulty, one bar per solved game (oldest → newest)
+        const chron = [...games].sort((a, b) => a.startedAt - b.startedAt);
+        let diffTrend = "";
+        for (const d of diffs) {
+          const solved = chron.filter((g) => g.solved && g.difficulty === d);
+          if (!solved.length) continue;
+          const pts = solved.map((g) => ({ v: g.totalMs, label: `${new Date(g.startedAt).toLocaleDateString()} · ${fmtTime(g.totalMs)}` }));
+          diffTrend += `<div class="card"><b>${d}</b> · ${pts.length} solved · ${trendNote(pts.map((p) => p.v))}
+            ${sparkBars(pts, "var(--accent)")}
+            <span class="k">oldest → newest · best ${fmtTime(Math.min(...pts.map((p) => p.v)))}</span></div>`;
+        }
+        if (!diffTrend) diffTrend = '<div class="card">Solve a few puzzles and your times will chart here, so you can watch them drop.</div>';
+
         // by technique (typical time per move)
         const allMoves = games.flatMap((g) => g.moves);
         const byTech = {};
@@ -1051,6 +1097,22 @@
           ? `You take longest on <b style="color:${TECH_COLORS[focus.t]}">${esc(focus.t)}</b> placements (typically ${fmtDt(focus.med)}). Practice scanning for these earlier.${mistakes ? ` You've also made ${mistakes} mistake${mistakes > 1 ? "s" : ""} — slow down to verify before placing.` : ""}`
           : `Keep playing — after a few games I'll point out which technique slows you down most.`;
 
+        // technique time over time — per technique, one bar per game that used it (median time per choice)
+        const techNames = [...new Set(allMoves.map((m) => m.tech))].filter((t) => t !== "Mistake");
+        const techTrendRows = techNames
+          .map((t) => ({ t, pts: techGameSeries(chron, t), total: allMoves.filter((m) => m.tech === t).length }))
+          .filter((r) => r.pts.length >= 2)
+          .sort((a, b) => b.total - a.total)
+          .slice(0, 6);
+        let techTrend = "";
+        for (const r of techTrendRows) {
+          const color = TECH_COLORS[r.t] || "#94a3b8";
+          techTrend += `<div class="card"><b style="color:${color}">${esc(r.t)}</b> · ${r.pts.length} games · ${trendNote(r.pts.map((p) => p.v))}
+            ${sparkBars(r.pts, color)}
+            <span class="k">median time per choice, oldest → newest</span></div>`;
+        }
+        if (!techTrend) techTrend = '<div class="card">Once you\'ve played a technique across a couple of games, its trend will show here.</div>';
+
         // per-game selector
         let opts = "";
         games.forEach((g, i) => { opts += `<option value="${i}">${esc(g.source)} · ${esc(g.difficulty)} · ${new Date(g.startedAt).toLocaleDateString()} · ${fmtTime(g.totalMs)} ${g.solved ? "✓" : "▢"}</option>`; });
@@ -1058,8 +1120,10 @@
         statsEl.innerHTML = `<button id="sb">← Back</button><h2>Your stats</h2>
           <div class="card takeaway">${takeaway}</div>
           <h3>By difficulty</h3>${summary || '<div class="card">No solved games yet.</div>'}
+          <h3>Solve time over time</h3>${diffTrend}
           <h3>Where you spend time</h3>${techTable}
           <p class="sub" style="margin:8px 0 0">Typical = median time between your choices, so a long pause stands out without one outlier skewing it.</p>
+          <h3>Technique time over time</h3>${techTrend}
           <h3>Deep dive — a single game</h3>
           <select id="gamePick" style="width:100%;margin-bottom:10px">${opts}</select>
           <div id="deepDive"></div>`;

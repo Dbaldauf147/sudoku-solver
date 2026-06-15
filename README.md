@@ -27,10 +27,14 @@ answer.
     skew your stats. **Undo** (or Ctrl/⌘-Z) steps back through your entries.
     Once a digit is placed nine times its number-pad key is crossed out.
   - **Stats** opens a deep-dive: solve times and accuracy **per difficulty**,
-    a "where you spend time" breakdown of typical (median) time **per
-    technique** so you can see what trips you up, and a per-game timeline that
-    bars out the gap before each move and flags the slow ones. **Tap any
-    technique** for a pop-up with a visual example of how it works.
+    plus **over-time trends** that chart how your numbers move from game to
+    game — a **solve time over time** sparkline per difficulty and a
+    **technique time over time** sparkline per technique, each tagged with a
+    faster/slower badge so you can see whether you're improving. It also has a
+    "where you spend time" breakdown of typical (median) time **per technique**
+    so you can see what trips you up, and a per-game timeline that bars out the
+    gap before each move and flags the slow ones. **Tap any technique** for a
+    pop-up with a visual example of how it works.
   - Finishing a puzzle pops a **celebration screen** with your time and error
     count.
   - Wrong entries are flagged with the reason they can't work — without
