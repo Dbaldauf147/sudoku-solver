@@ -8,7 +8,7 @@
       :root {
         --bg: #ffffff; --panel: #f3f4f6; --line: #d7dbe2; --thick: #9aa3b2;
         --text: #1d2330; --muted: #5b6472; --accent: #2563eb; --given: #0b1020;
-        --user: #2563eb; --ok: #16a34a; --bad: #dc2626; --pencil: #475569;
+        --user: #2563eb; --ok: #16a34a; --bad: #dc2626; --pencil: #1f2937;
         --sel: #dbe7ff;
       }
       * { box-sizing: border-box; }
@@ -36,18 +36,18 @@
       input#source { flex: 1; min-width: 120px; }
       .library select { flex: 1; min-width: 160px; }
 
-      .topbar { display: flex; flex-wrap: wrap; justify-content: space-between;
-        align-items: center; gap: 10px; margin-bottom: 14px; }
+      .topbar { position: relative; display: flex; flex-wrap: wrap; align-items: center;
+        gap: 10px; margin-bottom: 14px; padding-right: 54px; }
       .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
       .tabs button, .tabs label.file { padding: 8px 13px; font-size: 0.9rem; }
-      .menu { position: relative; }
-      #gear { font-size: 1.15rem; padding: 8px 12px; line-height: 1; }
-      .dropdown { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40;
-        display: flex; flex-direction: column; min-width: 180px;
+      .menu { position: absolute; top: 0; right: 0; }
+      #gear { font-size: 1.2rem; padding: 8px 12px; line-height: 1; }
+      .dropdown { position: absolute; right: 0; top: calc(100% + 6px); z-index: 100;
+        display: flex; flex-direction: column; min-width: 184px;
         background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
-        box-shadow: 0 16px 40px rgba(17, 20, 28, 0.2); overflow: hidden; }
+        box-shadow: 0 16px 40px rgba(17, 20, 28, 0.22); overflow: hidden; }
       .dropdown[hidden] { display: none; }
-      .dropdown button { border: none; border-radius: 0; text-align: left; background: transparent; padding: 11px 14px; }
+      .dropdown button { border: none; border-radius: 0; text-align: left; background: transparent; padding: 12px 14px; font-weight: 500; }
       .dropdown button:hover { background: var(--panel); }
       .timer { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums;
         font-size: 1.1rem; background: var(--panel); border: 1px solid var(--line);
@@ -76,7 +76,7 @@
       .pencil {
         position: absolute; inset: 0; display: grid;
         grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
-        font-size: clamp(0.46rem, 1.7vw, 0.64rem); line-height: 1; color: var(--pencil); font-weight: 600;
+        font-size: clamp(0.55rem, 2vw, 0.74rem); line-height: 1; color: var(--pencil); font-weight: 700;
         pointer-events: none; z-index: 1;
       }
       .pencil span { display: flex; align-items: center; justify-content: center; }
@@ -144,12 +144,12 @@
       <div class="topbar">
         <div class="tabs">
           <label class="file">Import screenshot<input id="file" type="file" accept="image/*" /></label>
-          <button id="start" class="primary">Start solving</button>
           <button id="clear">Clear</button>
         </div>
         <div class="menu">
           <button id="gear" aria-label="Menu" title="Menu">⚙</button>
           <div id="gearMenu" class="dropdown" hidden>
+            <button id="start">Start solving</button>
             <button id="statsBtn">Stats</button>
             <button id="check">Check entries</button>
             <button id="reveal">Reveal solution</button>
@@ -690,7 +690,9 @@
         startTimer();
         const first = (() => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) return [r, c]; return [0, 0]; })();
         select(first[0], first[1]);
-        showExplain("Puzzle locked — start solving", variants > 1
+        const savedNow = saveGameIfNew(grid, session.difficulty, session.source);
+        const note = savedNow ? " (saved to your library)" : "";
+        showExplain("Puzzle locked — start solving" + note, variants > 1
           ? "Heads up: this grid has more than one solution. Tap a cell, pick a number, and I'll explain. Candidate mode adds pencil marks."
           : "Tap a cell and pick a number — I'll say if it's right and why. Try Candidate mode for notes, or Hint for the next step.", "info");
       }
@@ -800,14 +802,22 @@
         try { const st = await cloudLoad("stats"); if (st) lsSet(STATS_KEY, st); } catch {}
         renderLibrary();
       }
+      // Save a puzzle to the library only if that exact grid isn't already saved.
+      function gridKey(grid) { return grid.map((r) => r.join("")).join(""); }
+      function saveGameIfNew(grid, difficulty, source) {
+        const games = lsGet(STORE_KEY);
+        const key = gridKey(grid);
+        if (games.some((g) => gridKey(g.grid) === key)) return false;
+        const game = { id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()), grid: grid.map((r) => r.slice()), difficulty, source: (source || "Unknown").trim() || "Unknown", savedAt: Date.now() };
+        games.unshift(game); lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
+        return true;
+      }
       document.getElementById("save").addEventListener("click", () => {
         const grid = readGrid();
         if (grid.flat().filter(Boolean).length < 17) return showExplain("Nothing to save yet", "Import or type a puzzle's givens first (at least 17).", "bad");
         if (hasConflict(grid)) return showExplain("Can't save that", "The puzzle has a duplicate in a row, column, or box. Fix it first.", "bad");
-        const games = lsGet(STORE_KEY);
-        const game = { id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()), grid, difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", savedAt: Date.now() };
-        games.unshift(game); lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
-        showExplain("Puzzle saved", `Saved as ${game.source} · ${game.difficulty}${syncNote()}.`, "ok");
+        const added = saveGameIfNew(grid, difficultyEl.value, sourceEl.value);
+        showExplain(added ? "Puzzle saved" : "Already saved", added ? `Saved as ${sourceEl.value} · ${difficultyEl.value}${syncNote()}.` : "This exact puzzle is already in your library.", added ? "ok" : "info");
       });
       document.getElementById("load").addEventListener("click", () => {
         const game = lsGet(STORE_KEY).find((g) => g.id === savedEl.value); if (!game) return;
@@ -910,7 +920,7 @@
           const data = await r.json();
           if (!r.ok) { let msg = data.error || "Failed to read image"; if (data.diagnostic) msg += ` (key defined: ${data.diagnostic.defined}, length: ${data.diagnostic.length}, matching vars: ${(data.diagnostic.anthropicVars || []).join(", ") || "none"})`; throw new Error(msg); }
           writeGrid(data.grid); renderPencils();
-          showReady("Grid imported. Check for any misread digits first — ready to start the timer?");
+          showReady(`Grid imported as ${sourceEl.value} · ${difficultyEl.value}. Fix any misread digits, then start — I'll save it to your library when you do.`);
         } catch (err) { showExplain("Couldn't read the image", (err.message || "Unknown error") + " — you can still type the puzzle in by hand.", "bad"); }
         finally { e.target.value = ""; }
       });

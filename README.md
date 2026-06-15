@@ -32,9 +32,13 @@ answer.
   - Wrong entries are flagged with the reason they can't work — without
     spoiling the answer. **Check entries** and **Reveal solution** are there
     when you want them.
-  - **Save puzzle** stores the current grid with its **difficulty**
+  - Puzzles are **auto-saved to your library when you start solving** (if that
+    exact grid isn't already saved), capturing the selected **difficulty**
     (Easy/Medium/Hard) and **source** (defaults to NYT, editable for other
-    sources). Saved puzzles are listed below the grid to load or delete.
+    sources). There's also a manual **Save puzzle**, and saved puzzles are
+    listed below the grid to load or delete.
+  - Stats, Check entries, Reveal solution, Edit puzzle, and Start solving live
+    under a ⚙ menu in the top-right corner.
 
   The coaching and saved library are entirely client-side, so they work
   **without an API key** — only the optional screenshot import calls Claude.
