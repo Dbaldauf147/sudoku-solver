@@ -158,7 +158,9 @@
 
       <div class="row solving">
         <button id="hint" class="primary">Hint</button>
+        <button id="undo">Undo</button>
         <button id="autonotes">Auto notes</button>
+        <button id="pause">Pause</button>
         <button id="check">Check entries</button>
         <button id="reveal">Reveal solution</button>
         <button id="edit">Edit puzzle</button>
@@ -263,6 +265,7 @@
           return;
         }
         if (!statsEl.hidden) return;
+        if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { if (solving) undo(); e.preventDefault(); return; }
         if (e.key >= "1" && e.key <= "9") { applyDigit(Number(e.key)); e.preventDefault(); }
         else if (["0", "Backspace", "Delete", "x", "X"].includes(e.key)) { applyClear(); e.preventDefault(); }
         else if (e.key === "n" || e.key === "N") setMode("normal");
@@ -297,8 +300,25 @@
         if (entryMode === "candidate" && solving) { marks[r][c].clear(); renderPencils(); }
         else clearCell(r, c);
       }
+      let undoStack = [];
+      function pushUndo(r, c) {
+        if (!solving) return;
+        undoStack.push({ r, c, value: inputs[r][c].value, marks: new Set(marks[r][c]) });
+        if (undoStack.length > 300) undoStack.shift();
+      }
+      function undo() {
+        const last = undoStack.pop();
+        if (!last) return showExplain("Nothing to undo", "You're back at the start of this puzzle.", "info");
+        const { r, c, value, marks: m } = last;
+        inputs[r][c].value = value; marks[r][c] = new Set(m);
+        inputs[r][c].classList.remove("wrong", "solved");
+        if (value && Number(value) !== solution[r][c]) inputs[r][c].classList.add("wrong");
+        renderPencils(); select(r, c);
+        showExplain("Undid last action", `Restored ${loc(r, c)}.`, "info");
+      }
       function setValue(r, c, n) {
         if (givens[r][c]) return;
+        pushUndo(r, c);
         inputs[r][c].value = String(n);
         marks[r][c].clear();
         if (solving) handleMove(r, c);
@@ -306,12 +326,14 @@
       }
       function clearCell(r, c) {
         if (givens[r][c]) return;
+        pushUndo(r, c);
         inputs[r][c].value = ""; inputs[r][c].classList.remove("wrong", "solved");
         if (solving) showExplain("Cell cleared", "Keep going — pick a number or press Hint.", "info");
         renderPencils(); select(r, c);
       }
       function toggleMark(r, c, n) {
         if (givens[r][c] || inputs[r][c].value) return;
+        pushUndo(r, c);
         marks[r][c].has(n) ? marks[r][c].delete(n) : marks[r][c].add(n);
         renderPencils();
       }
@@ -562,26 +584,57 @@
         showExplain("🎉 Solved!", `Every cell is correct in ${fmtTime(session ? 0 : lastTotalMs)}. Open Stats for your deep dive.`, "ok");
       }
 
-      // ---- timer + session tracking ----
+      // ---- timer + session tracking (active time only; pauses don't count) ----
       let lastTotalMs = 0;
       function fmtTime(ms) { const s = Math.round(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; }
       function fmtDt(ms) { return ms < 60000 ? `${(ms / 1000).toFixed(1)}s` : fmtTime(ms); }
+      function activeElapsed() {
+        if (!session) return 0;
+        const now = Date.now();
+        return now - session.startedAt - session.pausedMs - (session.pauseStart ? now - session.pauseStart : 0);
+      }
       function startTimer() {
         timerDiffEl.textContent = session.difficulty;
         timerEl.textContent = "0:00";
         clearInterval(timerId);
-        timerId = setInterval(() => { timerEl.textContent = fmtTime(Date.now() - session.startedAt); }, 500);
+        timerId = setInterval(() => { timerEl.textContent = fmtTime(activeElapsed()); }, 500);
       }
+      function pauseTimer(manual) {
+        if (!session || session.pauseStart) return;
+        if (manual) session.manualPaused = true;
+        session.pauseStart = Date.now();
+        clearInterval(timerId); timerId = null;
+        timerDiffEl.textContent = session.difficulty + " · paused";
+        document.getElementById("pause").textContent = "Resume";
+      }
+      function resumeTimer(manual) {
+        if (!session || !session.pauseStart) return;
+        if (!manual && session.manualPaused) return; // don't auto-resume a manual pause
+        session.pausedMs += Date.now() - session.pauseStart;
+        session.pauseStart = null; session.manualPaused = false;
+        timerDiffEl.textContent = session.difficulty;
+        document.getElementById("pause").textContent = "Pause";
+        startTimer();
+      }
+      document.addEventListener("visibilitychange", () => {
+        if (!solving || !session) return;
+        document.hidden ? pauseTimer(false) : resumeTimer(false);
+      });
+      document.getElementById("pause").addEventListener("click", () => {
+        if (!session) return;
+        session.pauseStart ? resumeTimer(true) : pauseTimer(true);
+      });
       function recordMove(r, c, n, correct, tech) {
         if (!session) return;
-        const now = Date.now(), dt = now - session.lastAt; session.lastAt = now;
-        session.moves.push({ t: now - session.startedAt, dt, r, c, n, correct, tech });
+        const t = activeElapsed(), dt = t - session.lastT; session.lastT = t;
+        session.moves.push({ t, dt, r, c, n, correct, tech });
       }
       function finalizeSession(solved) {
         if (!session) return;
+        if (session.pauseStart) { session.pausedMs += Date.now() - session.pauseStart; session.pauseStart = null; }
+        session.totalMs = activeElapsed();
         clearInterval(timerId); timerId = null;
         session.solved = solved; session.finishedAt = Date.now();
-        session.totalMs = session.finishedAt - session.startedAt;
         lastTotalMs = session.totalMs;
         const stats = lsGet(STATS_KEY); stats.unshift(session); lsSet(STATS_KEY, stats); cloudSave("stats", stats);
         session = null;
@@ -607,7 +660,8 @@
         solving = true; setMode("normal");
         document.body.classList.add("solving");
         clearHighlights(); renderPencils();
-        session = { difficulty: document.getElementById("difficulty").value, source: (document.getElementById("source").value || "Unknown").trim(), startedAt: Date.now(), lastAt: Date.now(), moves: [] };
+        undoStack = [];
+        session = { difficulty: document.getElementById("difficulty").value, source: (document.getElementById("source").value || "Unknown").trim(), startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, moves: [] };
         startTimer();
         const first = (() => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) return [r, c]; return [0, 0]; })();
         select(first[0], first[1]);
@@ -623,6 +677,8 @@
       document.getElementById("modalStart").addEventListener("click", () => { hideModal(); startSolving(); });
       document.getElementById("modalCancel").addEventListener("click", () => { hideModal(); showExplain("Take your time", "Fix anything that looks off, then press Start solving when you're ready.", "info"); });
       modal.addEventListener("click", (e) => { if (e.target === modal) hideModal(); });
+
+      document.getElementById("undo").addEventListener("click", undo);
 
       document.getElementById("autonotes").addEventListener("click", () => {
         const grid = progressGrid();
@@ -672,9 +728,11 @@
       document.getElementById("edit").addEventListener("click", resetToEdit);
       document.getElementById("clear").addEventListener("click", () => { for (const row of inputs) for (const i of row) i.value = ""; resetToEdit(); });
       function resetToEdit() {
-        session = null; clearInterval(timerId); timerId = null;
+        session = null; clearInterval(timerId); timerId = null; undoStack = [];
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal");
         document.body.classList.remove("solving"); clearHighlights();
+        document.getElementById("pause").textContent = "Pause";
+        timerEl.textContent = "0:00"; timerDiffEl.textContent = "—";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].classList.remove("given", "wrong", "solved"); marks[r][c].clear(); }
         renderPencils();
         showExplain("Enter your puzzle", "Type the givens or import a screenshot, then press Start solving.", "info");
