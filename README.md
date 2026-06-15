@@ -17,7 +17,15 @@ answer.
   - **Hint** finds the next cell you can logically prove, explains it (and
     names the technique — naked/hidden single, pointing pair, box/line
     reduction, naked pair, hidden pair, X-wing), and offers to place it for you.
-  - **Candidates** toggles pencil marks in every empty cell.
+  - A **number pad** (1–9 plus **✕** to clear) with **Normal** and
+    **Candidate** modes — Candidate mode toggles your own pencil marks;
+    **Auto notes** fills every empty cell with its possible digits.
+  - A **timer** runs while you solve, and every move is logged with the time
+    since your last choice and the technique that justifies it.
+  - **Stats** opens a deep-dive: solve times and accuracy **per difficulty**,
+    a "where you spend time" breakdown of typical (median) time **per
+    technique** so you can see what trips you up, and a per-game timeline that
+    bars out the gap before each move and flags the slow ones.
   - Wrong entries are flagged with the reason they can't work — without
     spoiling the answer. **Check entries** and **Reveal solution** are there
     when you want them.
