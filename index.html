@@ -8,7 +8,7 @@
       :root {
         --bg: #ffffff; --panel: #f3f4f6; --line: #d7dbe2; --thick: #9aa3b2;
         --text: #1d2330; --muted: #5b6472; --accent: #2563eb; --given: #0b1020;
-        --user: #2563eb; --ok: #16a34a; --bad: #dc2626; --pencil: #6b7280;
+        --user: #2563eb; --ok: #16a34a; --bad: #dc2626; --pencil: #475569;
         --sel: #dbe7ff;
       }
       * { box-sizing: border-box; }
@@ -70,13 +70,13 @@
         text-align: center; outline: none; cursor: pointer; caret-color: transparent;
         z-index: 2;
       }
-      .cell-input.given { color: var(--given); font-weight: 700; }
+      .cell-input.given { color: var(--given); font-weight: 700; cursor: default; pointer-events: none; }
       .cell-input.wrong { color: var(--bad); }
       .cell-input.solved { color: var(--user); }
       .pencil {
         position: absolute; inset: 0; display: grid;
         grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
-        font-size: clamp(0.4rem, 1.5vw, 0.58rem); line-height: 1; color: var(--pencil); font-weight: 500;
+        font-size: clamp(0.46rem, 1.7vw, 0.64rem); line-height: 1; color: var(--pencil); font-weight: 600;
         pointer-events: none; z-index: 1;
       }
       .pencil span { display: flex; align-items: center; justify-content: center; }
@@ -253,8 +253,8 @@
           const input = document.createElement("input");
           input.className = "cell-input"; input.readOnly = true; input.inputMode = "none";
           input.dataset.row = r; input.dataset.col = c;
-          input.addEventListener("mousedown", (e) => { e.preventDefault(); select(r, c); });
-          input.addEventListener("touchstart", () => select(r, c), { passive: true });
+          input.addEventListener("mousedown", (e) => { e.preventDefault(); if (givens[r][c]) return; select(r, c); });
+          input.addEventListener("touchstart", () => { if (givens[r][c]) return; select(r, c); }, { passive: true });
           cell.append(pencil, input);
           boardEl.appendChild(cell);
           inputs[r][c] = input; cellEls[r][c] = cell; pencils[r][c] = spans; marks[r][c] = new Set();
