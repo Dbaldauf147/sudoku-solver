@@ -33,7 +33,9 @@ answer.
   - Wrong entries are flagged with the reason they can't work — without
     spoiling the answer. **Check entries** and **Reveal solution** are there
     when you want them.
-  - Puzzles are **auto-saved to your library when you start solving** (if that
+  - A built-in **catalog** of puzzles ships with the app, so every user can
+    pick one and play it from scratch — no setup or account needed. Puzzles
+    are also **auto-saved to your library when you start solving** (if that
     exact grid isn't already saved), capturing the selected **difficulty**
     (Easy/Medium/Hard) and **source** (defaults to NYT, editable for other
     sources). There's also a manual **Save puzzle**, and saved puzzles are

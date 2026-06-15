@@ -174,6 +174,10 @@
         <button id="load">Load</button>
         <button id="delete">Delete</button>
       </div>
+      <div class="row setup-extra">
+        <select id="catalog" title="Built-in puzzles"></select>
+        <button id="play">Play from catalog</button>
+      </div>
 
       <div class="row solving">
         <button id="hint" class="primary">Hint</button>
@@ -842,6 +846,28 @@
       document.getElementById("delete").addEventListener("click", () => {
         const games = lsGet(STORE_KEY).filter((g) => g.id !== savedEl.value); lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
         showExplain("Puzzle deleted", "Removed from your saved list.", "info");
+      });
+
+      // ---- built-in catalog (shipped with the app, available to every user) ----
+      const CATALOG_RAW = [
+        ["Easy", "530070000600195000098000060800060003400803001700020006060000280000419005000080079"],
+        ["Medium", "003020600900305001001806400008102900700000008006708200002609500800203009005010300"],
+        ["Medium", "200080300060070084030500209000105408000000000402706000301007040720040060004010003"],
+        ["Hard", "000000907000420180000705026100904000050000040000507009920108000034059000507000000"],
+        ["Hard", "030050040008010500460000012070502080000603000040109030250000098001020600080060020"],
+      ];
+      function parsePuzzle(str) {
+        const g = [];
+        for (let r = 0; r < 9; r++) { g.push([]); for (let c = 0; c < 9; c++) g[r].push(Number(str[r * 9 + c]) || 0); }
+        return g;
+      }
+      const CATALOG = CATALOG_RAW.filter(([, s]) => s.length === 81).map(([difficulty, s], i) => ({ difficulty, grid: parsePuzzle(s), n: i + 1 }));
+      const catalogEl = document.getElementById("catalog");
+      CATALOG.forEach((p, i) => { const o = document.createElement("option"); o.value = i; o.textContent = `Catalog · ${p.difficulty} #${p.n}`; catalogEl.appendChild(o); });
+      document.getElementById("play").addEventListener("click", () => {
+        const p = CATALOG[Number(catalogEl.value)]; if (!p) return;
+        resetToEdit(); writeGrid(p.grid); difficultyEl.value = p.difficulty; sourceEl.value = "Catalog"; renderPencils();
+        showReady(`Catalog · ${p.difficulty} #${p.n} loaded. Start the timer and play it from scratch?`);
       });
 
       // ---- stats / deep dive ----
