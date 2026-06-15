@@ -29,7 +29,10 @@ answer.
   - **Stats** opens a deep-dive: solve times and accuracy **per difficulty**,
     a "where you spend time" breakdown of typical (median) time **per
     technique** so you can see what trips you up, and a per-game timeline that
-    bars out the gap before each move and flags the slow ones.
+    bars out the gap before each move and flags the slow ones. **Tap any
+    technique** for a pop-up with a visual example of how it works.
+  - Finishing a puzzle pops a **celebration screen** with your time and error
+    count.
   - Wrong entries are flagged with the reason they can't work — without
     spoiling the answer. **Check entries** and **Reveal solution** are there
     when you want them.
