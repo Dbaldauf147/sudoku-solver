@@ -142,6 +142,12 @@
 
       .trow { cursor: pointer; }
       .trow:hover { background: var(--panel); }
+      .saved-row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        padding: 10px 0; border-bottom: 1px solid var(--line); }
+      .saved-row .saved-meta { line-height: 1.4; }
+      .saved-row .saved-actions { display: flex; gap: 6px; flex-shrink: 0; }
+      .saved-row .saved-actions button { padding: 6px 12px; font-size: 0.85rem; }
+      .saved-row .del-one { color: var(--bad); }
       .hintline { color: var(--muted); font-size: 0.8rem; margin: 6px 0 0; }
       .spark { display: flex; align-items: flex-end; gap: 3px; height: 48px; margin: 8px 0 6px; }
       .spark .sbar { flex: 1 1 0; min-width: 3px; border-radius: 2px 2px 0 0; min-height: 4px; }
@@ -199,9 +205,7 @@
         <button id="save">Save puzzle</button>
       </div>
       <div class="row setup-extra library" hidden>
-        <select id="saved" title="Saved puzzles"></select>
-        <button id="load">Load</button>
-        <button id="delete">Delete</button>
+        <button id="load">Saved games</button>
       </div>
       <div class="row setup-extra">
         <select id="catalog" title="Built-in puzzles"></select>
@@ -235,6 +239,7 @@
       </div>
 
       <div id="stats" class="stats" hidden></div>
+      <div id="savedGames" class="stats" hidden></div>
 
       <div id="modal" class="overlay" hidden>
         <div class="modal">
@@ -764,6 +769,7 @@
       document.getElementById("start").addEventListener("click", startSolving);
       function startSolving() {
         if (solving) return showExplain("Already solving", "Press Edit puzzle first if you want to change the clues.", "info");
+        closeLibrary();
         const grid = readGrid();
         if (grid.flat().filter(Boolean).length < 17) return showExplain("Need more clues", "Enter the givens first (a proper Sudoku has at least 17).", "bad");
         if (hasConflict(grid)) return showExplain("That puzzle has a conflict", "Two of the same digit share a row, column, or box. Fix it first.", "bad");
@@ -836,7 +842,7 @@
       });
 
       document.getElementById("check").addEventListener("click", () => {
-        closeStats();
+        closeStats(); closeLibrary();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle, then I can check your entries.", "info");
         let wrong = 0, filled = 0;
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
@@ -849,7 +855,7 @@
       });
 
       document.getElementById("reveal").addEventListener("click", () => {
-        closeStats();
+        closeStats(); closeLibrary();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle first.", "info");
         finalizeSession(false);
         writeGrid(solution);
@@ -863,7 +869,7 @@
       function resetToEdit() {
         session = null; clearInterval(timerId); timerId = null; undoStack = [];
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal");
-        document.body.classList.remove("solving"); clearHighlights(); closeStats();
+        document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary();
         pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].classList.remove("given", "wrong", "solved"); marks[r][c].clear(); }
         renderPencils();
@@ -873,7 +879,7 @@
       // ---- saved library + cloud (collections: library, stats) ----
       const STORE_KEY = "sudoku-coach:games", STATS_KEY = "sudoku-coach:stats";
       const difficultyEl = document.getElementById("difficulty"), sourceEl = document.getElementById("source");
-      const savedEl = document.getElementById("saved"), libraryEl = document.querySelector(".library");
+      const loadBtn = document.getElementById("load"), libraryEl = document.querySelector(".library"), libraryPanel = document.getElementById("savedGames");
       function lsGet(key) { try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; } }
       function lsSet(key, v) { localStorage.setItem(key, JSON.stringify(v)); }
       let cloudOn = false;
@@ -889,8 +895,10 @@
       }
       const syncNote = () => (cloudOn ? " and synced across your devices" : " on this device");
       function renderLibrary() {
-        const games = lsGet(STORE_KEY); libraryEl.hidden = games.length === 0; savedEl.innerHTML = "";
-        for (const g of games) { const o = document.createElement("option"); o.value = g.id; o.textContent = `${g.source} · ${g.difficulty} · ${new Date(g.savedAt).toLocaleDateString()}`; savedEl.appendChild(o); }
+        const games = lsGet(STORE_KEY);
+        libraryEl.hidden = games.length === 0;
+        loadBtn.textContent = games.length ? `Saved games (${games.length})` : "Saved games";
+        if (!libraryPanel.hidden) renderLibraryPanel();
       }
       async function initStores() {
         try { const lib = await cloudLoad("library"); if (lib) lsSet(STORE_KEY, lib); } catch {}
@@ -914,15 +922,48 @@
         const added = saveGameIfNew(grid, difficultyEl.value, sourceEl.value);
         showExplain(added ? "Puzzle saved" : "Already saved", added ? `Saved as ${sourceEl.value} · ${difficultyEl.value}${syncNote()}.` : "This exact puzzle is already in your library.", added ? "ok" : "info");
       });
-      document.getElementById("load").addEventListener("click", () => {
-        const game = lsGet(STORE_KEY).find((g) => g.id === savedEl.value); if (!game) return;
+      // ---- saved-games history panel (opened from the Load button) ----
+      function savedDateHeader(ts) {
+        const d = new Date(ts), now = new Date(), sameDay = (a, b) => a.toDateString() === b.toDateString();
+        const yest = new Date(now); yest.setDate(now.getDate() - 1);
+        if (sameDay(d, now)) return "Today";
+        if (sameDay(d, yest)) return "Yesterday";
+        return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      }
+      function openLibrary() { closeStats(); renderLibraryPanel(); libraryPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
+      function closeLibrary() { if (!libraryPanel.hidden) { libraryPanel.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
+      function renderLibraryPanel() {
+        const games = [...lsGet(STORE_KEY)].sort((a, b) => b.savedAt - a.savedAt);
+        if (!games.length) {
+          libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Saved games</h2><div class="card">No saved games yet. Type or import a puzzle and press <b>Save puzzle</b> — it'll appear here, newest first, grouped by date.</div>`;
+          document.getElementById("lb").onclick = closeLibrary; return;
+        }
+        let rows = "", lastHeader = null;
+        for (const g of games) {
+          const header = savedDateHeader(g.savedAt);
+          if (header !== lastHeader) { rows += `<h3>${esc(header)}</h3>`; lastHeader = header; }
+          const time = new Date(g.savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+          rows += `<div class="saved-row">
+            <div class="saved-meta"><b>${esc(g.difficulty)}</b> · ${esc(g.source)}<br><span class="k">${esc(time)}</span></div>
+            <div class="saved-actions"><button class="load-one" data-id="${esc(g.id)}">Load</button><button class="del-one" data-id="${esc(g.id)}">Delete</button></div>
+          </div>`;
+        }
+        libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Saved games <span class="k">(${games.length})</span></h2>${rows}`;
+        document.getElementById("lb").onclick = closeLibrary;
+        libraryPanel.querySelectorAll(".load-one").forEach((b) => (b.onclick = () => loadSavedGame(b.dataset.id)));
+        libraryPanel.querySelectorAll(".del-one").forEach((b) => (b.onclick = () => deleteSavedGame(b.dataset.id)));
+      }
+      function loadSavedGame(id) {
+        const game = lsGet(STORE_KEY).find((g) => g.id === id); if (!game) return;
+        closeLibrary();
         resetToEdit(); writeGrid(game.grid); difficultyEl.value = game.difficulty; sourceEl.value = game.source; renderPencils();
         showReady(`${game.source} · ${game.difficulty} is loaded. Start the timer and play?`);
-      });
-      document.getElementById("delete").addEventListener("click", () => {
-        const games = lsGet(STORE_KEY).filter((g) => g.id !== savedEl.value); lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
-        showExplain("Puzzle deleted", "Removed from your saved list.", "info");
-      });
+      }
+      function deleteSavedGame(id) {
+        const games = lsGet(STORE_KEY).filter((g) => g.id !== id); lsSet(STORE_KEY, games); cloudSave("library", games);
+        renderLibrary();
+      }
+      loadBtn.addEventListener("click", () => { if (libraryPanel.hidden) openLibrary(); else closeLibrary(); });
 
       // ---- built-in catalog (shipped with the app, available to every user) ----
       const CATALOG_RAW = [
@@ -1043,7 +1084,7 @@
       document.getElementById("exModal").addEventListener("click", (e) => { if (e.target.id === "exModal") e.currentTarget.hidden = true; });
       function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
       document.getElementById("statsBtn").addEventListener("click", () => {
-        if (statsEl.hidden) { renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
+        if (statsEl.hidden) { closeLibrary(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
         else closeStats();
       });
       function renderStats() {

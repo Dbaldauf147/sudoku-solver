@@ -45,8 +45,10 @@ answer.
     are also **auto-saved to your library when you start solving** (if that
     exact grid isn't already saved), capturing the selected **difficulty**
     (Easy/Medium/Hard) and **source** (defaults to NYT, editable for other
-    sources). There's also a manual **Save puzzle**, and saved puzzles are
-    listed below the grid to load or delete.
+    sources). There's also a manual **Save puzzle**. The **Saved games**
+    button opens a history of everything you've saved — **grouped by date**
+    (Today, Yesterday, then by day), newest first, with each entry's
+    difficulty and source — where you can **load** or **delete** any puzzle.
   - Stats, Check entries, Reveal solution, Edit puzzle, and Start solving live
     under a ⚙ menu in the top-right corner.
 
