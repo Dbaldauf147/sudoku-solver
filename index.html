@@ -8,7 +8,7 @@
       :root {
         --bg: #ffffff; --panel: #f3f4f6; --line: #d7dbe2; --thick: #9aa3b2;
         --text: #1d2330; --muted: #5b6472; --accent: #2563eb; --given: #0b1020;
-        --user: #2563eb; --ok: #16a34a; --bad: #dc2626; --pencil: #6b7280;
+        --user: #2563eb; --ok: #16a34a; --bad: #dc2626; --pencil: #aab0bb;
         --sel: #dbe7ff;
       }
       * { box-sizing: border-box; }
@@ -67,7 +67,7 @@
       .pencil {
         position: absolute; inset: 0; display: grid;
         grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
-        font-size: clamp(0.4rem, 1.5vw, 0.58rem); line-height: 1; color: var(--pencil); font-weight: 600;
+        font-size: clamp(0.4rem, 1.5vw, 0.58rem); line-height: 1; color: var(--pencil); font-weight: 500;
         pointer-events: none; z-index: 1;
       }
       .pencil span { display: flex; align-items: center; justify-content: center; }
@@ -80,7 +80,8 @@
       }
 
       .pad { margin-top: 14px; }
-      .modes { display: flex; gap: 8px; margin-bottom: 10px; }
+      .modes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; align-items: center; }
+      .modes .timer { margin-left: auto; }
       .keys { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
       .keys button { padding: 14px 0; font-size: 1.15rem; }
       .keys button.clear { color: var(--bad); }
@@ -113,13 +114,25 @@
       .move.bad .cellref { color: var(--bad); }
       .move .meta { color: var(--muted); }
       .move.slow .meta { color: var(--bad); font-weight: 600; }
+      .overlay {
+        position: fixed; inset: 0; background: rgba(17, 20, 28, 0.5);
+        display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50;
+      }
+      .overlay[hidden] { display: none; }
+      .modal {
+        background: var(--bg); border: 1px solid var(--line); border-radius: 14px;
+        padding: 24px; max-width: 360px; width: 100%; text-align: center;
+        box-shadow: 0 24px 60px rgba(17, 20, 28, 0.35);
+      }
+      .modal h2 { margin: 0 0 8px; font-size: 1.2rem; }
+      .modal p { color: var(--muted); margin: 0 0 20px; line-height: 1.5; }
+      .modal .actions { display: flex; gap: 10px; justify-content: center; }
       footer { margin-top: 18px; color: var(--muted); font-size: 0.8rem; line-height: 1.5; }
     </style>
   </head>
   <body>
     <main>
       <div class="topbar">
-        <span class="timer">⏱ <b id="timer">0:00</b> · <span id="timerDiff">—</span></span>
         <div class="tabs">
           <button id="statsBtn">Stats</button>
           <label class="file">Import screenshot<input id="file" type="file" accept="image/*" /></label>
@@ -157,6 +170,7 @@
         <div class="modes">
           <button id="modeNormal" class="on">Normal</button>
           <button id="modeCandidate">Candidate</button>
+          <span class="timer">⏱ <b id="timer">0:00</b> · <span id="timerDiff">—</span></span>
         </div>
         <div class="keys" id="keys"></div>
       </div>
@@ -167,6 +181,17 @@
       </div>
 
       <div id="stats" class="stats" hidden></div>
+
+      <div id="modal" class="overlay" hidden>
+        <div class="modal">
+          <h2>Ready to start?</h2>
+          <p id="modalMsg">Your puzzle is loaded.</p>
+          <div class="actions">
+            <button id="modalCancel">Not yet</button>
+            <button id="modalStart" class="primary">Start &amp; time me</button>
+          </div>
+        </div>
+      </div>
 
       <footer>
         Tap a cell, then a number (or type). <strong>Candidate</strong> mode
@@ -231,6 +256,12 @@
       }
 
       document.addEventListener("keydown", (e) => {
+        const m = document.getElementById("modal");
+        if (m && !m.hidden) {
+          if (e.key === "Enter") document.getElementById("modalStart").click();
+          else if (e.key === "Escape") document.getElementById("modalCancel").click();
+          return;
+        }
         if (!statsEl.hidden) return;
         if (e.key >= "1" && e.key <= "9") { applyDigit(Number(e.key)); e.preventDefault(); }
         else if (["0", "Backspace", "Delete", "x", "X"].includes(e.key)) { applyClear(); e.preventDefault(); }
@@ -557,7 +588,8 @@
       }
 
       // ---- buttons ----
-      document.getElementById("start").addEventListener("click", () => {
+      document.getElementById("start").addEventListener("click", startSolving);
+      function startSolving() {
         if (solving) return showExplain("Already solving", "Press Edit puzzle first if you want to change the clues.", "info");
         const grid = readGrid();
         if (grid.flat().filter(Boolean).length < 17) return showExplain("Need more clues", "Enter the givens first (a proper Sudoku has at least 17).", "bad");
@@ -582,7 +614,15 @@
         showExplain("Puzzle locked — start solving", variants > 1
           ? "Heads up: this grid has more than one solution. Tap a cell, pick a number, and I'll explain. Candidate mode adds pencil marks."
           : "Tap a cell and pick a number — I'll say if it's right and why. Try Candidate mode for notes, or Hint for the next step.", "info");
-      });
+      }
+
+      // Ready modal — shown after import / loading a saved game; starts the timer on confirm.
+      const modal = document.getElementById("modal");
+      function showReady(msg) { document.getElementById("modalMsg").textContent = msg; modal.hidden = false; }
+      function hideModal() { modal.hidden = true; }
+      document.getElementById("modalStart").addEventListener("click", () => { hideModal(); startSolving(); });
+      document.getElementById("modalCancel").addEventListener("click", () => { hideModal(); showExplain("Take your time", "Fix anything that looks off, then press Start solving when you're ready.", "info"); });
+      modal.addEventListener("click", (e) => { if (e.target === modal) hideModal(); });
 
       document.getElementById("autonotes").addEventListener("click", () => {
         const grid = progressGrid();
@@ -679,7 +719,7 @@
       document.getElementById("load").addEventListener("click", () => {
         const game = lsGet(STORE_KEY).find((g) => g.id === savedEl.value); if (!game) return;
         resetToEdit(); writeGrid(game.grid); difficultyEl.value = game.difficulty; sourceEl.value = game.source; renderPencils();
-        showExplain("Puzzle loaded", `${game.source} · ${game.difficulty}. Press Start solving when ready.`, "info");
+        showReady(`${game.source} · ${game.difficulty} is loaded. Start the timer and play?`);
       });
       document.getElementById("delete").addEventListener("click", () => {
         const games = lsGet(STORE_KEY).filter((g) => g.id !== savedEl.value); lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
@@ -776,7 +816,7 @@
           const data = await r.json();
           if (!r.ok) { let msg = data.error || "Failed to read image"; if (data.diagnostic) msg += ` (key defined: ${data.diagnostic.defined}, length: ${data.diagnostic.length}, matching vars: ${(data.diagnostic.anthropicVars || []).join(", ") || "none"})`; throw new Error(msg); }
           writeGrid(data.grid); renderPencils();
-          showExplain("Grid imported", "Check for misread digits, fix them, then press Start solving.", "info");
+          showReady("Grid imported. Check for any misread digits first — ready to start the timer?");
         } catch (err) { showExplain("Couldn't read the image", (err.message || "Unknown error") + " — you can still type the puzzle in by hand.", "bad"); }
         finally { e.target.value = ""; }
       });
