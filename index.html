@@ -677,13 +677,39 @@
         updatePad();
       }
 
+      // Is putting n at (r,c) provable as a single in candidate map M? Returns "naked"/"hidden"/null.
+      function singleAt(M, grid, r, c, n) {
+        if (M[r][c].size === 1 && M[r][c].has(n)) return "naked";
+        for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
+          const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && M[rr][cc].has(n));
+          if (spots.length === 1 && spots[0][0] === r && spots[0][1] === c) return "hidden";
+        }
+        return null;
+      }
+      // Apply every instance of one elimination technique (cumulatively) until (r,c)=n becomes a
+      // single, then report the exact technique that unlocked it. Returns null if it never does.
+      function techResolves(M, grid, fn, r, c, n) {
+        let MM = cloneMap(M);
+        for (let guard = 0; guard < 64; guard++) {
+          const e = fn(MM, grid);
+          if (!e) return null;
+          MM = applyElims(MM, e.elims);
+          if (singleAt(MM, grid, r, c, n)) return e.tech;
+        }
+        return null;
+      }
       function describeCorrect(M, grid, r, c, n) {
         if (M[r][c].size === 1) return { tech: "Naked single", body: `the other eight digits all already appear in ${loc(r, c)}'s row, column, or box, leaving ${n}.` };
         for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
           const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && M[rr][cc].has(n));
           if (spots.length === 1) return { tech: "Hidden single", body: `${n} can't go in any other empty cell of ${u.name}, so it must be here.` };
         }
-        return { tech: "Other", body: `${n} matches the solution. There isn't a single-cell proof yet — it follows once a few neighbors are filled, or from a more advanced technique.` };
+        // Not a basic single — see which named technique makes it deducible (easiest first).
+        for (const fn of [lockedCandidates, nakedPair, hiddenPair, xWing]) {
+          const tech = techResolves(M, grid, fn, r, c, n);
+          if (tech) return { tech, body: `applying a ${tech.toLowerCase()} clears the blocking candidates, and then ${n} is the only digit left for ${loc(r, c)}.` };
+        }
+        return { tech: "Advanced", body: `${n} matches the solution but isn't provable from one named technique here — it needs deeper reasoning (a chain, or combining several eliminations).` };
       }
       function handleMove(r, c) {
         inputs[r][c].classList.remove("wrong");

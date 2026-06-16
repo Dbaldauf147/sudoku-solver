@@ -13,7 +13,10 @@ answer.
   - **Type a number** in any cell and it tells you immediately whether it's
     right and *why* — e.g. "*R3C5 can only be 7 — every other digit already
     appears in its row, column, or box*" (naked single), or "*within this box,
-    7 can only go here*" (hidden single).
+    7 can only go here*" (hidden single). When a cell isn't a basic single, it
+    names the harder technique that unlocks it (pointing pair, box/line
+    reduction, naked/hidden pair, X-wing), so those moves are categorized in
+    your stats instead of lumped together as "Other".
   - **Hint** finds the next cell you can logically prove, explains it (and
     names the technique — naked/hidden single, pointing pair, box/line
     reduction, naked pair, hidden pair, X-wing), and offers to place it for you.
