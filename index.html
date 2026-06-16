@@ -64,6 +64,9 @@
       .cell.same { background: #eef2ff; }
       .cell.hint { background: #cfe0ff; box-shadow: inset 0 0 0 2px var(--accent); }
       .cell.peer { background: #e8eefc; }
+      .cell.conflict-unit { background: #fde4e4; }
+      .cell.conflict { background: #f8a9a9; box-shadow: inset 0 0 0 2px var(--bad); }
+      .cell.conflict-src { box-shadow: inset 0 0 0 2px var(--bad); z-index: 1; }
       .cell-input {
         position: absolute; inset: 0; width: 100%; height: 100%; background: transparent;
         border: none; color: var(--user); font-size: clamp(1rem, 5vw, 1.6rem);
@@ -142,7 +145,18 @@
 
       .trow { cursor: pointer; }
       .trow:hover { background: var(--panel); }
+      .saved-row { display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        padding: 10px 0; border-bottom: 1px solid var(--line); }
+      .saved-row .saved-meta { line-height: 1.4; }
+      .saved-row .saved-actions { display: flex; gap: 6px; flex-shrink: 0; }
+      .saved-row .saved-actions button { padding: 6px 12px; font-size: 0.85rem; }
+      .saved-row .del-one { color: var(--bad); }
       .hintline { color: var(--muted); font-size: 0.8rem; margin: 6px 0 0; }
+      .spark { display: flex; align-items: flex-end; gap: 3px; height: 48px; margin: 8px 0 6px; }
+      .spark .sbar { flex: 1 1 0; min-width: 3px; border-radius: 2px 2px 0 0; min-height: 4px; }
+      .trend.up { color: var(--bad); font-weight: 600; }
+      .trend.down { color: var(--ok); font-weight: 600; }
+      .trend.flat { color: var(--muted); }
 
       .miniboard { display: grid; grid-template-columns: repeat(9, 1fr); width: 100%; max-width: 290px;
         margin: 0 auto 14px; aspect-ratio: 1; background: var(--thick); border: 2px solid var(--thick);
@@ -194,9 +208,7 @@
         <button id="save">Save puzzle</button>
       </div>
       <div class="row setup-extra library" hidden>
-        <select id="saved" title="Saved puzzles"></select>
-        <button id="load">Load</button>
-        <button id="delete">Delete</button>
+        <button id="load">Saved games</button>
       </div>
       <div class="row setup-extra">
         <select id="catalog" title="Built-in puzzles"></select>
@@ -230,6 +242,7 @@
       </div>
 
       <div id="stats" class="stats" hidden></div>
+      <div id="savedGames" class="stats" hidden></div>
 
       <div id="modal" class="overlay" hidden>
         <div class="modal">
@@ -376,6 +389,7 @@
 
       function select(r, c) {
         selected = { r, c };
+        clearConflicts();
         const val = inputs[r][c].value;
         for (let i = 0; i < 9; i++) for (let j = 0; j < 9; j++) {
           cellEls[i][j].classList.toggle("selected", i === r && j === c);
@@ -415,8 +429,8 @@
         pushUndo(r, c);
         inputs[r][c].value = String(n);
         marks[r][c].clear();
-        if (solving) handleMove(r, c);
         renderPencils(); select(r, c);
+        if (solving) handleMove(r, c);
       }
       function clearCell(r, c) {
         if (givens[r][c]) return;
@@ -629,7 +643,31 @@
         explainEl.append(t, b);
         if (action) { const btn = document.createElement("button"); btn.textContent = action.label; btn.onclick = action.onClick; explainEl.append(btn); }
       }
-      function clearHighlights() { for (const row of cellEls) for (const el of row) el.classList.remove("hint", "peer"); }
+      function clearHighlights() { for (const row of cellEls) for (const el of row) el.classList.remove("hint", "peer", "conflict", "conflict-unit", "conflict-src"); }
+      function clearConflicts() { for (const row of cellEls) for (const el of row) el.classList.remove("conflict", "conflict-unit", "conflict-src"); }
+      // Find the already-placed cells that clash with putting n at (r,c), and which units (row/column/box) they violate.
+      function findConflicts(grid, r, c, n) {
+        const cells = new Map(), units = [];
+        const mark = (rr, cc) => cells.set(rr + "," + cc, { r: rr, c: cc });
+        let row = false, col = false, box = false;
+        for (let i = 0; i < 9; i++) {
+          if (i !== c && grid[r][i] === n) { mark(r, i); row = true; }
+          if (i !== r && grid[i][c] === n) { mark(i, c); col = true; }
+        }
+        const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3;
+        for (let i = br; i < br + 3; i++) for (let j = bc; j < bc + 3; j++)
+          if ((i !== r || j !== c) && grid[i][j] === n) { mark(i, j); box = true; }
+        if (row) units.push("row"); if (col) units.push("column"); if (box) units.push("box");
+        return { cells: [...cells.values()], units };
+      }
+      function showConflicts(r, c, conf) {
+        if (conf.units.includes("row")) for (let j = 0; j < 9; j++) cellEls[r][j].classList.add("conflict-unit");
+        if (conf.units.includes("column")) for (let i = 0; i < 9; i++) cellEls[i][c].classList.add("conflict-unit");
+        if (conf.units.includes("box")) { const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3; for (let i = br; i < br + 3; i++) for (let j = bc; j < bc + 3; j++) cellEls[i][j].classList.add("conflict-unit"); }
+        for (const cell of conf.cells) cellEls[cell.r][cell.c].classList.add("conflict");
+        cellEls[r][c].classList.add("conflict-src");
+      }
+      function listUnits(units) { return units.length <= 1 ? (units[0] || "") : units.length === 2 ? units.join(" and ") : units.slice(0, -1).join(", ") + ", and " + units[units.length - 1]; }
       function renderPencils() {
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
           const has = !!inputs[r][c].value, spans = pencils[r][c];
@@ -664,9 +702,16 @@
           inputs[r][c].classList.add("wrong");
           tech = "Mistake";
           if (session) { session.errors = (session.errors || 0) + 1; errorsEl.textContent = session.errors; }
-          const body = candidates(grid, r, c).includes(n)
-            ? `${n} doesn't break a rule yet, but it isn't what this cell resolves to — it would make the puzzle impossible later. Press Hint for a cell you can prove.`
-            : `${n} already appears in ${loc(r, c)}'s row, column, or 3×3 box, so it can't go here.`;
+          const conf = findConflicts(grid, r, c, n);
+          let body;
+          if (conf.cells.length) {
+            showConflicts(r, c, conf);
+            const where = listUnits(conf.cells.map((cc) => loc(cc.r, cc.c)));
+            const u = listUnits(conf.units);
+            body = `${n} is already in this ${u} — at ${where}. I've highlighted the clashing ${conf.cells.length > 1 ? "cells" : "cell"} and the ${u} in red: a ${u} can't hold two ${n}s.`;
+          } else {
+            body = `${n} doesn't break a rule yet, but it isn't what this cell resolves to — it would make the puzzle impossible later. Press Hint for a cell you can prove.`;
+          }
           showExplain(`✗ ${loc(r, c)} = ${n} won't work`, body, "bad");
         }
         recordMove(r, c, n, correct, tech);
@@ -759,6 +804,7 @@
       document.getElementById("start").addEventListener("click", startSolving);
       function startSolving() {
         if (solving) return showExplain("Already solving", "Press Edit puzzle first if you want to change the clues.", "info");
+        closeLibrary();
         const grid = readGrid();
         if (grid.flat().filter(Boolean).length < 17) return showExplain("Need more clues", "Enter the givens first (a proper Sudoku has at least 17).", "bad");
         if (hasConflict(grid)) return showExplain("That puzzle has a conflict", "Two of the same digit share a row, column, or box. Fix it first.", "bad");
@@ -831,7 +877,7 @@
       });
 
       document.getElementById("check").addEventListener("click", () => {
-        closeStats();
+        closeStats(); closeLibrary();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle, then I can check your entries.", "info");
         let wrong = 0, filled = 0;
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
@@ -844,7 +890,7 @@
       });
 
       document.getElementById("reveal").addEventListener("click", () => {
-        closeStats();
+        closeStats(); closeLibrary();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle first.", "info");
         finalizeSession(false);
         writeGrid(solution);
@@ -858,7 +904,7 @@
       function resetToEdit() {
         session = null; clearInterval(timerId); timerId = null; undoStack = [];
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal");
-        document.body.classList.remove("solving"); clearHighlights(); closeStats();
+        document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary();
         pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].classList.remove("given", "wrong", "solved"); marks[r][c].clear(); }
         renderPencils();
@@ -868,7 +914,7 @@
       // ---- saved library + cloud (collections: library, stats) ----
       const STORE_KEY = "sudoku-coach:games", STATS_KEY = "sudoku-coach:stats";
       const difficultyEl = document.getElementById("difficulty"), sourceEl = document.getElementById("source");
-      const savedEl = document.getElementById("saved"), libraryEl = document.querySelector(".library");
+      const loadBtn = document.getElementById("load"), libraryEl = document.querySelector(".library"), libraryPanel = document.getElementById("savedGames");
       function lsGet(key) { try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; } }
       function lsSet(key, v) { localStorage.setItem(key, JSON.stringify(v)); }
       let cloudOn = false;
@@ -884,8 +930,10 @@
       }
       const syncNote = () => (cloudOn ? " and synced across your devices" : " on this device");
       function renderLibrary() {
-        const games = lsGet(STORE_KEY); libraryEl.hidden = games.length === 0; savedEl.innerHTML = "";
-        for (const g of games) { const o = document.createElement("option"); o.value = g.id; o.textContent = `${g.source} · ${g.difficulty} · ${new Date(g.savedAt).toLocaleDateString()}`; savedEl.appendChild(o); }
+        const games = lsGet(STORE_KEY);
+        libraryEl.hidden = games.length === 0;
+        loadBtn.textContent = games.length ? `Saved games (${games.length})` : "Saved games";
+        if (!libraryPanel.hidden) renderLibraryPanel();
       }
       async function initStores() {
         try { const lib = await cloudLoad("library"); if (lib) lsSet(STORE_KEY, lib); } catch {}
@@ -909,15 +957,48 @@
         const added = saveGameIfNew(grid, difficultyEl.value, sourceEl.value);
         showExplain(added ? "Puzzle saved" : "Already saved", added ? `Saved as ${sourceEl.value} · ${difficultyEl.value}${syncNote()}.` : "This exact puzzle is already in your library.", added ? "ok" : "info");
       });
-      document.getElementById("load").addEventListener("click", () => {
-        const game = lsGet(STORE_KEY).find((g) => g.id === savedEl.value); if (!game) return;
+      // ---- saved-games history panel (opened from the Load button) ----
+      function savedDateHeader(ts) {
+        const d = new Date(ts), now = new Date(), sameDay = (a, b) => a.toDateString() === b.toDateString();
+        const yest = new Date(now); yest.setDate(now.getDate() - 1);
+        if (sameDay(d, now)) return "Today";
+        if (sameDay(d, yest)) return "Yesterday";
+        return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      }
+      function openLibrary() { closeStats(); renderLibraryPanel(); libraryPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
+      function closeLibrary() { if (!libraryPanel.hidden) { libraryPanel.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
+      function renderLibraryPanel() {
+        const games = [...lsGet(STORE_KEY)].sort((a, b) => b.savedAt - a.savedAt);
+        if (!games.length) {
+          libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Saved games</h2><div class="card">No saved games yet. Type or import a puzzle and press <b>Save puzzle</b> — it'll appear here, newest first, grouped by date.</div>`;
+          document.getElementById("lb").onclick = closeLibrary; return;
+        }
+        let rows = "", lastHeader = null;
+        for (const g of games) {
+          const header = savedDateHeader(g.savedAt);
+          if (header !== lastHeader) { rows += `<h3>${esc(header)}</h3>`; lastHeader = header; }
+          const time = new Date(g.savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+          rows += `<div class="saved-row">
+            <div class="saved-meta"><b>${esc(g.difficulty)}</b> · ${esc(g.source)}<br><span class="k">${esc(time)}</span></div>
+            <div class="saved-actions"><button class="load-one" data-id="${esc(g.id)}">Load</button><button class="del-one" data-id="${esc(g.id)}">Delete</button></div>
+          </div>`;
+        }
+        libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Saved games <span class="k">(${games.length})</span></h2>${rows}`;
+        document.getElementById("lb").onclick = closeLibrary;
+        libraryPanel.querySelectorAll(".load-one").forEach((b) => (b.onclick = () => loadSavedGame(b.dataset.id)));
+        libraryPanel.querySelectorAll(".del-one").forEach((b) => (b.onclick = () => deleteSavedGame(b.dataset.id)));
+      }
+      function loadSavedGame(id) {
+        const game = lsGet(STORE_KEY).find((g) => g.id === id); if (!game) return;
+        closeLibrary();
         resetToEdit(); writeGrid(game.grid); difficultyEl.value = game.difficulty; sourceEl.value = game.source; renderPencils();
         showReady(`${game.source} · ${game.difficulty} is loaded. Start the timer and play?`);
-      });
-      document.getElementById("delete").addEventListener("click", () => {
-        const games = lsGet(STORE_KEY).filter((g) => g.id !== savedEl.value); lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
-        showExplain("Puzzle deleted", "Removed from your saved list.", "info");
-      });
+      }
+      function deleteSavedGame(id) {
+        const games = lsGet(STORE_KEY).filter((g) => g.id !== id); lsSet(STORE_KEY, games); cloudSave("library", games);
+        renderLibrary();
+      }
+      loadBtn.addEventListener("click", () => { if (libraryPanel.hidden) openLibrary(); else closeLibrary(); });
 
       // ---- built-in catalog (shipped with the app, available to every user) ----
       const CATALOG_RAW = [
@@ -947,6 +1028,34 @@
         "Advanced": "#94a3b8", "Other": "#94a3b8", "Mistake": "#ff6b6b" };
       function median(arr) { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
       function errorsIn(g) { return typeof g.errors === "number" ? g.errors : g.moves.filter((m) => !m.correct).length; }
+      // ---- over-time trends ----
+      function sparkBars(points, color) {
+        // points: [{ v:number, label:string }] in chronological order (oldest → newest)
+        const max = Math.max(1, ...points.map((p) => p.v));
+        const bars = points.map((p) => `<span class="sbar" title="${esc(p.label)}" style="height:${Math.max(8, Math.round((p.v / max) * 100))}%;background:${color}"></span>`).join("");
+        return `<div class="spark">${bars}</div>`;
+      }
+      function trendNote(vals) {
+        // compares the average of the earlier half against the later half (lower time = improving)
+        if (vals.length < 2) return `<span class="trend flat">need a couple games for a trend</span>`;
+        const half = Math.max(1, Math.floor(vals.length / 2));
+        const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+        const early = avg(vals.slice(0, half)), late = avg(vals.slice(-half));
+        if (!early) return "";
+        const pct = Math.round(((late - early) / early) * 100);
+        if (pct <= -5) return `<span class="trend down">▼ ${Math.abs(pct)}% faster</span>`;
+        if (pct >= 5) return `<span class="trend up">▲ ${pct}% slower</span>`;
+        return `<span class="trend flat">steady</span>`;
+      }
+      function techGameSeries(chron, tech) {
+        // one point per game that used the technique: the median time between choices for that technique
+        const pts = [];
+        for (const g of chron) {
+          const dts = g.moves.filter((m) => m.tech === tech).map((m) => m.dt);
+          if (dts.length) { const med = median(dts); pts.push({ v: med, label: `${new Date(g.startedAt).toLocaleDateString()} · ${fmtDt(med)}` }); }
+        }
+        return pts;
+      }
 
       // ---- visual technique examples (shown from the stats technique table) ----
       const TECH_EXAMPLES = {
@@ -1010,7 +1119,7 @@
       document.getElementById("exModal").addEventListener("click", (e) => { if (e.target.id === "exModal") e.currentTarget.hidden = true; });
       function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
       document.getElementById("statsBtn").addEventListener("click", () => {
-        if (statsEl.hidden) { renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
+        if (statsEl.hidden) { closeLibrary(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
         else closeStats();
       });
       function renderStats() {
@@ -1034,6 +1143,19 @@
             <span class="k">errors</span> ${totalErrors} (${(totalErrors / gs.length).toFixed(1)}/game)</div>`;
         }
 
+        // solve time over time — per difficulty, one bar per solved game (oldest → newest)
+        const chron = [...games].sort((a, b) => a.startedAt - b.startedAt);
+        let diffTrend = "";
+        for (const d of diffs) {
+          const solved = chron.filter((g) => g.solved && g.difficulty === d);
+          if (!solved.length) continue;
+          const pts = solved.map((g) => ({ v: g.totalMs, label: `${new Date(g.startedAt).toLocaleDateString()} · ${fmtTime(g.totalMs)}` }));
+          diffTrend += `<div class="card"><b>${d}</b> · ${pts.length} solved · ${trendNote(pts.map((p) => p.v))}
+            ${sparkBars(pts, "var(--accent)")}
+            <span class="k">oldest → newest · best ${fmtTime(Math.min(...pts.map((p) => p.v)))}</span></div>`;
+        }
+        if (!diffTrend) diffTrend = '<div class="card">Solve a few puzzles and your times will chart here, so you can watch them drop.</div>';
+
         // by technique (typical time per move)
         const allMoves = games.flatMap((g) => g.moves);
         const byTech = {};
@@ -1051,6 +1173,22 @@
           ? `You take longest on <b style="color:${TECH_COLORS[focus.t]}">${esc(focus.t)}</b> placements (typically ${fmtDt(focus.med)}). Practice scanning for these earlier.${mistakes ? ` You've also made ${mistakes} mistake${mistakes > 1 ? "s" : ""} — slow down to verify before placing.` : ""}`
           : `Keep playing — after a few games I'll point out which technique slows you down most.`;
 
+        // technique time over time — per technique, one bar per game that used it (median time per choice)
+        const techNames = [...new Set(allMoves.map((m) => m.tech))].filter((t) => t !== "Mistake");
+        const techTrendRows = techNames
+          .map((t) => ({ t, pts: techGameSeries(chron, t), total: allMoves.filter((m) => m.tech === t).length }))
+          .filter((r) => r.pts.length >= 2)
+          .sort((a, b) => b.total - a.total)
+          .slice(0, 6);
+        let techTrend = "";
+        for (const r of techTrendRows) {
+          const color = TECH_COLORS[r.t] || "#94a3b8";
+          techTrend += `<div class="card"><b style="color:${color}">${esc(r.t)}</b> · ${r.pts.length} games · ${trendNote(r.pts.map((p) => p.v))}
+            ${sparkBars(r.pts, color)}
+            <span class="k">median time per choice, oldest → newest</span></div>`;
+        }
+        if (!techTrend) techTrend = '<div class="card">Once you\'ve played a technique across a couple of games, its trend will show here.</div>';
+
         // per-game selector
         let opts = "";
         games.forEach((g, i) => { opts += `<option value="${i}">${esc(g.source)} · ${esc(g.difficulty)} · ${new Date(g.startedAt).toLocaleDateString()} · ${fmtTime(g.totalMs)} ${g.solved ? "✓" : "▢"}</option>`; });
@@ -1058,8 +1196,10 @@
         statsEl.innerHTML = `<button id="sb">← Back</button><h2>Your stats</h2>
           <div class="card takeaway">${takeaway}</div>
           <h3>By difficulty</h3>${summary || '<div class="card">No solved games yet.</div>'}
+          <h3>Solve time over time</h3>${diffTrend}
           <h3>Where you spend time</h3>${techTable}
           <p class="sub" style="margin:8px 0 0">Typical = median time between your choices, so a long pause stands out without one outlier skewing it.</p>
+          <h3>Technique time over time</h3>${techTrend}
           <h3>Deep dive — a single game</h3>
           <select id="gamePick" style="width:100%;margin-bottom:10px">${opts}</select>
           <div id="deepDive"></div>`;

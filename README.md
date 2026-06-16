@@ -27,22 +27,30 @@ answer.
     skew your stats. **Undo** (or Ctrl/⌘-Z) steps back through your entries.
     Once a digit is placed nine times its number-pad key is crossed out.
   - **Stats** opens a deep-dive: solve times and accuracy **per difficulty**,
-    a "where you spend time" breakdown of typical (median) time **per
-    technique** so you can see what trips you up, and a per-game timeline that
-    bars out the gap before each move and flags the slow ones. **Tap any
-    technique** for a pop-up with a visual example of how it works.
+    plus **over-time trends** that chart how your numbers move from game to
+    game — a **solve time over time** sparkline per difficulty and a
+    **technique time over time** sparkline per technique, each tagged with a
+    faster/slower badge so you can see whether you're improving. It also has a
+    "where you spend time" breakdown of typical (median) time **per technique**
+    so you can see what trips you up, and a per-game timeline that bars out the
+    gap before each move and flags the slow ones. **Tap any technique** for a
+    pop-up with a visual example of how it works.
   - Finishing a puzzle pops a **celebration screen** with your time and error
     count.
   - Wrong entries are flagged with the reason they can't work — without
-    spoiling the answer. **Check entries** and **Reveal solution** are there
-    when you want them.
+    spoiling the answer. When a digit **clashes** with one already placed, the
+    offending cell, the duplicate cell(s), and the shared **row, column, or
+    box are highlighted in red** so you can see exactly why it's illegal.
+    **Check entries** and **Reveal solution** are there when you want them.
   - A built-in **catalog** of puzzles ships with the app, so every user can
     pick one and play it from scratch — no setup or account needed. Puzzles
     are also **auto-saved to your library when you start solving** (if that
     exact grid isn't already saved), capturing the selected **difficulty**
     (Easy/Medium/Hard) and **source** (defaults to NYT, editable for other
-    sources). There's also a manual **Save puzzle**, and saved puzzles are
-    listed below the grid to load or delete.
+    sources). There's also a manual **Save puzzle**. The **Saved games**
+    button opens a history of everything you've saved — **grouped by date**
+    (Today, Yesterday, then by day), newest first, with each entry's
+    difficulty and source — where you can **load** or **delete** any puzzle.
   - Stats, Check entries, Reveal solution, Edit puzzle, and Start solving live
     under a ⚙ menu in the top-right corner.
 
