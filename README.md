@@ -38,6 +38,10 @@ answer.
     so you can see what trips you up, and a per-game timeline that bars out the
     gap before each move and flags the slow ones. **Tap any technique** for a
     pop-up with a visual example of how it works.
+  - A **History** tab on the main page lists every game you've finished (or
+    revealed), grouped by date, with its difficulty, source, time, and error
+    count — tap **Details** on any entry to jump straight to that game's
+    move-by-move breakdown in Stats.
   - Finishing a puzzle pops a **celebration screen** with your time and error
     count.
   - Wrong entries are flagged with the reason they can't work — without
