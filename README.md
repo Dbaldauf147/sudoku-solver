@@ -38,8 +38,10 @@ answer.
   - Finishing a puzzle pops a **celebration screen** with your time and error
     count.
   - Wrong entries are flagged with the reason they can't work — without
-    spoiling the answer. **Check entries** and **Reveal solution** are there
-    when you want them.
+    spoiling the answer. When a digit **clashes** with one already placed, the
+    offending cell, the duplicate cell(s), and the shared **row, column, or
+    box are highlighted in red** so you can see exactly why it's illegal.
+    **Check entries** and **Reveal solution** are there when you want them.
   - A built-in **catalog** of puzzles ships with the app, so every user can
     pick one and play it from scratch — no setup or account needed. Puzzles
     are also **auto-saved to your library when you start solving** (if that

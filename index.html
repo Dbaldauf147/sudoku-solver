@@ -64,6 +64,9 @@
       .cell.same { background: #eef2ff; }
       .cell.hint { background: #cfe0ff; box-shadow: inset 0 0 0 2px var(--accent); }
       .cell.peer { background: #e8eefc; }
+      .cell.conflict-unit { background: #fde4e4; }
+      .cell.conflict { background: #f8a9a9; box-shadow: inset 0 0 0 2px var(--bad); }
+      .cell.conflict-src { box-shadow: inset 0 0 0 2px var(--bad); z-index: 1; }
       .cell-input {
         position: absolute; inset: 0; width: 100%; height: 100%; background: transparent;
         border: none; color: var(--user); font-size: clamp(1rem, 5vw, 1.6rem);
@@ -386,6 +389,7 @@
 
       function select(r, c) {
         selected = { r, c };
+        clearConflicts();
         const val = inputs[r][c].value;
         for (let i = 0; i < 9; i++) for (let j = 0; j < 9; j++) {
           cellEls[i][j].classList.toggle("selected", i === r && j === c);
@@ -425,8 +429,8 @@
         pushUndo(r, c);
         inputs[r][c].value = String(n);
         marks[r][c].clear();
-        if (solving) handleMove(r, c);
         renderPencils(); select(r, c);
+        if (solving) handleMove(r, c);
       }
       function clearCell(r, c) {
         if (givens[r][c]) return;
@@ -639,7 +643,31 @@
         explainEl.append(t, b);
         if (action) { const btn = document.createElement("button"); btn.textContent = action.label; btn.onclick = action.onClick; explainEl.append(btn); }
       }
-      function clearHighlights() { for (const row of cellEls) for (const el of row) el.classList.remove("hint", "peer"); }
+      function clearHighlights() { for (const row of cellEls) for (const el of row) el.classList.remove("hint", "peer", "conflict", "conflict-unit", "conflict-src"); }
+      function clearConflicts() { for (const row of cellEls) for (const el of row) el.classList.remove("conflict", "conflict-unit", "conflict-src"); }
+      // Find the already-placed cells that clash with putting n at (r,c), and which units (row/column/box) they violate.
+      function findConflicts(grid, r, c, n) {
+        const cells = new Map(), units = [];
+        const mark = (rr, cc) => cells.set(rr + "," + cc, { r: rr, c: cc });
+        let row = false, col = false, box = false;
+        for (let i = 0; i < 9; i++) {
+          if (i !== c && grid[r][i] === n) { mark(r, i); row = true; }
+          if (i !== r && grid[i][c] === n) { mark(i, c); col = true; }
+        }
+        const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3;
+        for (let i = br; i < br + 3; i++) for (let j = bc; j < bc + 3; j++)
+          if ((i !== r || j !== c) && grid[i][j] === n) { mark(i, j); box = true; }
+        if (row) units.push("row"); if (col) units.push("column"); if (box) units.push("box");
+        return { cells: [...cells.values()], units };
+      }
+      function showConflicts(r, c, conf) {
+        if (conf.units.includes("row")) for (let j = 0; j < 9; j++) cellEls[r][j].classList.add("conflict-unit");
+        if (conf.units.includes("column")) for (let i = 0; i < 9; i++) cellEls[i][c].classList.add("conflict-unit");
+        if (conf.units.includes("box")) { const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3; for (let i = br; i < br + 3; i++) for (let j = bc; j < bc + 3; j++) cellEls[i][j].classList.add("conflict-unit"); }
+        for (const cell of conf.cells) cellEls[cell.r][cell.c].classList.add("conflict");
+        cellEls[r][c].classList.add("conflict-src");
+      }
+      function listUnits(units) { return units.length <= 1 ? (units[0] || "") : units.length === 2 ? units.join(" and ") : units.slice(0, -1).join(", ") + ", and " + units[units.length - 1]; }
       function renderPencils() {
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
           const has = !!inputs[r][c].value, spans = pencils[r][c];
@@ -674,9 +702,16 @@
           inputs[r][c].classList.add("wrong");
           tech = "Mistake";
           if (session) { session.errors = (session.errors || 0) + 1; errorsEl.textContent = session.errors; }
-          const body = candidates(grid, r, c).includes(n)
-            ? `${n} doesn't break a rule yet, but it isn't what this cell resolves to — it would make the puzzle impossible later. Press Hint for a cell you can prove.`
-            : `${n} already appears in ${loc(r, c)}'s row, column, or 3×3 box, so it can't go here.`;
+          const conf = findConflicts(grid, r, c, n);
+          let body;
+          if (conf.cells.length) {
+            showConflicts(r, c, conf);
+            const where = listUnits(conf.cells.map((cc) => loc(cc.r, cc.c)));
+            const u = listUnits(conf.units);
+            body = `${n} is already in this ${u} — at ${where}. I've highlighted the clashing ${conf.cells.length > 1 ? "cells" : "cell"} and the ${u} in red: a ${u} can't hold two ${n}s.`;
+          } else {
+            body = `${n} doesn't break a rule yet, but it isn't what this cell resolves to — it would make the puzzle impossible later. Press Hint for a cell you can prove.`;
+          }
           showExplain(`✗ ${loc(r, c)} = ${n} won't work`, body, "bad");
         }
         recordMove(r, c, n, correct, tech);
