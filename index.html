@@ -142,6 +142,8 @@
       .modal p { color: var(--muted); margin: 0 0 20px; line-height: 1.5; }
       .modal .actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
       .modal { position: relative; }
+      .modal-diff { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 0.9rem; margin: 0 0 20px; }
+      .modal-diff select { flex: 0 0 auto; }
 
       .trow { cursor: pointer; }
       .trow:hover { background: var(--panel); }
@@ -249,6 +251,13 @@
         <div class="modal">
           <h2>Ready to start?</h2>
           <p id="modalMsg">Your puzzle is loaded.</p>
+          <label class="modal-diff">Difficulty
+            <select id="modalDifficulty" title="Set the difficulty for this puzzle">
+              <option value="Easy">Easy</option>
+              <option value="Medium">Medium</option>
+              <option value="Hard">Hard</option>
+            </select>
+          </label>
           <div class="actions">
             <button id="modalCancel">Not yet</button>
             <button id="modalStart" class="primary">Start &amp; time me</button>
@@ -852,8 +861,11 @@
 
       // Ready modal — shown after import / loading a saved game; starts the timer on confirm.
       const modal = document.getElementById("modal");
-      function showReady(msg) { document.getElementById("modalMsg").textContent = msg; modal.hidden = false; }
+      const modalDifficulty = document.getElementById("modalDifficulty");
+      function showReady(msg) { document.getElementById("modalMsg").textContent = msg; modalDifficulty.value = difficultyEl.value; modal.hidden = false; }
       function hideModal() { modal.hidden = true; }
+      // Let the player correct the difficulty (e.g. after a misread import) right from the ready popup.
+      modalDifficulty.addEventListener("change", () => { difficultyEl.value = modalDifficulty.value; });
       document.getElementById("modalStart").addEventListener("click", () => { hideModal(); startSolving(); });
       document.getElementById("modalCancel").addEventListener("click", () => { hideModal(); showExplain("Take your time", "Fix anything that looks off, then press Start solving when you're ready.", "info"); });
       modal.addEventListener("click", (e) => { if (e.target === modal) hideModal(); });
@@ -1311,7 +1323,7 @@
           const data = await r.json();
           if (!r.ok) { let msg = data.error || "Failed to read image"; if (data.diagnostic) msg += ` (key defined: ${data.diagnostic.defined}, length: ${data.diagnostic.length}, matching vars: ${(data.diagnostic.anthropicVars || []).join(", ") || "none"})`; throw new Error(msg); }
           writeGrid(data.grid); renderPencils();
-          showReady(`Grid imported as ${sourceEl.value} · ${difficultyEl.value}. Fix any misread digits, then start — I'll save it to your library when you do.`);
+          showReady(`Grid imported from ${sourceEl.value}. Fix any misread digits and set the difficulty below, then start — I'll save it to your library when you do.`);
         } catch (err) { showExplain("Couldn't read the image", (err.message || "Unknown error") + " — you can still type the puzzle in by hand.", "bad"); }
         finally { e.target.value = ""; }
       });
