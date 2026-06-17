@@ -684,7 +684,19 @@
           const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && M[rr][cc].has(n));
           if (spots.length === 1) return { tech: "Hidden single", body: `${n} can't go in any other empty cell of ${u.name}, so it must be here.` };
         }
-        return { tech: "Other", body: `${n} matches the solution. There isn't a single-cell proof yet — it follows once a few neighbors are filled, or from a more advanced technique.` };
+        // No single-cell proof yet — try one round of an advanced elimination and see if it pins this cell.
+        for (const tech of [lockedCandidates, nakedPair, hiddenPair, xWing]) {
+          const e = tech(M, grid); if (!e) continue;
+          const N = applyElims(M, e.elims);
+          if (N[r][c].size === 1 && [...N[r][c]][0] === n)
+            return { tech: e.tech, body: `${e.reason} That leaves ${n} as the only candidate for ${loc(r, c)}.` };
+          for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
+            const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && N[rr][cc].has(n));
+            if (spots.length === 1 && spots[0][0] === r && spots[0][1] === c)
+              return { tech: e.tech, body: `${e.reason} That leaves ${loc(r, c)} as the only spot for ${n} in ${u.name}.` };
+          }
+        }
+        return { tech: "Advanced", body: `${n} matches the solution. It follows from a technique beyond the ones I name here, or once a few more neighbors are filled in.` };
       }
       function handleMove(r, c) {
         inputs[r][c].classList.remove("wrong");
