@@ -676,6 +676,7 @@
           for (let n = 1; n <= 9; n++) spans[n - 1].textContent = marks[r][c].has(n) ? String(n) : "";
         }
         updatePad();
+        saveActiveGame();
       }
 
       function describeCorrect(M, grid, r, c, n) {
@@ -779,6 +780,7 @@
         if (manual) session.manualPaused = true;
         session.pauseStart = Date.now();
         clearInterval(timerId); timerId = null;
+        saveActiveGame();
       }
       function resumeTimer(manual) {
         if (!session || !session.pauseStart) return;
@@ -786,6 +788,7 @@
         session.pausedMs += Date.now() - session.pauseStart;
         session.pauseStart = null; session.manualPaused = false;
         startTimer();
+        saveActiveGame();
       }
       const pauseModal = document.getElementById("pauseModal");
       document.addEventListener("visibilitychange", () => {
@@ -810,7 +813,7 @@
         session.solved = solved; session.finishedAt = Date.now();
         lastTotalMs = session.totalMs;
         const stats = lsGet(STATS_KEY); stats.unshift(session); lsSet(STATS_KEY, stats); cloudSave("stats", stats);
-        session = null;
+        session = null; clearActiveGame();
       }
 
       // ---- buttons ----
@@ -925,11 +928,53 @@
       }
 
       // ---- saved library + cloud (collections: library, stats) ----
-      const STORE_KEY = "sudoku-coach:games", STATS_KEY = "sudoku-coach:stats";
+      const STORE_KEY = "sudoku-coach:games", STATS_KEY = "sudoku-coach:stats", ACTIVE_KEY = "sudoku-coach:active";
       const difficultyEl = document.getElementById("difficulty"), sourceEl = document.getElementById("source");
       const loadBtn = document.getElementById("load"), libraryEl = document.querySelector(".library"), libraryPanel = document.getElementById("savedGames");
       function lsGet(key) { try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; } }
       function lsSet(key, v) { localStorage.setItem(key, JSON.stringify(v)); }
+
+      // ---- in-progress game persistence (survives closing the tab / reloading later) ----
+      function clearActiveGame() { try { localStorage.removeItem(ACTIVE_KEY); } catch {} }
+      function saveActiveGame() {
+        if (!solving || !session) { clearActiveGame(); return; }
+        const state = {
+          values: inputs.map((row) => row.map((i) => i.value)),
+          givens: givens.map((row) => row.slice()),
+          marks: marks.map((row) => row.map((s) => [...s])),
+          solution,
+          elapsed: activeElapsed(),
+          manualPaused: !!(session.pauseStart && session.manualPaused),
+          session: { difficulty: session.difficulty, source: session.source, errors: session.errors || 0, lastT: session.lastT || 0, moves: session.moves || [] },
+          savedAt: Date.now(),
+        };
+        try { localStorage.setItem(ACTIVE_KEY, JSON.stringify(state)); } catch {}
+      }
+      function restoreActiveGame() {
+        let st; try { st = JSON.parse(localStorage.getItem(ACTIVE_KEY)); } catch { st = null; }
+        if (!st || !st.values || !st.solution || !st.givens || !st.session) return false;
+        resetToEdit();
+        solution = st.solution; givens = st.givens;
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+          inputs[r][c].value = st.values[r][c] || "";
+          inputs[r][c].classList.toggle("given", !!givens[r][c]);
+          inputs[r][c].classList.remove("wrong", "solved");
+          if (!givens[r][c] && inputs[r][c].value && Number(inputs[r][c].value) !== solution[r][c]) inputs[r][c].classList.add("wrong");
+          marks[r][c] = new Set((st.marks && st.marks[r] && st.marks[r][c]) || []);
+        }
+        // Time away from the app doesn't count: rebase so active time resumes from where it stood.
+        const elapsed = Math.max(0, st.elapsed || 0), now = Date.now();
+        session = { difficulty: st.session.difficulty, source: st.session.source, startedAt: now - elapsed, pausedMs: 0, pauseStart: null, manualPaused: false, errors: st.session.errors || 0, lastT: st.session.lastT || 0, moves: st.session.moves || [] };
+        solving = true; setMode("normal"); document.body.classList.add("solving");
+        difficultyEl.value = session.difficulty; sourceEl.value = session.source;
+        errorsEl.textContent = session.errors;
+        clearHighlights(); renderPencils();
+        if (st.manualPaused) { pauseTimer(true); pauseModal.hidden = false; }
+        else startTimer();
+        timerEl.textContent = fmtTime(elapsed);
+        showExplain("Welcome back", "Your in-progress puzzle was restored — pick up right where you left off.", "info");
+        return true;
+      }
       let cloudOn = false;
       async function cloudLoad(collection) {
         const r = await fetch(`/api/games?collection=${collection}`);
@@ -1258,7 +1303,7 @@
 
       // ---- init ----
       select(0, 0);
-      renderPencils();
+      if (!restoreActiveGame()) renderPencils();
       initStores();
     </script>
   </body>
