@@ -144,6 +144,8 @@
       .modal p { color: var(--muted); margin: 0 0 20px; line-height: 1.5; }
       .modal .actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
       .modal { position: relative; }
+      .modal-diff { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 0.9rem; margin: 0 0 20px; }
+      .modal-diff select { flex: 0 0 auto; }
 
       .trow { cursor: pointer; }
       .trow:hover { background: var(--panel); }
@@ -154,8 +156,9 @@
       .saved-row .saved-actions button { padding: 6px 12px; font-size: 0.85rem; }
       .saved-row .del-one { color: var(--bad); }
       .hintline { color: var(--muted); font-size: 0.8rem; margin: 6px 0 0; }
-      .spark { display: flex; align-items: flex-end; gap: 3px; height: 48px; margin: 8px 0 6px; }
-      .spark .sbar { flex: 1 1 0; min-width: 3px; border-radius: 2px 2px 0 0; min-height: 4px; }
+      .spark { position: relative; height: 48px; margin: 8px 0 6px; }
+      .spark svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+      .spark .sdot { position: absolute; width: 6px; height: 6px; margin: 0 0 -3px -3px; border-radius: 50%; }
       .trend.up { color: var(--bad); font-weight: 600; }
       .trend.down { color: var(--ok); font-weight: 600; }
       .trend.flat { color: var(--muted); }
@@ -187,7 +190,6 @@
         <div class="tabs">
           <label class="file">Import screenshot<input id="file" type="file" accept="image/*" /></label>
           <button id="historyBtn">History</button>
-          <button id="clear">Clear</button>
         </div>
         <div class="menu">
           <button id="gear" aria-label="Menu" title="Menu">⚙</button>
@@ -197,6 +199,7 @@
             <button id="check">Check entries</button>
             <button id="reveal">Reveal solution</button>
             <button id="edit">Edit puzzle</button>
+            <button id="clear">Clear board</button>
           </div>
         </div>
       </div>
@@ -252,6 +255,13 @@
         <div class="modal">
           <h2>Ready to start?</h2>
           <p id="modalMsg">Your puzzle is loaded.</p>
+          <label class="modal-diff">Difficulty
+            <select id="modalDifficulty" title="Set the difficulty for this puzzle">
+              <option value="Easy">Easy</option>
+              <option value="Medium">Medium</option>
+              <option value="Hard">Hard</option>
+            </select>
+          </label>
           <div class="actions">
             <button id="modalCancel">Not yet</button>
             <button id="modalStart" class="primary">Start &amp; time me</button>
@@ -409,7 +419,8 @@
       function applyClear() {
         if (!selected) return;
         const { r, c } = selected;
-        if (entryMode === "candidate" && solving) { marks[r][c].clear(); renderPencils(); }
+        if (givens[r][c]) return;
+        if (entryMode === "candidate" && solving && !inputs[r][c].value) { marks[r][c].clear(); renderPencils(); }
         else clearCell(r, c);
       }
       let undoStack = [];
@@ -542,14 +553,15 @@
           for (let n = 1; n <= 9; n++) {
             const has = cells.filter(([r, c]) => grid[r][c] === 0 && M[r][c].has(n));
             if (has.length < 2) continue;
+            const pointing = has.length === 2 ? "Pointing pair" : "Pointing triple";
             const rows = new Set(has.map(([r]) => r)), cols = new Set(has.map(([, c]) => c));
             if (rows.size === 1) { const r = [...rows][0], elims = [];
               for (let c = 0; c < 9; c++) if (Math.floor(c / 3) * 3 !== bc && grid[r][c] === 0 && M[r][c].has(n)) elims.push([r, c, n]);
-              if (elims.length) return { elims, highlight: has, tech: "Pointing pair", reason: `In box ${b + 1}, ${n} can only appear in row ${r + 1}, so ${n} is removed from the rest of row ${r + 1}.` };
+              if (elims.length) return { elims, highlight: has, tech: pointing, reason: `In box ${b + 1}, ${n} can only appear in row ${r + 1}, so ${n} is removed from the rest of row ${r + 1}.` };
             }
             if (cols.size === 1) { const c = [...cols][0], elims = [];
               for (let r = 0; r < 9; r++) if (Math.floor(r / 3) * 3 !== br && grid[r][c] === 0 && M[r][c].has(n)) elims.push([r, c, n]);
-              if (elims.length) return { elims, highlight: has, tech: "Pointing pair", reason: `In box ${b + 1}, ${n} can only appear in column ${c + 1}, so ${n} is removed from the rest of column ${c + 1}.` };
+              if (elims.length) return { elims, highlight: has, tech: pointing, reason: `In box ${b + 1}, ${n} can only appear in column ${c + 1}, so ${n} is removed from the rest of column ${c + 1}.` };
             }
           }
         }
@@ -561,7 +573,7 @@
             if (new Set(has.map(([r, c]) => boxIndex(r, c))).size === 1) {
               const [hr, hc] = has[0], elims = [];
               for (const [r, c] of boxCells(hr, hc)) if (!u.cells.some(([ur, uc]) => ur === r && uc === c) && grid[r][c] === 0 && M[r][c].has(n)) elims.push([r, c, n]);
-              if (elims.length) return { elims, highlight: has, tech: "Box/line reduction", reason: `In ${u.name}, ${n} only fits inside box ${boxIndex(hr, hc)}, so ${n} is removed from the rest of that box.` };
+              if (elims.length) return { elims, highlight: has, tech: "Locked candidate", reason: `In ${u.name}, ${n} only fits inside box ${boxIndex(hr, hc)}, so ${n} is removed from the rest of that box.` };
             }
           }
         }
@@ -620,13 +632,95 @@
         }
         return null;
       }
+      // Two cells "see" each other when they share a row, column, or box (and aren't the same cell).
+      function sees(r1, c1, r2, c2) { return !(r1 === r2 && c1 === c2) && (r1 === r2 || c1 === c2 || boxIndex(r1, c1) === boxIndex(r2, c2)); }
+      function nakedTriple(M, grid) {
+        for (const u of UNITS) {
+          const cells = u.cells.filter(([r, c]) => grid[r][c] === 0 && M[r][c].size >= 2 && M[r][c].size <= 3);
+          for (let i = 0; i < cells.length; i++) for (let j = i + 1; j < cells.length; j++) for (let k = j + 1; k < cells.length; k++) {
+            const tri = [cells[i], cells[j], cells[k]], union = new Set();
+            for (const [r, c] of tri) for (const n of M[r][c]) union.add(n);
+            if (union.size !== 3) continue;
+            const digits = [...union], elims = [];
+            for (const [r, c] of u.cells) {
+              if (grid[r][c] !== 0 || tri.some(([tr, tc]) => tr === r && tc === c)) continue;
+              for (const n of digits) if (M[r][c].has(n)) elims.push([r, c, n]);
+            }
+            if (elims.length) return { elims, highlight: tri, tech: "Naked triple", reason: `${tri.map(([r, c]) => loc(r, c)).join(", ")} in ${u.name} only hold {${digits.join(", ")}}, so those digits are removed from the rest of the ${u.kind}.` };
+          }
+        }
+        return null;
+      }
+      function hiddenTriple(M, grid) {
+        for (const u of UNITS) {
+          const empties = u.cells.filter(([r, c]) => grid[r][c] === 0), spots = {};
+          for (let n = 1; n <= 9; n++) spots[n] = empties.filter(([r, c]) => M[r][c].has(n));
+          const digits = [];
+          for (let n = 1; n <= 9; n++) if (spots[n].length >= 2 && spots[n].length <= 3) digits.push(n);
+          for (let i = 0; i < digits.length; i++) for (let j = i + 1; j < digits.length; j++) for (let k = j + 1; k < digits.length; k++) {
+            const tri = [digits[i], digits[j], digits[k]], cellSet = new Set();
+            for (const n of tri) for (const [r, c] of spots[n]) cellSet.add(r * 9 + c);
+            if (cellSet.size !== 3) continue;
+            const cells = [...cellSet].map((v) => [Math.floor(v / 9), v % 9]), elims = [];
+            for (const [r, c] of cells) for (const n of M[r][c]) if (!tri.includes(n)) elims.push([r, c, n]);
+            if (elims.length) return { elims, highlight: cells, tech: "Hidden triple", reason: `In ${u.name}, ${tri.join(", ")} can only go in ${cells.map(([r, c]) => loc(r, c)).join(", ")}, so every other candidate is removed from those cells.` };
+          }
+        }
+        return null;
+      }
+      function xyWing(M, grid) {
+        const bivalue = [];
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0 && M[r][c].size === 2) bivalue.push([r, c, [...M[r][c]]]);
+        for (const [pr, pc, pv] of bivalue) {
+          const [X, Y] = pv, pincers = bivalue.filter(([r, c]) => sees(pr, pc, r, c));
+          for (const [ar, ac, av] of pincers) for (const [br, bc, bv] of pincers) {
+            if (ar === br && ac === bc) continue;
+            if (!av.includes(X) || av.includes(Y) || !bv.includes(Y) || bv.includes(X)) continue;
+            const Z = av.find((n) => n !== X);
+            if (Z !== bv.find((n) => n !== Y)) continue;
+            const elims = [];
+            for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+              if (grid[r][c] !== 0 || !M[r][c].has(Z)) continue;
+              if ((r === pr && c === pc) || (r === ar && c === ac) || (r === br && c === bc)) continue;
+              if (sees(ar, ac, r, c) && sees(br, bc, r, c)) elims.push([r, c, Z]);
+            }
+            if (elims.length) return { elims, highlight: [[pr, pc], [ar, ac], [br, bc]], tech: "XY-wing", reason: `XY-wing: pivot ${loc(pr, pc)} {${X}, ${Y}} with pincers ${loc(ar, ac)} and ${loc(br, bc)} that can each be ${Z}, so ${Z} is removed from any cell seeing both pincers.` };
+          }
+        }
+        return null;
+      }
+      function swordfish(M, grid) {
+        for (let n = 1; n <= 9; n++) {
+          const rowCols = [];
+          for (let r = 0; r < 9; r++) { const cols = []; for (let c = 0; c < 9; c++) if (grid[r][c] === 0 && M[r][c].has(n)) cols.push(c); if (cols.length >= 2 && cols.length <= 3) rowCols.push([r, cols]); }
+          for (let i = 0; i < rowCols.length; i++) for (let j = i + 1; j < rowCols.length; j++) for (let k = j + 1; k < rowCols.length; k++) {
+            const rows = [rowCols[i], rowCols[j], rowCols[k]], colSet = new Set();
+            for (const [, cols] of rows) for (const c of cols) colSet.add(c);
+            if (colSet.size !== 3) continue;
+            const rset = rows.map(([r]) => r), cols = [...colSet], elims = [];
+            for (let r = 0; r < 9; r++) if (!rset.includes(r)) for (const c of cols) if (grid[r][c] === 0 && M[r][c].has(n)) elims.push([r, c, n]);
+            if (elims.length) { const highlight = []; for (const [r, cs] of rows) for (const c of cs) highlight.push([r, c]); return { elims, highlight, tech: "Swordfish", reason: `Swordfish on ${n}: rows ${rset.map((r) => r + 1).join(", ")} confine ${n} to columns ${cols.map((c) => c + 1).join(", ")}, so ${n} is removed from those columns in other rows.` }; }
+          }
+          const colRows = [];
+          for (let c = 0; c < 9; c++) { const rs = []; for (let r = 0; r < 9; r++) if (grid[r][c] === 0 && M[r][c].has(n)) rs.push(r); if (rs.length >= 2 && rs.length <= 3) colRows.push([c, rs]); }
+          for (let i = 0; i < colRows.length; i++) for (let j = i + 1; j < colRows.length; j++) for (let k = j + 1; k < colRows.length; k++) {
+            const colsT = [colRows[i], colRows[j], colRows[k]], rowSet = new Set();
+            for (const [, rs] of colsT) for (const r of rs) rowSet.add(r);
+            if (rowSet.size !== 3) continue;
+            const cset = colsT.map(([c]) => c), rows = [...rowSet], elims = [];
+            for (let c = 0; c < 9; c++) if (!cset.includes(c)) for (const r of rows) if (grid[r][c] === 0 && M[r][c].has(n)) elims.push([r, c, n]);
+            if (elims.length) { const highlight = []; for (const [c, rs] of colsT) for (const r of rs) highlight.push([r, c]); return { elims, highlight, tech: "Swordfish", reason: `Swordfish on ${n}: columns ${cset.map((c) => c + 1).join(", ")} confine ${n} to rows ${rows.map((r) => r + 1).join(", ")}, so ${n} is removed from those rows in other columns.` }; }
+          }
+        }
+        return null;
+      }
       function applyElims(M, elims) { const N = cloneMap(M); for (const [r, c, n] of elims) N[r][c].delete(n); return N; }
 
       function findHint(grid) {
         const M = candMap(grid);
         let s = findNakedSingle(M, grid) || findHiddenSingle(M, grid);
         if (s) return { kind: "place", ...s, highlight: [[s.r, s.c]], reason: `${s.tech}: ${s.reason}` };
-        for (const tech of [lockedCandidates, nakedPair, hiddenPair, xWing]) {
+        for (const tech of [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, xWing, xyWing, swordfish]) {
           const e = tech(M, grid); if (!e) continue;
           const after = findNakedSingle(applyElims(M, e.elims), grid) || findHiddenSingle(applyElims(M, e.elims), grid);
           if (after) return { kind: "place", r: after.r, c: after.c, n: after.n, tech: e.tech, highlight: e.highlight.concat([[after.r, after.c]]), reason: `${e.tech}: ${e.reason} That leaves ${loc(after.r, after.c)} = ${after.n} (${after.tech.toLowerCase()}).` };
@@ -679,41 +773,28 @@
           for (let n = 1; n <= 9; n++) spans[n - 1].textContent = marks[r][c].has(n) ? String(n) : "";
         }
         updatePad();
+        saveActiveGame();
       }
 
-      // Is putting n at (r,c) provable as a single in candidate map M? Returns "naked"/"hidden"/null.
-      function singleAt(M, grid, r, c, n) {
-        if (M[r][c].size === 1 && M[r][c].has(n)) return "naked";
-        for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
-          const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && M[rr][cc].has(n));
-          if (spots.length === 1 && spots[0][0] === r && spots[0][1] === c) return "hidden";
-        }
-        return null;
-      }
-      // Apply every instance of one elimination technique (cumulatively) until (r,c)=n becomes a
-      // single, then report the exact technique that unlocked it. Returns null if it never does.
-      function techResolves(M, grid, fn, r, c, n) {
-        let MM = cloneMap(M);
-        for (let guard = 0; guard < 64; guard++) {
-          const e = fn(MM, grid);
-          if (!e) return null;
-          MM = applyElims(MM, e.elims);
-          if (singleAt(MM, grid, r, c, n)) return e.tech;
-        }
-        return null;
-      }
       function describeCorrect(M, grid, r, c, n) {
         if (M[r][c].size === 1) return { tech: "Naked single", body: `the other eight digits all already appear in ${loc(r, c)}'s row, column, or box, leaving ${n}.` };
         for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
           const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && M[rr][cc].has(n));
           if (spots.length === 1) return { tech: "Hidden single", body: `${n} can't go in any other empty cell of ${u.name}, so it must be here.` };
         }
-        // Not a basic single — see which named technique makes it deducible (easiest first).
-        for (const fn of [lockedCandidates, nakedPair, hiddenPair, xWing]) {
-          const tech = techResolves(M, grid, fn, r, c, n);
-          if (tech) return { tech, body: `applying a ${tech.toLowerCase()} clears the blocking candidates, and then ${n} is the only digit left for ${loc(r, c)}.` };
+        // No single-cell proof yet — try one round of an advanced elimination and see if it pins this cell.
+        for (const tech of [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, xWing, xyWing, swordfish]) {
+          const e = tech(M, grid); if (!e) continue;
+          const N = applyElims(M, e.elims);
+          if (N[r][c].size === 1 && [...N[r][c]][0] === n)
+            return { tech: e.tech, body: `${e.reason} That leaves ${n} as the only candidate for ${loc(r, c)}.` };
+          for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
+            const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && N[rr][cc].has(n));
+            if (spots.length === 1 && spots[0][0] === r && spots[0][1] === c)
+              return { tech: e.tech, body: `${e.reason} That leaves ${loc(r, c)} as the only spot for ${n} in ${u.name}.` };
+          }
         }
-        return { tech: "Advanced", body: `${n} matches the solution but isn't provable from one named technique here — it needs deeper reasoning (a chain, or combining several eliminations).` };
+        return { tech: "Advanced", body: `${n} matches the solution. It follows from a technique beyond the ones I name here, or once a few more neighbors are filled in.` };
       }
       function handleMove(r, c) {
         inputs[r][c].classList.remove("wrong");
@@ -796,6 +877,7 @@
         if (manual) session.manualPaused = true;
         session.pauseStart = Date.now();
         clearInterval(timerId); timerId = null;
+        saveActiveGame();
       }
       function resumeTimer(manual) {
         if (!session || !session.pauseStart) return;
@@ -803,6 +885,7 @@
         session.pausedMs += Date.now() - session.pauseStart;
         session.pauseStart = null; session.manualPaused = false;
         startTimer();
+        saveActiveGame();
       }
       const pauseModal = document.getElementById("pauseModal");
       document.addEventListener("visibilitychange", () => {
@@ -827,7 +910,7 @@
         session.solved = solved; session.finishedAt = Date.now();
         lastTotalMs = session.totalMs;
         const stats = lsGet(STATS_KEY); stats.unshift(session); lsSet(STATS_KEY, stats); cloudSave("stats", stats);
-        session = null;
+        session = null; clearActiveGame();
       }
 
       // ---- buttons ----
@@ -865,8 +948,11 @@
 
       // Ready modal — shown after import / loading a saved game; starts the timer on confirm.
       const modal = document.getElementById("modal");
-      function showReady(msg) { document.getElementById("modalMsg").textContent = msg; modal.hidden = false; }
+      const modalDifficulty = document.getElementById("modalDifficulty");
+      function showReady(msg) { document.getElementById("modalMsg").textContent = msg; modalDifficulty.value = difficultyEl.value; modal.hidden = false; }
       function hideModal() { modal.hidden = true; }
+      // Let the player correct the difficulty (e.g. after a misread import) right from the ready popup.
+      modalDifficulty.addEventListener("change", () => { difficultyEl.value = modalDifficulty.value; });
       document.getElementById("modalStart").addEventListener("click", () => { hideModal(); startSolving(); });
       document.getElementById("modalCancel").addEventListener("click", () => { hideModal(); showExplain("Take your time", "Fix anything that looks off, then press Start solving when you're ready.", "info"); });
       modal.addEventListener("click", (e) => { if (e.target === modal) hideModal(); });
@@ -942,11 +1028,53 @@
       }
 
       // ---- saved library + cloud (collections: library, stats) ----
-      const STORE_KEY = "sudoku-coach:games", STATS_KEY = "sudoku-coach:stats";
+      const STORE_KEY = "sudoku-coach:games", STATS_KEY = "sudoku-coach:stats", ACTIVE_KEY = "sudoku-coach:active";
       const difficultyEl = document.getElementById("difficulty"), sourceEl = document.getElementById("source");
       const loadBtn = document.getElementById("load"), libraryEl = document.querySelector(".library"), libraryPanel = document.getElementById("savedGames");
       function lsGet(key) { try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; } }
       function lsSet(key, v) { localStorage.setItem(key, JSON.stringify(v)); }
+
+      // ---- in-progress game persistence (survives closing the tab / reloading later) ----
+      function clearActiveGame() { try { localStorage.removeItem(ACTIVE_KEY); } catch {} }
+      function saveActiveGame() {
+        if (!solving || !session) { clearActiveGame(); return; }
+        const state = {
+          values: inputs.map((row) => row.map((i) => i.value)),
+          givens: givens.map((row) => row.slice()),
+          marks: marks.map((row) => row.map((s) => [...s])),
+          solution,
+          elapsed: activeElapsed(),
+          manualPaused: !!(session.pauseStart && session.manualPaused),
+          session: { difficulty: session.difficulty, source: session.source, errors: session.errors || 0, lastT: session.lastT || 0, moves: session.moves || [] },
+          savedAt: Date.now(),
+        };
+        try { localStorage.setItem(ACTIVE_KEY, JSON.stringify(state)); } catch {}
+      }
+      function restoreActiveGame() {
+        let st; try { st = JSON.parse(localStorage.getItem(ACTIVE_KEY)); } catch { st = null; }
+        if (!st || !st.values || !st.solution || !st.givens || !st.session) return false;
+        resetToEdit();
+        solution = st.solution; givens = st.givens;
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+          inputs[r][c].value = st.values[r][c] || "";
+          inputs[r][c].classList.toggle("given", !!givens[r][c]);
+          inputs[r][c].classList.remove("wrong", "solved");
+          if (!givens[r][c] && inputs[r][c].value && Number(inputs[r][c].value) !== solution[r][c]) inputs[r][c].classList.add("wrong");
+          marks[r][c] = new Set((st.marks && st.marks[r] && st.marks[r][c]) || []);
+        }
+        // Time away from the app doesn't count: rebase so active time resumes from where it stood.
+        const elapsed = Math.max(0, st.elapsed || 0), now = Date.now();
+        session = { difficulty: st.session.difficulty, source: st.session.source, startedAt: now - elapsed, pausedMs: 0, pauseStart: null, manualPaused: false, errors: st.session.errors || 0, lastT: st.session.lastT || 0, moves: st.session.moves || [] };
+        solving = true; setMode("normal"); document.body.classList.add("solving");
+        difficultyEl.value = session.difficulty; sourceEl.value = session.source;
+        errorsEl.textContent = session.errors;
+        clearHighlights(); renderPencils();
+        if (st.manualPaused) { pauseTimer(true); pauseModal.hidden = false; }
+        else startTimer();
+        timerEl.textContent = fmtTime(elapsed);
+        showExplain("Welcome back", "Your in-progress puzzle was restored — pick up right where you left off.", "info");
+        return true;
+      }
       let cloudOn = false;
       async function cloudLoad(collection) {
         const r = await fetch(`/api/games?collection=${collection}`);
@@ -1086,16 +1214,32 @@
 
       // ---- stats / deep dive ----
       const TECH_COLORS = { "Naked single": "#4ade80", "Hidden single": "#6ea8fe", "Pointing pair": "#f59e0b",
-        "Box/line reduction": "#f59e0b", "Naked pair": "#a78bfa", "Hidden pair": "#a78bfa", "X-wing": "#ec4899",
+        "Pointing triple": "#f59e0b", "Locked candidate": "#f59e0b", "Box/line reduction": "#f59e0b",
+        "Naked pair": "#a78bfa", "Hidden pair": "#a78bfa", "Naked triple": "#7c3aed", "Hidden triple": "#7c3aed",
+        "X-wing": "#ec4899", "Swordfish": "#db2777", "XY-wing": "#14b8a6",
         "Advanced": "#94a3b8", "Other": "#94a3b8", "Mistake": "#ff6b6b" };
       function median(arr) { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
       function errorsIn(g) { return typeof g.errors === "number" ? g.errors : g.moves.filter((m) => !m.correct).length; }
       // ---- over-time trends ----
-      function sparkBars(points, color) {
+      function sparkLine(points, color) {
         // points: [{ v:number, label:string }] in chronological order (oldest → newest)
-        const max = Math.max(1, ...points.map((p) => p.v));
-        const bars = points.map((p) => `<span class="sbar" title="${esc(p.label)}" style="height:${Math.max(8, Math.round((p.v / max) * 100))}%;background:${color}"></span>`).join("");
-        return `<div class="spark">${bars}</div>`;
+        const n = points.length;
+        if (!n) return `<div class="spark"></div>`;
+        const vals = points.map((p) => p.v), max = Math.max(...vals), min = Math.min(...vals), span = max - min;
+        const xy = points.map((p, i) => ({
+          x: n === 1 ? 50 : (i / (n - 1)) * 100,
+          y: span ? 100 - ((p.v - min) / span) * 100 : 50,
+          p,
+        }));
+        const path = xy.map(({ x, y }) => `${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
+        const svg = n > 1
+          ? `<svg viewBox="0 0 100 100" preserveAspectRatio="none">
+               <polygon points="0,100 ${path} 100,100" fill="${color}" fill-opacity="0.12"></polygon>
+               <polyline points="${path}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"></polyline>
+             </svg>`
+          : "";
+        const dots = xy.map(({ x, y, p }) => `<span class="sdot" style="left:${x}%;bottom:${(100 - y).toFixed(2)}%;background:${color}" title="${esc(p.label)}"></span>`).join("");
+        return `<div class="spark">${svg}${dots}</div>`;
       }
       function trendNote(vals) {
         // compares the average of the earlier half against the later half (lower time = improving)
@@ -1213,7 +1357,7 @@
           if (!solved.length) continue;
           const pts = solved.map((g) => ({ v: g.totalMs, label: `${new Date(g.startedAt).toLocaleDateString()} · ${fmtTime(g.totalMs)}` }));
           diffTrend += `<div class="card"><b>${d}</b> · ${pts.length} solved · ${trendNote(pts.map((p) => p.v))}
-            ${sparkBars(pts, "var(--accent)")}
+            ${sparkLine(pts, "var(--accent)")}
             <span class="k">oldest → newest · best ${fmtTime(Math.min(...pts.map((p) => p.v)))}</span></div>`;
         }
         if (!diffTrend) diffTrend = '<div class="card">Solve a few puzzles and your times will chart here, so you can watch them drop.</div>';
@@ -1235,7 +1379,7 @@
           ? `You take longest on <b style="color:${TECH_COLORS[focus.t]}">${esc(focus.t)}</b> placements (typically ${fmtDt(focus.med)}). Practice scanning for these earlier.${mistakes ? ` You've also made ${mistakes} mistake${mistakes > 1 ? "s" : ""} — slow down to verify before placing.` : ""}`
           : `Keep playing — after a few games I'll point out which technique slows you down most.`;
 
-        // technique time over time — per technique, one bar per game that used it (median time per choice)
+        // technique time over time — per technique, one point per game that used it (median time per choice)
         const techNames = [...new Set(allMoves.map((m) => m.tech))].filter((t) => t !== "Mistake");
         const techTrendRows = techNames
           .map((t) => ({ t, pts: techGameSeries(chron, t), total: allMoves.filter((m) => m.tech === t).length }))
@@ -1246,7 +1390,7 @@
         for (const r of techTrendRows) {
           const color = TECH_COLORS[r.t] || "#94a3b8";
           techTrend += `<div class="card"><b style="color:${color}">${esc(r.t)}</b> · ${r.pts.length} games · ${trendNote(r.pts.map((p) => p.v))}
-            ${sparkBars(r.pts, color)}
+            ${sparkLine(r.pts, color)}
             <span class="k">median time per choice, oldest → newest</span></div>`;
         }
         if (!techTrend) techTrend = '<div class="card">Once you\'ve played a technique across a couple of games, its trend will show here.</div>';
@@ -1300,14 +1444,14 @@
           const data = await r.json();
           if (!r.ok) { let msg = data.error || "Failed to read image"; if (data.diagnostic) msg += ` (key defined: ${data.diagnostic.defined}, length: ${data.diagnostic.length}, matching vars: ${(data.diagnostic.anthropicVars || []).join(", ") || "none"})`; throw new Error(msg); }
           writeGrid(data.grid); renderPencils();
-          showReady(`Grid imported as ${sourceEl.value} · ${difficultyEl.value}. Fix any misread digits, then start — I'll save it to your library when you do.`);
+          showReady(`Grid imported from ${sourceEl.value}. Fix any misread digits and set the difficulty below, then start — I'll save it to your library when you do.`);
         } catch (err) { showExplain("Couldn't read the image", (err.message || "Unknown error") + " — you can still type the puzzle in by hand.", "bad"); }
         finally { e.target.value = ""; }
       });
 
       // ---- init ----
       select(0, 0);
-      renderPencils();
+      if (!restoreActiveGame()) renderPencils();
       initStores();
     </script>
   </body>
