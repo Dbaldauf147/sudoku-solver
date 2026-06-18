@@ -569,7 +569,7 @@
             if (new Set(has.map(([r, c]) => boxIndex(r, c))).size === 1) {
               const [hr, hc] = has[0], elims = [];
               for (const [r, c] of boxCells(hr, hc)) if (!u.cells.some(([ur, uc]) => ur === r && uc === c) && grid[r][c] === 0 && M[r][c].has(n)) elims.push([r, c, n]);
-              if (elims.length) return { elims, highlight: has, tech: "Box/line reduction", reason: `In ${u.name}, ${n} only fits inside box ${boxIndex(hr, hc)}, so ${n} is removed from the rest of that box.` };
+              if (elims.length) return { elims, highlight: has, tech: "Locked candidate", reason: `In ${u.name}, ${n} only fits inside box ${boxIndex(hr, hc)}, so ${n} is removed from the rest of that box.` };
             }
           }
         }
@@ -628,13 +628,95 @@
         }
         return null;
       }
+      // Two cells "see" each other when they share a row, column, or box (and aren't the same cell).
+      function sees(r1, c1, r2, c2) { return !(r1 === r2 && c1 === c2) && (r1 === r2 || c1 === c2 || boxIndex(r1, c1) === boxIndex(r2, c2)); }
+      function nakedTriple(M, grid) {
+        for (const u of UNITS) {
+          const cells = u.cells.filter(([r, c]) => grid[r][c] === 0 && M[r][c].size >= 2 && M[r][c].size <= 3);
+          for (let i = 0; i < cells.length; i++) for (let j = i + 1; j < cells.length; j++) for (let k = j + 1; k < cells.length; k++) {
+            const tri = [cells[i], cells[j], cells[k]], union = new Set();
+            for (const [r, c] of tri) for (const n of M[r][c]) union.add(n);
+            if (union.size !== 3) continue;
+            const digits = [...union], elims = [];
+            for (const [r, c] of u.cells) {
+              if (grid[r][c] !== 0 || tri.some(([tr, tc]) => tr === r && tc === c)) continue;
+              for (const n of digits) if (M[r][c].has(n)) elims.push([r, c, n]);
+            }
+            if (elims.length) return { elims, highlight: tri, tech: "Naked triple", reason: `${tri.map(([r, c]) => loc(r, c)).join(", ")} in ${u.name} only hold {${digits.join(", ")}}, so those digits are removed from the rest of the ${u.kind}.` };
+          }
+        }
+        return null;
+      }
+      function hiddenTriple(M, grid) {
+        for (const u of UNITS) {
+          const empties = u.cells.filter(([r, c]) => grid[r][c] === 0), spots = {};
+          for (let n = 1; n <= 9; n++) spots[n] = empties.filter(([r, c]) => M[r][c].has(n));
+          const digits = [];
+          for (let n = 1; n <= 9; n++) if (spots[n].length >= 2 && spots[n].length <= 3) digits.push(n);
+          for (let i = 0; i < digits.length; i++) for (let j = i + 1; j < digits.length; j++) for (let k = j + 1; k < digits.length; k++) {
+            const tri = [digits[i], digits[j], digits[k]], cellSet = new Set();
+            for (const n of tri) for (const [r, c] of spots[n]) cellSet.add(r * 9 + c);
+            if (cellSet.size !== 3) continue;
+            const cells = [...cellSet].map((v) => [Math.floor(v / 9), v % 9]), elims = [];
+            for (const [r, c] of cells) for (const n of M[r][c]) if (!tri.includes(n)) elims.push([r, c, n]);
+            if (elims.length) return { elims, highlight: cells, tech: "Hidden triple", reason: `In ${u.name}, ${tri.join(", ")} can only go in ${cells.map(([r, c]) => loc(r, c)).join(", ")}, so every other candidate is removed from those cells.` };
+          }
+        }
+        return null;
+      }
+      function xyWing(M, grid) {
+        const bivalue = [];
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0 && M[r][c].size === 2) bivalue.push([r, c, [...M[r][c]]]);
+        for (const [pr, pc, pv] of bivalue) {
+          const [X, Y] = pv, pincers = bivalue.filter(([r, c]) => sees(pr, pc, r, c));
+          for (const [ar, ac, av] of pincers) for (const [br, bc, bv] of pincers) {
+            if (ar === br && ac === bc) continue;
+            if (!av.includes(X) || av.includes(Y) || !bv.includes(Y) || bv.includes(X)) continue;
+            const Z = av.find((n) => n !== X);
+            if (Z !== bv.find((n) => n !== Y)) continue;
+            const elims = [];
+            for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+              if (grid[r][c] !== 0 || !M[r][c].has(Z)) continue;
+              if ((r === pr && c === pc) || (r === ar && c === ac) || (r === br && c === bc)) continue;
+              if (sees(ar, ac, r, c) && sees(br, bc, r, c)) elims.push([r, c, Z]);
+            }
+            if (elims.length) return { elims, highlight: [[pr, pc], [ar, ac], [br, bc]], tech: "XY-wing", reason: `XY-wing: pivot ${loc(pr, pc)} {${X}, ${Y}} with pincers ${loc(ar, ac)} and ${loc(br, bc)} that can each be ${Z}, so ${Z} is removed from any cell seeing both pincers.` };
+          }
+        }
+        return null;
+      }
+      function swordfish(M, grid) {
+        for (let n = 1; n <= 9; n++) {
+          const rowCols = [];
+          for (let r = 0; r < 9; r++) { const cols = []; for (let c = 0; c < 9; c++) if (grid[r][c] === 0 && M[r][c].has(n)) cols.push(c); if (cols.length >= 2 && cols.length <= 3) rowCols.push([r, cols]); }
+          for (let i = 0; i < rowCols.length; i++) for (let j = i + 1; j < rowCols.length; j++) for (let k = j + 1; k < rowCols.length; k++) {
+            const rows = [rowCols[i], rowCols[j], rowCols[k]], colSet = new Set();
+            for (const [, cols] of rows) for (const c of cols) colSet.add(c);
+            if (colSet.size !== 3) continue;
+            const rset = rows.map(([r]) => r), cols = [...colSet], elims = [];
+            for (let r = 0; r < 9; r++) if (!rset.includes(r)) for (const c of cols) if (grid[r][c] === 0 && M[r][c].has(n)) elims.push([r, c, n]);
+            if (elims.length) { const highlight = []; for (const [r, cs] of rows) for (const c of cs) highlight.push([r, c]); return { elims, highlight, tech: "Swordfish", reason: `Swordfish on ${n}: rows ${rset.map((r) => r + 1).join(", ")} confine ${n} to columns ${cols.map((c) => c + 1).join(", ")}, so ${n} is removed from those columns in other rows.` }; }
+          }
+          const colRows = [];
+          for (let c = 0; c < 9; c++) { const rs = []; for (let r = 0; r < 9; r++) if (grid[r][c] === 0 && M[r][c].has(n)) rs.push(r); if (rs.length >= 2 && rs.length <= 3) colRows.push([c, rs]); }
+          for (let i = 0; i < colRows.length; i++) for (let j = i + 1; j < colRows.length; j++) for (let k = j + 1; k < colRows.length; k++) {
+            const colsT = [colRows[i], colRows[j], colRows[k]], rowSet = new Set();
+            for (const [, rs] of colsT) for (const r of rs) rowSet.add(r);
+            if (rowSet.size !== 3) continue;
+            const cset = colsT.map(([c]) => c), rows = [...rowSet], elims = [];
+            for (let c = 0; c < 9; c++) if (!cset.includes(c)) for (const r of rows) if (grid[r][c] === 0 && M[r][c].has(n)) elims.push([r, c, n]);
+            if (elims.length) { const highlight = []; for (const [c, rs] of colsT) for (const r of rs) highlight.push([r, c]); return { elims, highlight, tech: "Swordfish", reason: `Swordfish on ${n}: columns ${cset.map((c) => c + 1).join(", ")} confine ${n} to rows ${rows.map((r) => r + 1).join(", ")}, so ${n} is removed from those rows in other columns.` }; }
+          }
+        }
+        return null;
+      }
       function applyElims(M, elims) { const N = cloneMap(M); for (const [r, c, n] of elims) N[r][c].delete(n); return N; }
 
       function findHint(grid) {
         const M = candMap(grid);
         let s = findNakedSingle(M, grid) || findHiddenSingle(M, grid);
         if (s) return { kind: "place", ...s, highlight: [[s.r, s.c]], reason: `${s.tech}: ${s.reason}` };
-        for (const tech of [lockedCandidates, nakedPair, hiddenPair, xWing]) {
+        for (const tech of [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, xWing, xyWing, swordfish]) {
           const e = tech(M, grid); if (!e) continue;
           const after = findNakedSingle(applyElims(M, e.elims), grid) || findHiddenSingle(applyElims(M, e.elims), grid);
           if (after) return { kind: "place", r: after.r, c: after.c, n: after.n, tech: e.tech, highlight: e.highlight.concat([[after.r, after.c]]), reason: `${e.tech}: ${e.reason} That leaves ${loc(after.r, after.c)} = ${after.n} (${after.tech.toLowerCase()}).` };
@@ -697,7 +779,7 @@
           if (spots.length === 1) return { tech: "Hidden single", body: `${n} can't go in any other empty cell of ${u.name}, so it must be here.` };
         }
         // No single-cell proof yet — try one round of an advanced elimination and see if it pins this cell.
-        for (const tech of [lockedCandidates, nakedPair, hiddenPair, xWing]) {
+        for (const tech of [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, xWing, xyWing, swordfish]) {
           const e = tech(M, grid); if (!e) continue;
           const N = applyElims(M, e.elims);
           if (N[r][c].size === 1 && [...N[r][c]][0] === n)
@@ -1096,8 +1178,10 @@
 
       // ---- stats / deep dive ----
       const TECH_COLORS = { "Naked single": "#4ade80", "Hidden single": "#6ea8fe", "Pointing pair": "#f59e0b",
-        "Pointing triple": "#f59e0b", "Box/line reduction": "#f59e0b", "Naked pair": "#a78bfa", "Hidden pair": "#a78bfa",
-        "X-wing": "#ec4899", "Advanced": "#94a3b8", "Other": "#94a3b8", "Mistake": "#ff6b6b" };
+        "Pointing triple": "#f59e0b", "Locked candidate": "#f59e0b", "Box/line reduction": "#f59e0b",
+        "Naked pair": "#a78bfa", "Hidden pair": "#a78bfa", "Naked triple": "#7c3aed", "Hidden triple": "#7c3aed",
+        "X-wing": "#ec4899", "Swordfish": "#db2777", "XY-wing": "#14b8a6",
+        "Advanced": "#94a3b8", "Other": "#94a3b8", "Mistake": "#ff6b6b" };
       function median(arr) { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
       function errorsIn(g) { return typeof g.errors === "number" ? g.errors : g.moves.filter((m) => !m.correct).length; }
       // ---- over-time trends ----
