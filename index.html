@@ -1106,9 +1106,31 @@
         if (!libraryPanel.hidden) renderLibraryPanel();
       }
       async function initStores() {
-        try { const lib = await cloudLoad("library"); if (lib) lsSet(STORE_KEY, lib); } catch {}
-        try { const st = await cloudLoad("stats"); if (st) lsSet(STATS_KEY, st); } catch {}
+        try {
+          const cloud = await cloudLoad("library");
+          if (cloud) {
+            const merged = mergeCollections(lsGet(STORE_KEY), cloud, (g) => g.id || gridKey(g.grid), (a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+            lsSet(STORE_KEY, merged); cloudSave("library", merged);
+          }
+        } catch {}
+        try {
+          const cloud = await cloudLoad("stats");
+          if (cloud) {
+            const merged = mergeCollections(lsGet(STATS_KEY), cloud, (g) => String(g.startedAt) + "|" + (g.finishedAt || ""), (a, b) => (b.finishedAt || b.startedAt || 0) - (a.finishedAt || a.startedAt || 0));
+            lsSet(STATS_KEY, merged); cloudSave("stats", merged);
+          }
+        } catch {}
         renderLibrary();
+      }
+      // Union local + cloud so neither an empty cloud nor a stale device can wipe the other's data.
+      // The merged set is written back to both sides, which also re-seeds an empty cloud from a device that still has history.
+      function mergeCollections(local, cloud, keyFn, sortFn) {
+        const byKey = new Map();
+        for (const item of cloud) byKey.set(keyFn(item), item);
+        for (const item of local) byKey.set(keyFn(item), item); // local wins on key collision (keeps latest edits)
+        const merged = [...byKey.values()];
+        if (sortFn) merged.sort(sortFn);
+        return merged;
       }
       // Save a puzzle to the library only if that exact grid isn't already saved.
       function gridKey(grid) { return grid.map((r) => r.join("")).join(""); }
