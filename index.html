@@ -1536,21 +1536,134 @@
         dd.innerHTML = html;
       }
 
-      // ---- image import (optional) ----
+      // ---- image import ----
+      // Two readers: a free, in-browser OCR pass (Tesseract.js) runs first; if its read
+      // looks shaky we offer Claude Vision (the paid API) as a fallback. Manual fixing is
+      // always available either way.
+
+      // Lazy-load Tesseract.js from a CDN the first time it's needed.
+      let tesseractPromise = null;
+      function loadTesseract() {
+        if (window.Tesseract) return Promise.resolve(window.Tesseract);
+        if (!tesseractPromise) tesseractPromise = new Promise((res, rej) => {
+          const s = document.createElement("script");
+          s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js";
+          s.onload = () => res(window.Tesseract);
+          s.onerror = () => rej(new Error("Couldn't load the free in-browser reader (are you offline?)"));
+          document.head.appendChild(s);
+        });
+        return tesseractPromise;
+      }
+      function readImageFile(file) {
+        return new Promise((res, rej) => { const img = new Image(); img.onload = () => res(img); img.onerror = () => rej(new Error("Couldn't open that image")); img.src = URL.createObjectURL(file); });
+      }
+      // Find the puzzle's bounding box by the longest dark grid lines, and return a cropped canvas.
+      function cropToGrid(img) {
+        const maxSide = 1100, scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const w = Math.max(9, Math.round(img.width * scale)), h = Math.max(9, Math.round(img.height * scale));
+        const c = document.createElement("canvas"); c.width = w; c.height = h;
+        const ctx = c.getContext("2d"); ctx.drawImage(img, 0, 0, w, h);
+        const { data } = ctx.getImageData(0, 0, w, h);
+        const rowC = new Array(h).fill(0), colC = new Array(w).fill(0);
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+          const i = (y * w + x) * 4;
+          if ((data[i] + data[i + 1] + data[i + 2]) / 3 < 140) { rowC[y]++; colC[x]++; }
+        }
+        const rowLines = [], colLines = [];
+        for (let y = 0; y < h; y++) if (rowC[y] > w * 0.5) rowLines.push(y);
+        for (let x = 0; x < w; x++) if (colC[x] > h * 0.5) colLines.push(x);
+        let x0 = 0, y0 = 0, x1 = w - 1, y1 = h - 1;
+        if (rowLines.length >= 2 && colLines.length >= 2) {
+          x0 = colLines[0]; x1 = colLines[colLines.length - 1];
+          y0 = rowLines[0]; y1 = rowLines[rowLines.length - 1];
+        }
+        const bw = Math.max(9, x1 - x0), bh = Math.max(9, y1 - y0);
+        const out = document.createElement("canvas"); out.width = bw; out.height = bh;
+        out.getContext("2d").drawImage(c, x0, y0, bw, bh, 0, 0, bw, bh);
+        return out;
+      }
+      // Split the cropped grid into 81 cleaned-up cell canvases (inner crop, white margin, thresholded).
+      function sliceCells(grid) {
+        const w = grid.width, h = grid.height, cw = w / 9, ch = h / 9, cells = [], S = 96, m = Math.round(S * 0.15), pad = 0.14;
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+          const sx = Math.round((c + pad) * cw), sy = Math.round((r + pad) * ch);
+          const sw = Math.max(1, Math.round((1 - 2 * pad) * cw)), sh = Math.max(1, Math.round((1 - 2 * pad) * ch));
+          const out = document.createElement("canvas"); out.width = S; out.height = S;
+          const o = out.getContext("2d");
+          o.fillStyle = "#fff"; o.fillRect(0, 0, S, S);
+          o.drawImage(grid, sx, sy, sw, sh, m, m, S - 2 * m, S - 2 * m);
+          const id = o.getImageData(0, 0, S, S);
+          for (let i = 0; i < id.data.length; i += 4) {
+            const v = (id.data[i] + id.data[i + 1] + id.data[i + 2]) / 3, b = v < 150 ? 0 : 255;
+            id.data[i] = id.data[i + 1] = id.data[i + 2] = b;
+          }
+          o.putImageData(id, 0, 0);
+          cells.push(out);
+        }
+        return cells;
+      }
+      function cellHasInk(canvas) {
+        const { data } = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+        let dark = 0; for (let i = 0; i < data.length; i += 4) if (data[i] < 128) dark++;
+        return dark > 18;
+      }
+      // Free, in-browser read. Returns { grid, confidence, givenCount }.
+      async function localParse(file, onProgress) {
+        const Tesseract = await loadTesseract();
+        const img = await readImageFile(file);
+        const cells = sliceCells(cropToGrid(img));
+        const inked = cells.map((cv, i) => ({ i, cv })).filter((x) => cellHasInk(x.cv));
+        const worker = await Tesseract.createWorker("eng");
+        try {
+          await worker.setParameters({ tessedit_char_whitelist: "123456789", tessedit_pageseg_mode: "10" });
+          const grid = blank(0);
+          let confSum = 0, confN = 0, givenCount = 0, done = 0;
+          for (const { i, cv } of inked) {
+            const { data } = await worker.recognize(cv);
+            const m = (data.text || "").match(/[1-9]/);
+            if (m) { grid[Math.floor(i / 9)][i % 9] = Number(m[0]); givenCount++; confSum += data.confidence; confN++; }
+            if (onProgress) onProgress(++done, inked.length);
+          }
+          return { grid, confidence: confN ? confSum / confN : 0, givenCount };
+        } finally { await worker.terminate(); }
+      }
+      async function claudeParse(file) {
+        const dataUrl = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
+        const r = await fetch("/api/parse-sudoku-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: String(dataUrl).split(",")[1], media_type: file.type || "image/png" }) });
+        const data = await r.json();
+        if (!r.ok) { let msg = data.error || "Failed to read image"; if (data.diagnostic) msg += ` (key defined: ${data.diagnostic.defined}, length: ${data.diagnostic.length}, matching vars: ${(data.diagnostic.anthropicVars || []).join(", ") || "none"})`; throw new Error(msg); }
+        return data.grid;
+      }
+      function finishImport(grid) {
+        writeGrid(grid); renderPencils();
+        const added = autoSaveImport(readGrid());
+        showReady(`Grid imported and ${added ? "saved to your library" : "matched to a puzzle already in your library"}${syncNote()}. Fix any misread digits and set the difficulty and source below — edits update the saved copy. Then start the timer.`);
+      }
+      async function reReadWithClaude(file) {
+        showExplain("Reading puzzle…", "Claude Vision is reading the grid from your screenshot (uses the paid API).", "info");
+        try { finishImport(await claudeParse(file)); }
+        catch (err) { showExplain("Couldn't read the image", (err.message || "Unknown error") + " — you can still type the puzzle in by hand.", "bad"); }
+      }
       document.getElementById("file").addEventListener("change", async (e) => {
         const file = e.target.files[0]; if (!file) return;
         if (solving) { e.target.value = ""; return showExplain("Already solving", "Press Edit puzzle first, then import a new screenshot.", "info"); }
-        showExplain("Reading puzzle…", "Claude Vision is reading the grid from your screenshot.", "info");
+        showExplain("Reading puzzle (free)…", "Reading the grid right in your browser — no account, no cost. This can take a few seconds.", "info");
         try {
-          const dataUrl = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
-          const r = await fetch("/api/parse-sudoku-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: String(dataUrl).split(",")[1], media_type: file.type || "image/png" }) });
-          const data = await r.json();
-          if (!r.ok) { let msg = data.error || "Failed to read image"; if (data.diagnostic) msg += ` (key defined: ${data.diagnostic.defined}, length: ${data.diagnostic.length}, matching vars: ${(data.diagnostic.anthropicVars || []).join(", ") || "none"})`; throw new Error(msg); }
-          writeGrid(data.grid); renderPencils();
-          const added = autoSaveImport(readGrid());
-          showReady(`Grid imported and ${added ? "saved to your library" : "matched to a puzzle already in your library"}${syncNote()}. Fix any misread digits and set the difficulty and source below — edits update the saved copy. Then start the timer.`);
-        } catch (err) { showExplain("Couldn't read the image", (err.message || "Unknown error") + " — you can still type the puzzle in by hand.", "bad"); }
-        finally { e.target.value = ""; }
+          const { grid, confidence, givenCount } = await localParse(file, (n, total) =>
+            showExplain("Reading puzzle (free)…", `Reading digit ${n} of ${total} in your browser — no account, no cost.`, "info"));
+          const conflict = hasConflict(grid), tooFew = givenCount < 17, lowConf = confidence < 60;
+          if (!conflict && !tooFew && !lowConf) { finishImport(grid); return; }
+          // Shaky read: show what we got so it can be fixed by hand, and offer the paid Claude reader.
+          writeGrid(grid); renderPencils();
+          const why = conflict ? "the read has a duplicate digit in a row, column, or box"
+            : tooFew ? `it only found ${givenCount} digit${givenCount === 1 ? "" : "s"}`
+            : "some digits were read with low confidence";
+          showExplain("Read it for free — but double-check", `The in-browser reader finished, but ${why}, so a digit may be wrong. Fix any cells by hand, then Start solving — or have Claude re-read it (uses the paid API).`, "info",
+            { label: "Re-read with Claude", onClick: () => reReadWithClaude(file) });
+        } catch (err) {
+          showExplain("Free reader couldn't read it", (err.message || "Unknown error") + ". You can type the puzzle in by hand, or have Claude read it (uses the paid API).", "bad",
+            { label: "Read with Claude", onClick: () => reReadWithClaude(file) });
+        } finally { e.target.value = ""; }
       });
 
       // ---- init ----

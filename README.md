@@ -64,7 +64,13 @@ answer.
     under a ⚙ menu in the top-right corner.
 
   The coaching and saved library are entirely client-side, so they work
-  **without an API key** — only the optional screenshot import calls Claude.
+  **without an API key**. **Screenshot import is free by default**: it reads
+  the grid right in your browser with **Tesseract.js** (loaded from a CDN on
+  first use) — no account, no cost. The read works best on tightly-cropped
+  digital screenshots; if it looks shaky (a duplicate digit, too few digits,
+  or low confidence) the app says so and offers a **"Re-read with Claude"**
+  button that calls the paid Claude Vision API as a fallback. You can always
+  fix any misread cells by hand instead.
 
 - **`api/games.js`** — optional cross-device sync for the saved library,
   backed by a Redis store. When a store is connected the library syncs across
@@ -85,7 +91,9 @@ The library is stored as a single shared collection (no per-user auth), which
 is fine for a personal tool — add auth before sharing it broadly.
 - **`api/parse-sudoku-image.js`** — a Vercel serverless function that forwards
   the screenshot to Claude Vision and returns the parsed grid as a `9×9` array
-  of numbers (`0` = empty).
+  of numbers (`0` = empty). This is now the **fallback** reader, used only when
+  the free in-browser Tesseract.js pass is uncertain and you click "Re-read
+  with Claude" (so it needs an API key only for that fallback).
 
 ```
 Browser ──(base64 image)──▶ /api/parse-sudoku-image ──▶ Claude Vision
