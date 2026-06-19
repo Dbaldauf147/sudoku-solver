@@ -50,14 +50,16 @@ answer.
     box are highlighted in red** so you can see exactly why it's illegal.
     **Check entries** and **Reveal solution** are there when you want them.
   - A built-in **catalog** of puzzles ships with the app, so every user can
-    pick one and play it from scratch — no setup or account needed. Puzzles
-    are also **auto-saved to your library when you start solving** (if that
-    exact grid isn't already saved), capturing the selected **difficulty**
-    (Easy/Medium/Hard) and **source** (defaults to NYT, editable for other
-    sources). There's also a manual **Save puzzle**. The **Saved games**
-    button opens a history of everything you've saved — **grouped by date**
-    (Today, Yesterday, then by day), newest first, with each entry's
-    difficulty and source — where you can **load** or **delete** any puzzle.
+    pick one and play it from scratch — no setup or account needed.
+  - Every time you **import a screenshot** the puzzle is **saved to your
+    library automatically** (if that exact grid isn't already saved) — no
+    button to press. The **difficulty** (Easy/Medium/Hard) and **source**
+    (defaults to NYT) are set right in the **"Ready to start?" popup** that
+    appears on import; editing them there updates the saved copy. The
+    **Saved games** button opens a history of everything you've saved —
+    **grouped by date** (Today, Yesterday, then by day), newest first, with
+    each entry's difficulty and source — where you can **load**, **edit**, or
+    **delete** any puzzle.
   - Stats, Check entries, Reveal solution, Edit puzzle, and Start solving live
     under a ⚙ menu in the top-right corner.
 

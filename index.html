@@ -24,16 +24,15 @@
       .row.solving { display: none; }
       body.solving .setup-extra { display: none; }
       body.solving .row.solving { display: flex; }
-      button, label.file, select, input#source {
+      button, label.file, select, input#modalSource {
         background: var(--panel); color: var(--text); border: 1px solid var(--line);
         border-radius: 8px; padding: 10px 16px; font-size: 0.95rem; cursor: pointer;
       }
-      select, input#source { cursor: auto; padding: 9px 12px; }
+      select, input#modalSource { cursor: auto; padding: 9px 12px; }
       button.primary { background: var(--accent); border-color: var(--accent); color: #ffffff; font-weight: 600; }
       button.on { background: var(--sel); border-color: var(--accent); color: var(--text); }
       button:disabled { opacity: 0.45; cursor: not-allowed; }
       label.file input { display: none; }
-      input#source { flex: 1; min-width: 120px; }
       .library select { flex: 1; min-width: 160px; }
 
       .topbar { position: relative; display: flex; flex-wrap: wrap; align-items: center;
@@ -144,8 +143,9 @@
       .modal p { color: var(--muted); margin: 0 0 20px; line-height: 1.5; }
       .modal .actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
       .modal { position: relative; }
-      .modal-diff { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 0.9rem; margin: 0 0 20px; }
-      .modal-diff select { flex: 0 0 auto; }
+      .modal-diff { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 0.9rem; margin: 0 0 12px; }
+      .modal-diff:last-of-type { margin-bottom: 20px; }
+      .modal-diff select, .modal-diff input { flex: 0 0 auto; max-width: 160px; }
 
       .trow { cursor: pointer; }
       .trow:hover { background: var(--panel); }
@@ -207,15 +207,6 @@
         </div>
       </div>
 
-      <div class="row setup-extra">
-        <select id="difficulty" title="Difficulty">
-          <option value="Easy">Easy</option>
-          <option value="Medium" selected>Medium</option>
-          <option value="Hard">Hard</option>
-        </select>
-        <input id="source" placeholder="Source" value="NYT" />
-        <button id="save">Save puzzle</button>
-      </div>
       <div class="row setup-extra library" hidden>
         <button id="load">Saved games</button>
       </div>
@@ -261,9 +252,12 @@
           <label class="modal-diff">Difficulty
             <select id="modalDifficulty" title="Set the difficulty for this puzzle">
               <option value="Easy">Easy</option>
-              <option value="Medium">Medium</option>
+              <option value="Medium" selected>Medium</option>
               <option value="Hard">Hard</option>
             </select>
+          </label>
+          <label class="modal-diff">Source
+            <input id="modalSource" placeholder="Source" value="NYT" title="Where this puzzle came from" />
           </label>
           <div class="actions">
             <button id="modalCancel">Not yet</button>
@@ -938,7 +932,7 @@
         document.body.classList.add("solving");
         clearHighlights(); renderPencils();
         undoStack = []; errorsEl.textContent = "0";
-        session = { difficulty: document.getElementById("difficulty").value, source: (document.getElementById("source").value || "Unknown").trim(), startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, moves: [] };
+        session = { difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, moves: [] };
         startTimer();
         const first = (() => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) return [r, c]; return [0, 0]; })();
         select(first[0], first[1]);
@@ -951,11 +945,8 @@
 
       // Ready modal — shown after import / loading a saved game; starts the timer on confirm.
       const modal = document.getElementById("modal");
-      const modalDifficulty = document.getElementById("modalDifficulty");
-      function showReady(msg) { document.getElementById("modalMsg").textContent = msg; modalDifficulty.value = difficultyEl.value; modal.hidden = false; }
+      function showReady(msg) { document.getElementById("modalMsg").textContent = msg; modal.hidden = false; }
       function hideModal() { modal.hidden = true; }
-      // Let the player correct the difficulty (e.g. after a misread import) right from the ready popup.
-      modalDifficulty.addEventListener("change", () => { difficultyEl.value = modalDifficulty.value; });
       document.getElementById("modalStart").addEventListener("click", () => { hideModal(); startSolving(); });
       document.getElementById("modalCancel").addEventListener("click", () => { hideModal(); showExplain("Take your time", "Fix anything that looks off, then press Start solving when you're ready.", "info"); });
       modal.addEventListener("click", (e) => { if (e.target === modal) hideModal(); });
@@ -1021,7 +1012,7 @@
       document.getElementById("edit").addEventListener("click", resetToEdit);
       document.getElementById("clear").addEventListener("click", () => { for (const row of inputs) for (const i of row) i.value = ""; resetToEdit(); });
       function resetToEdit() {
-        session = null; clearInterval(timerId); timerId = null; undoStack = [];
+        session = null; clearInterval(timerId); timerId = null; undoStack = []; activeSavedGame = null;
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal");
         document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory();
         pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
@@ -1032,7 +1023,13 @@
 
       // ---- saved library + cloud (collections: library, stats) ----
       const STORE_KEY = "sudoku-coach:games", STATS_KEY = "sudoku-coach:stats", ACTIVE_KEY = "sudoku-coach:active";
-      const difficultyEl = document.getElementById("difficulty"), sourceEl = document.getElementById("source");
+      // Difficulty and source now live in the "Ready to start?" popup shown on import,
+      // so these point at the modal controls rather than a row on the main page.
+      const difficultyEl = document.getElementById("modalDifficulty"), sourceEl = document.getElementById("modalSource");
+      // The difficulty/source live in the ready popup. Editing them (e.g. after a misread import)
+      // updates the library entry that was auto-saved when the screenshot was loaded.
+      difficultyEl.addEventListener("change", syncActiveSavedGame);
+      sourceEl.addEventListener("input", syncActiveSavedGame);
       const loadBtn = document.getElementById("load"), libraryEl = document.querySelector(".library"), libraryPanel = document.getElementById("savedGames");
       function lsGet(key) { try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; } }
       function lsSet(key, v) { localStorage.setItem(key, JSON.stringify(v)); }
@@ -1111,13 +1108,31 @@
         games.unshift(game); lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
         return true;
       }
-      document.getElementById("save").addEventListener("click", () => {
-        const grid = readGrid();
-        if (grid.flat().filter(Boolean).length < 17) return showExplain("Nothing to save yet", "Import or type a puzzle's givens first (at least 17).", "bad");
-        if (hasConflict(grid)) return showExplain("Can't save that", "The puzzle has a duplicate in a row, column, or box. Fix it first.", "bad");
-        const added = saveGameIfNew(grid, difficultyEl.value, sourceEl.value);
-        showExplain(added ? "Puzzle saved" : "Already saved", added ? `Saved as ${sourceEl.value} · ${difficultyEl.value}${syncNote()}.` : "This exact puzzle is already in your library.", added ? "ok" : "info");
-      });
+      // The library entry for the puzzle currently loaded (set when a screenshot is imported
+      // or a saved game is loaded). Editing difficulty/source in the ready popup updates it.
+      let activeSavedGame = null;
+      // Auto-save an imported grid to the library. Returns true if it was newly added.
+      function autoSaveImport(grid) {
+        const games = lsGet(STORE_KEY);
+        const key = gridKey(grid);
+        let game = games.find((g) => gridKey(g.grid) === key);
+        const added = !game;
+        if (added) {
+          game = { id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()), grid: grid.map((r) => r.slice()), difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", savedAt: Date.now() };
+          games.unshift(game); lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
+        }
+        activeSavedGame = game;
+        return added;
+      }
+      // Keep the auto-saved library entry in step with edits made in the ready popup.
+      function syncActiveSavedGame() {
+        if (!activeSavedGame) return;
+        const games = lsGet(STORE_KEY);
+        const g = games.find((x) => x.id === activeSavedGame.id); if (!g) return;
+        g.difficulty = difficultyEl.value;
+        g.source = (sourceEl.value || "Unknown").trim() || "Unknown";
+        lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
+      }
       // ---- saved-games history panel (opened from the Load button) ----
       function savedDateHeader(ts) {
         const d = new Date(ts), now = new Date(), sameDay = (a, b) => a.toDateString() === b.toDateString();
@@ -1134,7 +1149,7 @@
       function renderLibraryPanel() {
         const games = [...lsGet(STORE_KEY)].sort((a, b) => b.savedAt - a.savedAt);
         if (!games.length) {
-          libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Saved games</h2><div class="card">No saved games yet. Type or import a puzzle and press <b>Save puzzle</b> — it'll appear here, newest first, grouped by date.</div>`;
+          libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Saved games</h2><div class="card">No saved games yet. Import a screenshot and it's saved here automatically — newest first, grouped by date.</div>`;
           document.getElementById("lb").onclick = closeLibrary; return;
         }
         let rows = "", lastHeader = null;
@@ -1180,7 +1195,8 @@
         const game = lsGet(STORE_KEY).find((g) => g.id === id); if (!game) return;
         closeLibrary();
         resetToEdit(); writeGrid(game.grid); difficultyEl.value = game.difficulty; sourceEl.value = game.source; renderPencils();
-        showReady(`${game.source} · ${game.difficulty} is loaded. Start the timer and play?`);
+        activeSavedGame = game;
+        showReady(`${game.source} · ${game.difficulty} is loaded. Adjust difficulty or source if needed, then start the timer and play?`);
       }
       function deleteSavedGame(id) {
         const games = lsGet(STORE_KEY).filter((g) => g.id !== id); lsSet(STORE_KEY, games); cloudSave("library", games);
@@ -1499,7 +1515,8 @@
           const data = await r.json();
           if (!r.ok) { let msg = data.error || "Failed to read image"; if (data.diagnostic) msg += ` (key defined: ${data.diagnostic.defined}, length: ${data.diagnostic.length}, matching vars: ${(data.diagnostic.anthropicVars || []).join(", ") || "none"})`; throw new Error(msg); }
           writeGrid(data.grid); renderPencils();
-          showReady(`Grid imported from ${sourceEl.value}. Fix any misread digits and set the difficulty below, then start — I'll save it to your library when you do.`);
+          const added = autoSaveImport(readGrid());
+          showReady(`Grid imported and ${added ? "saved to your library" : "matched to a puzzle already in your library"}${syncNote()}. Fix any misread digits and set the difficulty and source below — edits update the saved copy. Then start the timer.`);
         } catch (err) { showExplain("Couldn't read the image", (err.message || "Unknown error") + " — you can still type the puzzle in by hand.", "bad"); }
         finally { e.target.value = ""; }
       });
