@@ -181,6 +181,15 @@
       .mpencil span { display: flex; align-items: center; justify-content: center; }
       .mpencil span.struck { color: var(--bad); text-decoration: line-through; }
 
+      .profile-modal { text-align: left; }
+      .profile-modal h2 { text-align: center; }
+      .profile-modal #profileMsg { margin: 0 0 18px; }
+      .profile-modal label { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; font-size: 0.9rem; color: var(--muted); }
+      .profile-modal label .k { font-weight: 400; }
+      .profile-modal input { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+        border-radius: 8px; padding: 10px 12px; font-size: 0.95rem; width: 100%; }
+      .profile-modal .actions { justify-content: center; margin-top: 4px; }
+
       #exGames { text-align: left; margin: 4px 0 16px; max-height: 220px; overflow-y: auto; }
       #exGames .ex-games-title { font-weight: 600; margin: 0 0 6px; font-size: 0.9rem; }
       #exGames .ex-game-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
@@ -210,6 +219,7 @@
             <button id="reveal">Reveal solution</button>
             <button id="edit">Edit puzzle</button>
             <button id="clear">Clear board</button>
+            <button id="profileBtn">Profile</button>
           </div>
         </div>
       </div>
@@ -279,6 +289,23 @@
           <p>The timer is stopped and the board is hidden. Resume when you're ready.</p>
           <div class="actions">
             <button id="resumeBtn" class="primary">Resume</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="profileModal" class="overlay" hidden>
+        <div class="modal profile-modal">
+          <h2>Profile</h2>
+          <p id="profileMsg" class="body"></p>
+          <label>Profile name
+            <input id="profileName" placeholder="e.g. dan" autocomplete="off" autocapitalize="none" spellcheck="false" />
+          </label>
+          <label>Passphrase <span class="k">(optional, keeps your data private)</span>
+            <input id="profilePass" type="password" placeholder="••••••" autocomplete="off" />
+          </label>
+          <div class="actions">
+            <button id="profileSignout">Sign out</button>
+            <button id="profileSave" class="primary">Save</button>
           </div>
         </div>
       </div>
@@ -379,6 +406,12 @@
         if (win && !win.hidden) { if (e.key === "Enter" || e.key === "Escape") document.getElementById("winAgain").click(); return; }
         const ex = document.getElementById("exModal");
         if (ex && !ex.hidden) { if (e.key === "Enter" || e.key === "Escape") document.getElementById("exClose").click(); return; }
+        const prof = document.getElementById("profileModal");
+        if (prof && !prof.hidden) {
+          if (e.key === "Escape") prof.hidden = true;
+          else if (e.key === "Enter") document.getElementById("profileSave").click();
+          return; // let the inputs receive all other keys (incl. digits) instead of the board
+        }
         const pm = document.getElementById("pauseModal");
         if (pm && !pm.hidden) {
           if (e.key === "Enter" || e.key === "Escape") document.getElementById("resumeBtn").click();
@@ -960,6 +993,36 @@
       document.getElementById("modalCancel").addEventListener("click", () => { hideModal(); showExplain("Take your time", "Fix anything that looks off, then press Start solving when you're ready.", "info"); });
       modal.addEventListener("click", (e) => { if (e.target === modal) hideModal(); });
 
+      // ---- profile modal ----
+      const profileModal = document.getElementById("profileModal");
+      function openProfile() {
+        document.getElementById("profileName").value = profile ? profile.name : "";
+        document.getElementById("profilePass").value = "";
+        document.getElementById("profileSignout").style.display = profile ? "" : "none";
+        document.getElementById("profileMsg").textContent = profile
+          ? `Signed in as “${profile.name}”. Your history, stats, and saved games are kept under this profile and synced across devices that use the same name and passphrase.`
+          : "Set a profile to keep your history, stats, and saved games separate from other players on this site. Add a passphrase to keep them private across devices.";
+        profileModal.hidden = false;
+        setTimeout(() => document.getElementById("profileName").focus(), 0);
+      }
+      async function saveProfile() {
+        const name = document.getElementById("profileName").value.trim();
+        const pass = document.getElementById("profilePass").value;
+        if (!name) { document.getElementById("profileMsg").textContent = "Enter a profile name first."; return; }
+        const id = await deriveProfileId(name, pass);
+        if (profile && profile.id === id) { profileModal.hidden = true; return; }
+        localStorage.setItem(PROFILE_KEY, JSON.stringify({ name, id }));
+        location.reload(); // reload so every store re-reads under the new profile namespace
+      }
+      document.getElementById("profileBtn").addEventListener("click", openProfile);
+      document.getElementById("profileSave").addEventListener("click", saveProfile);
+      document.getElementById("profileSignout").addEventListener("click", () => {
+        if (!confirm("Sign out of this profile? Your data stays saved and you can sign back in with the same name and passphrase.")) return;
+        localStorage.removeItem(PROFILE_KEY);
+        location.reload();
+      });
+      profileModal.addEventListener("click", (e) => { if (e.target === profileModal) profileModal.hidden = true; });
+
       // Gear dropdown
       const gearMenu = document.getElementById("gearMenu");
       function closeMenu() { gearMenu.hidden = true; }
@@ -1031,7 +1094,24 @@
       }
 
       // ---- saved library + cloud (collections: library, stats) ----
-      const STORE_KEY = "sudoku-coach:games", STATS_KEY = "sudoku-coach:stats", ACTIVE_KEY = "sudoku-coach:active";
+      // ---- profile: namespaces local + cloud storage so each player keeps their own history/stats ----
+      const PROFILE_KEY = "sudoku-coach:profile";
+      let profile = (() => { try { return JSON.parse(localStorage.getItem(PROFILE_KEY)) || null; } catch { return null; } })();
+      let STORE_KEY, STATS_KEY, ACTIVE_KEY;
+      function applyProfileKeys() {
+        const suffix = profile && profile.id ? ":" + profile.id : "";
+        STORE_KEY = "sudoku-coach:games" + suffix;
+        STATS_KEY = "sudoku-coach:stats" + suffix;
+        ACTIVE_KEY = "sudoku-coach:active" + suffix;
+      }
+      applyProfileKeys();
+      // A profile id is derived from name + passphrase so the cloud key isn't guessable without the passphrase.
+      async function deriveProfileId(name, pass) {
+        const data = new TextEncoder().encode(name.trim().toLowerCase() + " " + (pass || ""));
+        const buf = await crypto.subtle.digest("SHA-256", data);
+        return [...new Uint8Array(buf)].slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
+      }
+      function profileParam() { return profile && profile.id ? `&profile=${encodeURIComponent(profile.id)}` : ""; }
       // Difficulty and source now live in the "Ready to start?" popup shown on import,
       // so these point at the modal controls rather than a row on the main page.
       const difficultyEl = document.getElementById("modalDifficulty"), sourceEl = document.getElementById("modalSource");
@@ -1086,14 +1166,14 @@
       }
       let cloudOn = false;
       async function cloudLoad(collection) {
-        const r = await fetch(`/api/games?collection=${collection}`);
+        const r = await fetch(`/api/games?collection=${collection}${profileParam()}`);
         if (r.status === 501) { cloudOn = false; return null; }
         if (!r.ok) throw new Error("sync unavailable");
         cloudOn = true; return (await r.json()).games || [];
       }
       function cloudSave(collection, items) {
         if (!cloudOn) return;
-        fetch(`/api/games?collection=${collection}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ games: items }) }).catch(() => {});
+        fetch(`/api/games?collection=${collection}${profileParam()}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ games: items }) }).catch(() => {});
       }
       const syncNote = () => (cloudOn ? " and synced across your devices" : " on this device");
       function renderLibrary() {
