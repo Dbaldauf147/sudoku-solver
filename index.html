@@ -181,6 +181,13 @@
       .mpencil span { display: flex; align-items: center; justify-content: center; }
       .mpencil span.struck { color: var(--bad); text-decoration: line-through; }
 
+      #exGames { text-align: left; margin: 4px 0 16px; max-height: 220px; overflow-y: auto; }
+      #exGames .ex-games-title { font-weight: 600; margin: 0 0 6px; font-size: 0.9rem; }
+      #exGames .ex-game-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+        padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 0.88rem; }
+      #exGames .ex-game-row:last-child { border-bottom: none; }
+      #exGames .ex-game-row .k { color: var(--muted); }
+
       .confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
       .confetti i { position: absolute; top: -14px; width: 9px; height: 9px; border-radius: 2px; animation: cfall linear forwards; }
       @keyframes cfall { to { transform: translateY(110vh) rotate(720deg); opacity: 0.9; } }
@@ -287,6 +294,7 @@
           <h2 id="exTitle">Technique</h2>
           <div id="exBoard"></div>
           <p id="exCaption" class="body"></p>
+          <div id="exGames"></div>
           <div class="actions"><button id="exClose" class="primary">Got it</button></div>
         </div>
       </div>
@@ -454,6 +462,7 @@
         if (givens[r][c]) return;
         pushUndo(r, c);
         inputs[r][c].value = ""; inputs[r][c].classList.remove("wrong", "solved");
+        marks[r][c].clear();
         if (solving) showExplain("Cell cleared", "Keep going — pick a number or press Hint.", "info");
         renderPencils(); select(r, c);
       }
@@ -1374,7 +1383,30 @@
             ? "These are entries that didn't match the solution. There's no rule to learn here — slow down and verify a digit before placing it."
             : "This move follows from the puzzle's unique solution (an advanced technique, or simply filling neighbors first) rather than one named rule.";
         }
+        renderTechGames(tech);
         document.getElementById("exModal").hidden = false;
+      }
+      // List every logged game that used this technique, newest first, with its date and difficulty.
+      function renderTechGames(tech) {
+        const box = document.getElementById("exGames");
+        const played = lsGet(STATS_KEY)
+          .map((g) => ({ g, count: (g.moves || []).filter((m) => m.tech === tech).length }))
+          .filter((x) => x.count > 0)
+          .sort((a, b) => (b.g.finishedAt || b.g.startedAt) - (a.g.finishedAt || a.g.startedAt));
+        if (!played.length) {
+          box.innerHTML = `<p class="ex-games-title">Not logged in any game yet.</p>`;
+          return;
+        }
+        const fmtDate = (ts) => new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+        let rows = "";
+        for (const { g, count } of played) {
+          const date = fmtDate(g.finishedAt || g.startedAt);
+          rows += `<div class="ex-game-row">
+            <span>${esc(date)}</span>
+            <span class="k">${esc(g.difficulty || "—")} · ${esc(g.source || "—")} · ×${count}</span>
+          </div>`;
+        }
+        box.innerHTML = `<p class="ex-games-title">Logged in ${played.length} game${played.length === 1 ? "" : "s"}</p>${rows}`;
       }
       document.getElementById("exClose").addEventListener("click", () => { document.getElementById("exModal").hidden = true; });
       document.getElementById("exModal").addEventListener("click", (e) => { if (e.target.id === "exModal") e.currentTarget.hidden = true; });
@@ -1428,7 +1460,7 @@
         let techTable = `<table class="grid"><tr><th>Technique</th><th>Moves</th><th>Typical time</th></tr>`;
         for (const row of techRows) techTable += `<tr class="trow" data-tech="${esc(row.t)}"><td><span style="color:${TECH_COLORS[row.t] || "#94a3b8"}">●</span> ${esc(row.t)}</td><td>${row.count}</td><td>${fmtDt(row.med)}</td></tr>`;
         if (mistakes) techTable += `<tr class="trow" data-tech="Mistake"><td><span style="color:${TECH_COLORS.Mistake}">●</span> Mistake</td><td>${mistakes}</td><td>—</td></tr>`;
-        techTable += `</table><p class="hintline">Tap a technique to see a visual example of how it works.</p>`;
+        techTable += `</table><p class="hintline">Tap a technique to see a visual example and the games where it was logged.</p>`;
         const focus = techRows.filter((r) => r.count >= 3 && r.t !== "Other" && r.t !== "Advanced")[0];
         const takeaway = focus
           ? `You take longest on <b style="color:${TECH_COLORS[focus.t]}">${esc(focus.t)}</b> placements (typically ${fmtDt(focus.med)}). Practice scanning for these earlier.${mistakes ? ` You've also made ${mistakes} mistake${mistakes > 1 ? "s" : ""} — slow down to verify before placing.` : ""}`

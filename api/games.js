@@ -12,6 +12,8 @@
 // (redeploy afterwards). This is a single shared dataset — there's no per-user
 // auth, which is fine for a personal tool; add auth before sharing it widely.
 
+import { Redis } from "@upstash/redis";
+
 const REST_URL = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
 const REST_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 const COLLECTIONS = {
@@ -19,21 +21,12 @@ const COLLECTIONS = {
   stats: "sudoku-coach:stats",
 };
 
-async function redis(command) {
-  const r = await fetch(REST_URL, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${REST_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(command),
-  });
-  if (!r.ok) throw new Error(`Storage backend returned ${r.status}`);
-  return r.json(); // { result: ... }
-}
+// Only build a client when credentials are present; otherwise the endpoint
+// reports 501 and the front end falls back to per-device localStorage.
+const redis = REST_URL && REST_TOKEN ? new Redis({ url: REST_URL, token: REST_TOKEN }) : null;
 
 export default async function handler(req, res) {
-  if (!REST_URL || !REST_TOKEN) {
+  if (!redis) {
     return res
       .status(501)
       .json({ error: "Cloud sync not configured", configured: false });
@@ -43,8 +36,9 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === "GET") {
-      const { result } = await redis(["GET", KEY]);
-      return res.status(200).json({ games: result ? JSON.parse(result) : [] });
+      // The SDK auto-deserializes JSON values, so this is already an array.
+      const games = await redis.get(KEY);
+      return res.status(200).json({ games: Array.isArray(games) ? games : [] });
     }
 
     if (req.method === "PUT" || req.method === "POST") {
@@ -52,7 +46,7 @@ export default async function handler(req, res) {
       if (!Array.isArray(games)) {
         return res.status(400).json({ error: "`games` must be an array" });
       }
-      await redis(["SET", KEY, JSON.stringify(games)]);
+      await redis.set(KEY, games); // SDK serializes the array to JSON.
       return res.status(200).json({ ok: true, count: games.length });
     }
 
