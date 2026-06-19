@@ -454,6 +454,7 @@
         if (givens[r][c]) return;
         pushUndo(r, c);
         inputs[r][c].value = ""; inputs[r][c].classList.remove("wrong", "solved");
+        marks[r][c].clear();
         if (solving) showExplain("Cell cleared", "Keep going — pick a number or press Hint.", "info");
         renderPencils(); select(r, c);
       }
