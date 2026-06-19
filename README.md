@@ -13,7 +13,10 @@ answer.
   - **Type a number** in any cell and it tells you immediately whether it's
     right and *why* — e.g. "*R3C5 can only be 7 — every other digit already
     appears in its row, column, or box*" (naked single), or "*within this box,
-    7 can only go here*" (hidden single).
+    7 can only go here*" (hidden single). When a cell isn't a basic single, it
+    names the harder technique that unlocks it (pointing pair, box/line
+    reduction, naked/hidden pair, X-wing), so those moves are categorized in
+    your stats instead of lumped together as "Other".
   - **Hint** finds the next cell you can logically prove, explains it (and
     names the technique — naked/hidden single, pointing pair, box/line
     reduction, naked pair, hidden pair, X-wing), and offers to place it for you.
@@ -35,6 +38,10 @@ answer.
     so you can see what trips you up, and a per-game timeline that bars out the
     gap before each move and flags the slow ones. **Tap any technique** for a
     pop-up with a visual example of how it works.
+  - A **History** tab on the main page lists every game you've finished (or
+    revealed), grouped by date, with its difficulty, source, time, and error
+    count — tap **Details** on any entry to jump straight to that game's
+    move-by-move breakdown in Stats.
   - Finishing a puzzle pops a **celebration screen** with your time and error
     count.
   - Wrong entries are flagged with the reason they can't work — without
