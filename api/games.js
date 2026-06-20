@@ -32,7 +32,11 @@ export default async function handler(req, res) {
       .json({ error: "Cloud sync not configured", configured: false });
   }
 
-  const KEY = COLLECTIONS[req.query.collection] || COLLECTIONS.library;
+  const base = COLLECTIONS[req.query.collection] || COLLECTIONS.library;
+  // Per-profile namespacing: the client sends an opaque id (derived from name + passphrase).
+  // Restrict to a safe charset so it can't reach other keys.
+  const profile = String(req.query.profile || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+  const KEY = profile ? `${base}:${profile}` : base;
 
   try {
     if (req.method === "GET") {

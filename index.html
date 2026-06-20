@@ -181,6 +181,18 @@
       .mpencil span { display: flex; align-items: center; justify-content: center; }
       .mpencil span.struck { color: var(--bad); text-decoration: line-through; }
 
+      .profile-modal { text-align: left; }
+      .profile-modal h2 { text-align: center; }
+      .profile-modal #profileMsg { margin: 0 0 18px; }
+      .profile-modal label { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; font-size: 0.9rem; color: var(--muted); }
+      .profile-modal label .k { font-weight: 400; }
+      .profile-modal input { background: var(--panel); color: var(--text); border: 1px solid var(--line);
+        border-radius: 8px; padding: 10px 12px; font-size: 0.95rem; width: 100%; }
+      .profile-modal .actions { justify-content: center; margin-top: 4px; }
+      .backup-actions { flex-direction: column; align-items: stretch; }
+      .backup-actions > * { width: 100%; text-align: center; }
+      .backup-restore { display: block; }
+
       #exGames { text-align: left; margin: 4px 0 16px; max-height: 220px; overflow-y: auto; }
       #exGames .ex-games-title { font-weight: 600; margin: 0 0 6px; font-size: 0.9rem; }
       #exGames .ex-game-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
@@ -210,6 +222,8 @@
             <button id="reveal">Reveal solution</button>
             <button id="edit">Edit puzzle</button>
             <button id="clear">Clear board</button>
+            <button id="profileBtn">Profile</button>
+            <button id="backupBtn">Backup &amp; restore</button>
           </div>
         </div>
       </div>
@@ -279,6 +293,35 @@
           <p>The timer is stopped and the board is hidden. Resume when you're ready.</p>
           <div class="actions">
             <button id="resumeBtn" class="primary">Resume</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="profileModal" class="overlay" hidden>
+        <div class="modal profile-modal">
+          <h2>Profile</h2>
+          <p id="profileMsg" class="body"></p>
+          <label>Profile name
+            <input id="profileName" placeholder="e.g. dan" autocomplete="off" autocapitalize="none" spellcheck="false" />
+          </label>
+          <label>Passphrase <span class="k">(optional, keeps your data private)</span>
+            <input id="profilePass" type="password" placeholder="••••••" autocomplete="off" />
+          </label>
+          <div class="actions">
+            <button id="profileSignout">Sign out</button>
+            <button id="profileSave" class="primary">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="backupModal" class="overlay" hidden>
+        <div class="modal profile-modal">
+          <h2>Backup &amp; restore</h2>
+          <p id="backupMsg" class="body"></p>
+          <div class="actions backup-actions">
+            <button id="backupDownload" class="primary">Download backup file</button>
+            <label class="file backup-restore">Restore from a backup file<input id="backupFile" type="file" accept="application/json,.json" /></label>
+            <button id="backupClose">Close</button>
           </div>
         </div>
       </div>
@@ -379,6 +422,14 @@
         if (win && !win.hidden) { if (e.key === "Enter" || e.key === "Escape") document.getElementById("winAgain").click(); return; }
         const ex = document.getElementById("exModal");
         if (ex && !ex.hidden) { if (e.key === "Enter" || e.key === "Escape") document.getElementById("exClose").click(); return; }
+        const prof = document.getElementById("profileModal");
+        if (prof && !prof.hidden) {
+          if (e.key === "Escape") prof.hidden = true;
+          else if (e.key === "Enter") document.getElementById("profileSave").click();
+          return; // let the inputs receive all other keys (incl. digits) instead of the board
+        }
+        const bk = document.getElementById("backupModal");
+        if (bk && !bk.hidden) { if (e.key === "Escape" || e.key === "Enter") bk.hidden = true; return; }
         const pm = document.getElementById("pauseModal");
         if (pm && !pm.hidden) {
           if (e.key === "Enter" || e.key === "Escape") document.getElementById("resumeBtn").click();
@@ -960,6 +1011,78 @@
       document.getElementById("modalCancel").addEventListener("click", () => { hideModal(); showExplain("Take your time", "Fix anything that looks off, then press Start solving when you're ready.", "info"); });
       modal.addEventListener("click", (e) => { if (e.target === modal) hideModal(); });
 
+      // ---- profile modal ----
+      const profileModal = document.getElementById("profileModal");
+      function openProfile() {
+        document.getElementById("profileName").value = profile ? profile.name : "";
+        document.getElementById("profilePass").value = "";
+        document.getElementById("profileSignout").style.display = profile ? "" : "none";
+        document.getElementById("profileMsg").textContent = profile
+          ? `Signed in as “${profile.name}”. Your history, stats, and saved games are kept under this profile and synced across devices that use the same name and passphrase.`
+          : "Set a profile to keep your history, stats, and saved games separate from other players on this site. Add a passphrase to keep them private across devices.";
+        profileModal.hidden = false;
+        setTimeout(() => document.getElementById("profileName").focus(), 0);
+      }
+      async function saveProfile() {
+        const name = document.getElementById("profileName").value.trim();
+        const pass = document.getElementById("profilePass").value;
+        if (!name) { document.getElementById("profileMsg").textContent = "Enter a profile name first."; return; }
+        const id = await deriveProfileId(name, pass);
+        if (profile && profile.id === id) { profileModal.hidden = true; return; }
+        localStorage.setItem(PROFILE_KEY, JSON.stringify({ name, id }));
+        location.reload(); // reload so every store re-reads under the new profile namespace
+      }
+      document.getElementById("profileBtn").addEventListener("click", openProfile);
+      document.getElementById("profileSave").addEventListener("click", saveProfile);
+      document.getElementById("profileSignout").addEventListener("click", () => {
+        if (!confirm("Sign out of this profile? Your data stays saved and you can sign back in with the same name and passphrase.")) return;
+        localStorage.removeItem(PROFILE_KEY);
+        location.reload();
+      });
+      profileModal.addEventListener("click", (e) => { if (e.target === profileModal) profileModal.hidden = true; });
+
+      // ---- backup layer 4: manual export/import to an off-device file ----
+      const backupModal = document.getElementById("backupModal");
+      const defaultBackupMsg = "Download a file with all your saved puzzles, play history, and stats — keep it somewhere safe. Restoring merges a backup file into your current data, so you never lose anything.";
+      function openBackup() {
+        const lib = lsGet(STORE_KEY).length, st = lsGet(STATS_KEY).length;
+        document.getElementById("backupMsg").textContent = `${defaultBackupMsg} (Currently: ${lib} saved puzzle${lib === 1 ? "" : "s"}, ${st} game${st === 1 ? "" : "s"}.)`;
+        backupModal.hidden = false;
+      }
+      function exportData() {
+        return { app: "sudoku-coach", format: 1, exportedAt: Date.now(), profile: profile ? profile.name : null, library: lsGet(STORE_KEY), stats: lsGet(STATS_KEY) };
+      }
+      document.getElementById("backupBtn").addEventListener("click", openBackup);
+      document.getElementById("backupDownload").addEventListener("click", () => {
+        const blob = new Blob([JSON.stringify(exportData(), null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `sudoku-coach-backup-${profile ? profile.name.replace(/[^a-z0-9]+/gi, "-") + "-" : ""}${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        document.getElementById("backupMsg").textContent = "Backup downloaded. Store it somewhere safe (cloud drive, email to yourself, etc.).";
+      });
+      document.getElementById("backupFile").addEventListener("change", async (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        try {
+          const data = JSON.parse(await file.text());
+          const lib = Array.isArray(data.library) ? data.library : [];
+          const st = Array.isArray(data.stats) ? data.stats : [];
+          if (!lib.length && !st.length) throw new Error("empty");
+          const mLib = mergeCollections(lsGet(STORE_KEY), lib, (g) => g.id || gridKey(g.grid), (a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+          const mSt = mergeCollections(lsGet(STATS_KEY), st, (g) => String(g.startedAt) + "|" + (g.finishedAt || ""), (a, b) => (b.finishedAt || b.startedAt || 0) - (a.finishedAt || a.startedAt || 0));
+          lsSet(STORE_KEY, mLib); cloudSave("library", mLib);
+          lsSet(STATS_KEY, mSt); cloudSave("stats", mSt);
+          document.getElementById("backupMsg").textContent = `Restored — you now have ${mLib.length} saved puzzles and ${mSt.length} games. Reloading…`;
+          setTimeout(() => location.reload(), 1000);
+        } catch {
+          document.getElementById("backupMsg").textContent = "That file couldn't be read as a Sudoku Coach backup. Pick a .json file you downloaded here.";
+        }
+        e.target.value = "";
+      });
+      document.getElementById("backupClose").addEventListener("click", () => { backupModal.hidden = true; });
+      backupModal.addEventListener("click", (e) => { if (e.target === backupModal) backupModal.hidden = true; });
+
       // Gear dropdown
       const gearMenu = document.getElementById("gearMenu");
       function closeMenu() { gearMenu.hidden = true; }
@@ -1031,7 +1154,24 @@
       }
 
       // ---- saved library + cloud (collections: library, stats) ----
-      const STORE_KEY = "sudoku-coach:games", STATS_KEY = "sudoku-coach:stats", ACTIVE_KEY = "sudoku-coach:active";
+      // ---- profile: namespaces local + cloud storage so each player keeps their own history/stats ----
+      const PROFILE_KEY = "sudoku-coach:profile";
+      let profile = (() => { try { return JSON.parse(localStorage.getItem(PROFILE_KEY)) || null; } catch { return null; } })();
+      let STORE_KEY, STATS_KEY, ACTIVE_KEY;
+      function applyProfileKeys() {
+        const suffix = profile && profile.id ? ":" + profile.id : "";
+        STORE_KEY = "sudoku-coach:games" + suffix;
+        STATS_KEY = "sudoku-coach:stats" + suffix;
+        ACTIVE_KEY = "sudoku-coach:active" + suffix;
+      }
+      applyProfileKeys();
+      // A profile id is derived from name + passphrase so the cloud key isn't guessable without the passphrase.
+      async function deriveProfileId(name, pass) {
+        const data = new TextEncoder().encode(name.trim().toLowerCase() + " " + (pass || ""));
+        const buf = await crypto.subtle.digest("SHA-256", data);
+        return [...new Uint8Array(buf)].slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
+      }
+      function profileParam() { return profile && profile.id ? `&profile=${encodeURIComponent(profile.id)}` : ""; }
       // Difficulty and source now live in the "Ready to start?" popup shown on import,
       // so these point at the modal controls rather than a row on the main page.
       const difficultyEl = document.getElementById("modalDifficulty"), sourceEl = document.getElementById("modalSource");
@@ -1041,7 +1181,37 @@
       sourceEl.addEventListener("input", syncActiveSavedGame);
       const loadBtn = document.getElementById("load"), libraryEl = document.querySelector(".library"), libraryPanel = document.getElementById("savedGames");
       function lsGet(key) { try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; } }
-      function lsSet(key, v) { localStorage.setItem(key, JSON.stringify(v)); }
+      function lsSet(key, v) {
+        localStorage.setItem(key, JSON.stringify(v));
+        // Backup layer 3: every write to the library/stats also feeds the rolling local snapshots.
+        if (key === STORE_KEY || key === STATS_KEY) snapshotData();
+      }
+
+      // ---- backup layer 3: rolling local snapshots (auto-recover if primary data is ever lost) ----
+      const MAX_SNAPSHOTS = 12;
+      function backupKey() { return "sudoku-coach:backups" + (profile && profile.id ? ":" + profile.id : ""); }
+      function snapshotData() {
+        try {
+          const library = JSON.parse(localStorage.getItem(STORE_KEY)) || [];
+          const stats = JSON.parse(localStorage.getItem(STATS_KEY)) || [];
+          if (!library.length && !stats.length) return; // never snapshot (or overwrite) with an empty state
+          const snaps = JSON.parse(localStorage.getItem(backupKey())) || [];
+          const sig = `${library.length}|${stats.length}|${(stats[0] || {}).finishedAt || ""}|${(library[0] || {}).savedAt || ""}`;
+          if (snaps[0] && snaps[0].sig === sig) return; // dedupe back-to-back identical states
+          snaps.unshift({ ts: Date.now(), sig, library, stats });
+          localStorage.setItem(backupKey(), JSON.stringify(snaps.slice(0, MAX_SNAPSHOTS)));
+        } catch {}
+      }
+      // If both library and stats are empty but a snapshot holds data, restore the most recent non-empty one.
+      function recoverFromBackupIfEmpty() {
+        if ((lsGet(STORE_KEY).length) || (lsGet(STATS_KEY).length)) return false;
+        const snaps = JSON.parse(localStorage.getItem(backupKey()) || "[]");
+        const snap = snaps.find((s) => (s.library && s.library.length) || (s.stats && s.stats.length));
+        if (!snap) return false;
+        lsSet(STORE_KEY, snap.library || []); cloudSave("library", snap.library || []);
+        lsSet(STATS_KEY, snap.stats || []); cloudSave("stats", snap.stats || []);
+        return true;
+      }
 
       // ---- in-progress game persistence (survives closing the tab / reloading later) ----
       function clearActiveGame() { try { localStorage.removeItem(ACTIVE_KEY); } catch {} }
@@ -1086,14 +1256,14 @@
       }
       let cloudOn = false;
       async function cloudLoad(collection) {
-        const r = await fetch(`/api/games?collection=${collection}`);
+        const r = await fetch(`/api/games?collection=${collection}${profileParam()}`);
         if (r.status === 501) { cloudOn = false; return null; }
         if (!r.ok) throw new Error("sync unavailable");
         cloudOn = true; return (await r.json()).games || [];
       }
       function cloudSave(collection, items) {
         if (!cloudOn) return;
-        fetch(`/api/games?collection=${collection}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ games: items }) }).catch(() => {});
+        fetch(`/api/games?collection=${collection}${profileParam()}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ games: items }) }).catch(() => {});
       }
       const syncNote = () => (cloudOn ? " and synced across your devices" : " on this device");
       function renderLibrary() {
@@ -1117,6 +1287,9 @@
             lsSet(STATS_KEY, merged); cloudSave("stats", merged);
           }
         } catch {}
+        // Backup layer 3: if cloud + local both came back empty, fall back to the newest local snapshot.
+        if (recoverFromBackupIfEmpty()) showExplain("Recovered your data", "Your saved games and history were restored from an automatic local backup.", "ok");
+        else snapshotData(); // keep a fresh baseline snapshot of the merged state
         renderLibrary();
       }
       // Union local + cloud so neither an empty cloud nor a stale device can wipe the other's data.
