@@ -968,7 +968,7 @@
         }
         setTimeout(() => { cc.innerHTML = ""; }, 4200);
       }
-      document.getElementById("winAgain").addEventListener("click", () => { document.getElementById("winModal").hidden = true; resetToEdit(); });
+      document.getElementById("winAgain").addEventListener("click", () => { document.getElementById("winModal").hidden = true; resetToEdit(); maybeRemindBackup(); });
       document.getElementById("winStats").addEventListener("click", () => { document.getElementById("winModal").hidden = true; if (statsEl.hidden) document.getElementById("statsBtn").click(); });
 
       // ---- timer + session tracking (active time only; pauses don't count) ----
@@ -1023,6 +1023,7 @@
         session.solved = solved; session.finishedAt = Date.now();
         lastTotalMs = session.totalMs;
         const stats = lsGet(STATS_KEY); stats.unshift(session); lsSet(STATS_KEY, stats); cloudSave("stats", stats);
+        bumpBackupCounter();
         session = null; clearActiveGame();
       }
 
@@ -1114,16 +1115,36 @@
         backupModal.hidden = false;
       }
       function exportData() {
-        return { app: "sudoku-coach", format: 1, exportedAt: Date.now(), profile: profile ? profile.name : null, library: lsGet(STORE_KEY), stats: lsGet(STATS_KEY) };
+        let active = null; try { active = JSON.parse(localStorage.getItem(ACTIVE_KEY)); } catch {}
+        return { app: "sudoku-coach", format: 2, exportedAt: Date.now(), profile: profile ? profile.name : null, library: lsGet(STORE_KEY), stats: lsGet(STATS_KEY), active: active || null };
       }
-      document.getElementById("backupBtn").addEventListener("click", openBackup);
-      document.getElementById("backupDownload").addEventListener("click", () => {
+      function downloadBackup() {
         const blob = new Blob([JSON.stringify(exportData(), null, 2)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
         a.download = `sudoku-coach-backup-${profile ? profile.name.replace(/[^a-z0-9]+/gi, "-") + "-" : ""}${new Date().toISOString().slice(0, 10)}.json`;
         document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        markBackedUp();
+      }
+      // ---- auto off-device backup reminder ----
+      const BACKUP_EVERY_GAMES = 10, BACKUP_EVERY_MS = 14 * 24 * 60 * 60 * 1000;
+      function backupMetaKey() { return "sudoku-coach:backupMeta" + (profile && profile.id ? ":" + profile.id : ""); }
+      function backupMeta() { try { return JSON.parse(localStorage.getItem(backupMetaKey())) || {}; } catch { return {}; } }
+      function setBackupMeta(m) { try { localStorage.setItem(backupMetaKey(), JSON.stringify(m)); } catch {} }
+      function markBackedUp() { setBackupMeta({ lastTs: Date.now(), sinceGames: 0 }); }
+      function bumpBackupCounter() { const m = backupMeta(); setBackupMeta({ lastTs: m.lastTs || 0, sinceGames: (m.sinceGames || 0) + 1 }); }
+      // Surfaced on the edit screen after finishing a game, so it isn't overwritten by the win flow.
+      function maybeRemindBackup() {
+        const m = backupMeta(), since = m.sinceGames || 0, last = m.lastTs || 0;
+        const due = since >= BACKUP_EVERY_GAMES || (last && Date.now() - last > BACKUP_EVERY_MS);
+        if (!due) return;
+        showExplain("Time to back up", `You've played ${since} game${since === 1 ? "" : "s"} since your last off-device backup. Download a backup file so your history is safe even if this browser's data is cleared.`, "info",
+          { label: "Download backup", onClick: () => { downloadBackup(); showExplain("Backup downloaded", "Stored safely — keep it off this device (cloud drive, email).", "ok"); } });
+      }
+      document.getElementById("backupBtn").addEventListener("click", openBackup);
+      document.getElementById("backupDownload").addEventListener("click", () => {
+        downloadBackup();
         document.getElementById("backupMsg").textContent = "Backup downloaded. Store it somewhere safe (cloud drive, email to yourself, etc.).";
       });
       document.getElementById("backupFile").addEventListener("change", async (e) => {
@@ -1137,6 +1158,8 @@
           const mSt = mergeCollections(lsGet(STATS_KEY), st, (g) => String(g.startedAt) + "|" + (g.finishedAt || ""), (a, b) => (b.finishedAt || b.startedAt || 0) - (a.finishedAt || a.startedAt || 0));
           lsSet(STORE_KEY, mLib); cloudSave("library", mLib);
           lsSet(STATS_KEY, mSt); cloudSave("stats", mSt);
+          // Restore an in-progress game from the backup only if there isn't one locally already.
+          if (data.active && !localStorage.getItem(ACTIVE_KEY)) { try { localStorage.setItem(ACTIVE_KEY, JSON.stringify(data.active)); } catch {} }
           document.getElementById("backupMsg").textContent = `Restored — you now have ${mLib.length} saved puzzles and ${mSt.length} games. Reloading…`;
           setTimeout(() => location.reload(), 1000);
         } catch {
@@ -1317,16 +1340,51 @@
       difficultyEl.addEventListener("change", syncActiveSavedGame);
       sourceEl.addEventListener("input", syncActiveSavedGame);
       const loadBtn = document.getElementById("load"), libraryPanel = document.getElementById("savedGames");
-      function lsGet(key) { try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; } }
+      function lsGet(key) {
+        try { const v = JSON.parse(localStorage.getItem(key)); return Array.isArray(v) ? v : []; } catch { return []; }
+      }
+      let storageWarned = false;
       function lsSet(key, v) {
-        localStorage.setItem(key, JSON.stringify(v));
-        // Backup layer 3: every write to the library/stats also feeds the rolling local snapshots.
-        if (key === STORE_KEY || key === STATS_KEY) snapshotData();
+        const json = JSON.stringify(v);
+        let saved = false;
+        for (let attempt = 0; attempt < 5 && !saved; attempt++) {
+          try { localStorage.setItem(key, json); saved = true; }
+          catch { if (!trimSnapshots()) break; } // hit quota — free space by dropping old snapshots, then retry
+        }
+        if (!saved && !storageWarned) {
+          storageWarned = true;
+          try { showExplain("Storage is full", "This device's browser storage is full, so the latest change may not have been saved here. Open Backup & restore to download a backup, then clear some space.", "bad"); } catch {}
+        }
+        // Backup layer 3: every successful write to the library/stats also feeds the rolling local snapshots.
+        if (saved && (key === STORE_KEY || key === STATS_KEY)) snapshotData();
+        return saved;
+      }
+      // Free localStorage space when a write hits quota: halve the rolling snapshots, or drop them entirely.
+      function trimSnapshots() {
+        try {
+          const k = backupKey();
+          const raw = localStorage.getItem(k);
+          if (raw === null) return false;
+          const snaps = JSON.parse(raw) || [];
+          if (snaps.length > 1) { localStorage.setItem(k, JSON.stringify(snaps.slice(0, Math.floor(snaps.length / 2)))); return true; }
+          localStorage.removeItem(k); return true;
+        } catch { try { localStorage.removeItem(backupKey()); return true; } catch { return false; } }
       }
 
       // ---- backup layer 3: rolling local snapshots (auto-recover if primary data is ever lost) ----
-      const MAX_SNAPSHOTS = 12;
+      const RECENT_SNAPSHOTS = 10, MAX_SNAPSHOTS = 30;
       function backupKey() { return "sudoku-coach:backups" + (profile && profile.id ? ":" + profile.id : ""); }
+      // Keep the most recent RECENT_SNAPSHOTS changes plus the newest snapshot from each earlier day, capped at MAX_SNAPSHOTS.
+      function retainSnapshots(snaps) {
+        const dayOf = (ts) => new Date(ts).toISOString().slice(0, 10);
+        const keep = [], seenDay = new Set();
+        snaps.forEach((s, i) => {
+          const d = dayOf(s.ts);
+          if (i < RECENT_SNAPSHOTS) { keep.push(s); seenDay.add(d); }
+          else if (!seenDay.has(d)) { seenDay.add(d); keep.push(s); }
+        });
+        return keep.slice(0, MAX_SNAPSHOTS);
+      }
       function snapshotData() {
         try {
           const library = JSON.parse(localStorage.getItem(STORE_KEY)) || [];
@@ -1336,7 +1394,9 @@
           const sig = `${library.length}|${stats.length}|${(stats[0] || {}).finishedAt || ""}|${(library[0] || {}).savedAt || ""}`;
           if (snaps[0] && snaps[0].sig === sig) return; // dedupe back-to-back identical states
           snaps.unshift({ ts: Date.now(), sig, library, stats });
-          localStorage.setItem(backupKey(), JSON.stringify(snaps.slice(0, MAX_SNAPSHOTS)));
+          const retained = retainSnapshots(snaps);
+          try { localStorage.setItem(backupKey(), JSON.stringify(retained)); }
+          catch { try { localStorage.setItem(backupKey(), JSON.stringify(retained.slice(0, RECENT_SNAPSHOTS))); } catch {} } // quota fallback
         } catch {}
       }
       // If both library and stats are empty but a snapshot holds data, restore the most recent non-empty one.
@@ -1398,10 +1458,37 @@
         if (!r.ok) throw new Error("sync unavailable");
         cloudOn = true; return (await r.json()).games || [];
       }
+      // Cloud writes are coalesced (latest state per collection wins) and retried with backoff,
+      // so a transient network blip never leaves the cloud copy stale.
+      const cloudQueue = {}, cloudBusy = {}, cloudRetry = {}, cloudTimer = {};
       function cloudSave(collection, items) {
         if (!cloudOn) return;
-        fetch(`/api/games?collection=${collection}${profileParam()}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ games: items }) }).catch(() => {});
+        cloudQueue[collection] = items; // remember the latest state to push
+        scheduleCloudFlush(collection, 0);
       }
+      function scheduleCloudFlush(collection, delay) {
+        clearTimeout(cloudTimer[collection]);
+        cloudTimer[collection] = setTimeout(() => flushCloud(collection), delay);
+      }
+      async function flushCloud(collection) {
+        if (cloudBusy[collection] || !(collection in cloudQueue)) return;
+        cloudBusy[collection] = true;
+        const items = cloudQueue[collection];
+        try {
+          const r = await fetch(`/api/games?collection=${collection}${profileParam()}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ games: items }) });
+          if (!r.ok) throw new Error("status " + r.status);
+          cloudRetry[collection] = 0;
+          if (cloudQueue[collection] === items) delete cloudQueue[collection]; // nothing newer arrived while saving
+        } catch {
+          const n = (cloudRetry[collection] = (cloudRetry[collection] || 0) + 1);
+          scheduleCloudFlush(collection, Math.min(30000, 500 * 2 ** n)); // back off, then retry
+        } finally {
+          cloudBusy[collection] = false;
+          if (collection in cloudQueue && cloudQueue[collection] !== items && !cloudRetry[collection]) scheduleCloudFlush(collection, 0);
+        }
+      }
+      // Re-push anything still pending the moment the network comes back.
+      window.addEventListener("online", () => Object.keys(cloudQueue).forEach((c) => { cloudRetry[c] = 0; scheduleCloudFlush(c, 0); }));
       const syncNote = () => (cloudOn ? " and synced across your devices" : " on this device");
       function renderLibrary() {
         const games = lsGet(STORE_KEY);
