@@ -39,6 +39,8 @@
         gap: 10px; margin-bottom: 14px; padding-right: 54px; }
       .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
       .tabs button, .tabs label.file { padding: 8px 13px; font-size: 0.9rem; }
+      .whoami { color: var(--muted); font-weight: 600; }
+      .whoami.signed { color: var(--accent); border-color: var(--accent); }
       .menu { position: absolute; top: 0; right: 0; }
       #gear { font-size: 1.2rem; padding: 8px 12px; line-height: 1; }
       .dropdown { position: absolute; right: 0; top: calc(100% + 6px); z-index: 100;
@@ -217,6 +219,7 @@
         <div class="tabs">
           <label class="file">Import screenshot<input id="file" type="file" accept="image/*" /></label>
           <button id="historyBtn">History</button>
+          <button id="whoami" class="whoami" title="Profile — tap to switch or sign in">Playing as: Guest</button>
         </div>
         <div class="menu">
           <button id="gear" aria-label="Menu" title="Menu">⚙</button>
@@ -1086,6 +1089,14 @@
         location.reload(); // reload so every store re-reads under the new profile namespace
       }
       document.getElementById("profileBtn").addEventListener("click", openProfile);
+      // "Playing as" chip in the top bar — shows Guest vs the active profile, opens the profile dialog.
+      const whoamiEl = document.getElementById("whoami");
+      function renderWhoami() {
+        whoamiEl.textContent = `Playing as: ${profile ? profile.name : "Guest"}`;
+        whoamiEl.classList.toggle("signed", !!profile);
+      }
+      renderWhoami();
+      whoamiEl.addEventListener("click", openProfile);
       document.getElementById("profileSave").addEventListener("click", saveProfile);
       document.getElementById("profileSignout").addEventListener("click", () => {
         if (!confirm("Sign out of this profile? Your data stays saved and you can sign back in with the same name and passphrase.")) return;
