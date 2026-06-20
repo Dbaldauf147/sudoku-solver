@@ -1391,7 +1391,9 @@
         for (const g of games) {
           const header = savedDateHeader(g.savedAt);
           if (header !== lastHeader) { rows += `<h3>${esc(header)}</h3>`; lastHeader = header; }
-          const time = new Date(g.savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+          const when = new Date(g.savedAt);
+          const date = when.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+          const time = when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
           if (g.id === editingId) {
             rows += `<div class="saved-row" data-id="${esc(g.id)}">
               <div class="saved-edit">
@@ -1402,7 +1404,7 @@
             </div>`;
           } else {
             rows += `<div class="saved-row">
-              <div class="saved-meta"><b>${esc(g.difficulty)}</b> · ${esc(g.source)}<br><span class="k">${esc(time)}</span></div>
+              <div class="saved-meta"><b>${esc(g.difficulty)}</b> · ${esc(g.source)}<br><span class="k">${esc(date)} · ${esc(time)}</span></div>
               <div class="saved-actions"><button class="load-one" data-id="${esc(g.id)}">Load</button><button class="edit-one" data-id="${esc(g.id)}">Edit</button><button class="del-one" data-id="${esc(g.id)}">Delete</button></div>
             </div>`;
           }
@@ -1497,25 +1499,33 @@
       historyBtn.addEventListener("click", () => { if (historyPanel.hidden) openHistory(); else closeHistory(); });
 
       // ---- built-in catalog (shipped with the app, available to every user) ----
+      // Each entry: [difficulty, 81-char puzzle, date (YYYY-MM-DD)].
       const CATALOG_RAW = [
-        ["Easy", "530070000600195000098000060800060003400803001700020006060000280000419005000080079"],
-        ["Medium", "003020600900305001001806400008102900700000008006708200002609500800203009005010300"],
-        ["Medium", "200080300060070084030500209000105408000000000402706000301007040720040060004010003"],
-        ["Hard", "000000907000420180000705026100904000050000040000507009920108000034059000507000000"],
-        ["Hard", "030050040008010500460000012070502080000603000040109030250000098001020600080060020"],
+        ["Easy", "530070000600195000098000060800060003400803001700020006060000280000419005000080079", "2025-01-06"],
+        ["Medium", "003020600900305001001806400008102900700000008006708200002609500800203009005010300", "2025-02-10"],
+        ["Medium", "200080300060070084030500209000105408000000000402706000301007040720040060004010003", "2025-03-17"],
+        ["Hard", "000000907000420180000705026100904000050000040000507009920108000034059000507000000", "2025-04-21"],
+        ["Hard", "030050040008010500460000012070502080000603000040109030250000098001020600080060020", "2025-05-26"],
       ];
       function parsePuzzle(str) {
         const g = [];
         for (let r = 0; r < 9; r++) { g.push([]); for (let c = 0; c < 9; c++) g[r].push(Number(str[r * 9 + c]) || 0); }
         return g;
       }
-      const CATALOG = CATALOG_RAW.filter(([, s]) => s.length === 81).map(([difficulty, s], i) => ({ difficulty, grid: parsePuzzle(s), n: i + 1 }));
+      // Format a YYYY-MM-DD string without timezone shifting (avoids Date() parsing as UTC).
+      function fmtCatalogDate(iso) {
+        if (!iso) return "";
+        const [y, m, d] = iso.split("-").map(Number);
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        return `${months[m - 1]} ${d}, ${y}`;
+      }
+      const CATALOG = CATALOG_RAW.filter(([, s]) => s.length === 81).map(([difficulty, s, date], i) => ({ difficulty, grid: parsePuzzle(s), date, n: i + 1 }));
       const catalogEl = document.getElementById("catalog");
-      CATALOG.forEach((p, i) => { const o = document.createElement("option"); o.value = i; o.textContent = `Catalog · ${p.difficulty} #${p.n}`; catalogEl.appendChild(o); });
+      CATALOG.forEach((p, i) => { const o = document.createElement("option"); o.value = i; o.textContent = `Catalog · ${p.difficulty} #${p.n}${p.date ? " · " + fmtCatalogDate(p.date) : ""}`; catalogEl.appendChild(o); });
       document.getElementById("play").addEventListener("click", () => {
         const p = CATALOG[Number(catalogEl.value)]; if (!p) return;
         resetToEdit(); writeGrid(p.grid); difficultyEl.value = p.difficulty; sourceEl.value = "Catalog"; renderPencils();
-        showReady(`Catalog · ${p.difficulty} #${p.n} loaded. Start the timer and play it from scratch?`);
+        showReady(`Catalog · ${p.difficulty} #${p.n}${p.date ? " · " + fmtCatalogDate(p.date) : ""} loaded. Start the timer and play it from scratch?`);
       });
 
       // ---- stats / deep dive ----
