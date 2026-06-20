@@ -400,7 +400,10 @@
       const inputs = [], cellEls = [], pencils = [], marks = [];
       let solving = false, solution = null, givens = blank(false), lastHint = null;
       let selected = null, entryMode = "normal", pendingTech = null;
-      let hlMatches = localStorage.getItem("sudoku-coach:hlmatches") !== "off"; // highlight all cells with the same number
+      // Read once, defensively: on iOS Safari with storage blocked, localStorage access can throw,
+      // and an unguarded read here would halt the whole script (dead buttons). Default to on.
+      let hlMatches = true;
+      try { hlMatches = localStorage.getItem("sudoku-coach:hlmatches") !== "off"; } catch {}
       let session = null, timerId = null;
 
       function blank(v) { return Array.from({ length: 9 }, () => Array(9).fill(v)); }
@@ -1244,7 +1247,7 @@
       renderHlToggle();
       hlToggle.addEventListener("click", () => {
         hlMatches = !hlMatches;
-        localStorage.setItem("sudoku-coach:hlmatches", hlMatches ? "on" : "off");
+        try { localStorage.setItem("sudoku-coach:hlmatches", hlMatches ? "on" : "off"); } catch {}
         renderHlToggle();
         if (selected) select(selected.r, selected.c);
         else for (const row of cellEls) for (const el of row) el.classList.remove("same");
