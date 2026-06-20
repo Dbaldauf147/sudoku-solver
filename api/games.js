@@ -19,6 +19,7 @@ const REST_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_RE
 const COLLECTIONS = {
   library: "sudoku-coach:games",
   stats: "sudoku-coach:stats",
+  share: "sudoku-coach:share", // shared catalogues, keyed by a share code (passed as `profile`)
 };
 
 // Only build a client when credentials are present; otherwise the endpoint
