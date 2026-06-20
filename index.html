@@ -78,7 +78,7 @@
       .pencil {
         position: absolute; inset: 0; display: grid;
         grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
-        font-size: clamp(0.55rem, 2vw, 0.74rem); line-height: 1; color: var(--pencil); font-weight: 700;
+        font-size: clamp(0.4rem, 1.5vw, 0.56rem); line-height: 1; color: var(--pencil); font-weight: 700;
         pointer-events: none; z-index: 1;
       }
       .pencil span { display: flex; align-items: center; justify-content: center; }
@@ -219,6 +219,7 @@
             <button id="start">Start solving</button>
             <button id="statsBtn">Stats</button>
             <button id="check">Check entries</button>
+            <button id="hlToggle">Highlight matches: On</button>
             <button id="reveal">Reveal solution</button>
             <button id="edit">Edit puzzle</button>
             <button id="clear">Clear board</button>
@@ -365,6 +366,7 @@
       const inputs = [], cellEls = [], pencils = [], marks = [];
       let solving = false, solution = null, givens = blank(false), lastHint = null;
       let selected = null, entryMode = "normal", pendingTech = null;
+      let hlMatches = localStorage.getItem("sudoku-coach:hlmatches") !== "off"; // highlight all cells with the same number
       let session = null, timerId = null;
 
       function blank(v) { return Array.from({ length: 9 }, () => Array(9).fill(v)); }
@@ -463,14 +465,21 @@
         const val = inputs[r][c].value;
         for (let i = 0; i < 9; i++) for (let j = 0; j < 9; j++) {
           cellEls[i][j].classList.toggle("selected", i === r && j === c);
-          cellEls[i][j].classList.toggle("same", !!val && inputs[i][j].value === val && !(i === r && j === c));
+          cellEls[i][j].classList.toggle("same", hlMatches && !!val && inputs[i][j].value === val && !(i === r && j === c));
         }
+      }
+      // Highlight every cell holding digit n across the board (used when entering a number, e.g. all 8s).
+      function highlightDigit(n) {
+        const s = String(n);
+        for (let i = 0; i < 9; i++) for (let j = 0; j < 9; j++)
+          cellEls[i][j].classList.toggle("same", hlMatches && !!n && inputs[i][j].value === s && !(selected && selected.r === i && selected.c === j));
       }
       function applyDigit(n) {
         if (!selected) return;
         const { r, c } = selected;
         if (entryMode === "candidate" && solving) toggleMark(r, c, n);
         else setValue(r, c, n);
+        highlightDigit(n);
       }
       function applyClear() {
         if (!selected) return;
@@ -1100,6 +1109,18 @@
       document.getElementById("gear").addEventListener("click", (e) => { e.stopPropagation(); gearMenu.hidden = !gearMenu.hidden; });
       gearMenu.addEventListener("click", () => closeMenu());
       document.addEventListener("click", (e) => { if (!gearMenu.hidden && !e.target.closest(".menu")) closeMenu(); });
+
+      // Highlight-matches setting: when on, all cells sharing the selected/entered digit are highlighted.
+      const hlToggle = document.getElementById("hlToggle");
+      function renderHlToggle() { hlToggle.textContent = `Highlight matches: ${hlMatches ? "On" : "Off"}`; }
+      renderHlToggle();
+      hlToggle.addEventListener("click", () => {
+        hlMatches = !hlMatches;
+        localStorage.setItem("sudoku-coach:hlmatches", hlMatches ? "on" : "off");
+        renderHlToggle();
+        if (selected) select(selected.r, selected.c);
+        else for (const row of cellEls) for (const el of row) el.classList.remove("same");
+      });
 
       document.getElementById("undo").addEventListener("click", undo);
 
