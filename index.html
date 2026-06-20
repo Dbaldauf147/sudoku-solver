@@ -896,8 +896,19 @@
       }
       function celebrate(ms, errs, diff) {
         document.getElementById("winMsg").textContent = `${diff ? diff + " " : ""}solved in ${fmtTime(ms)} with ${errs} error${errs === 1 ? "" : "s"}. Nice work!`;
+        playWinSound();
         launchConfetti();
         document.getElementById("winModal").hidden = false;
+      }
+      // Victory chime, played when a puzzle is completed. Loaded lazily and replayable.
+      let winSound = null;
+      function playWinSound() {
+        try {
+          if (!winSound) { winSound = new Audio("assets/win.m4a"); winSound.preload = "auto"; }
+          winSound.currentTime = 0;
+          const p = winSound.play();
+          if (p && p.catch) p.catch(() => {}); // ignore autoplay/codec rejections
+        } catch {}
       }
       function launchConfetti() {
         const cc = document.getElementById("confetti"); cc.innerHTML = "";
