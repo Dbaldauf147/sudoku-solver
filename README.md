@@ -72,6 +72,17 @@ answer.
   devices; when it isn't, the front end silently falls back to the browser's
   `localStorage` (per device), so nothing breaks either way.
 
+  Your game data is protected by four backup layers: (1) primary
+  `localStorage`; (2) cloud sync — coalesced and **retried with backoff**, and
+  re-pushed when the network reconnects; (3) **rolling local snapshots** (the
+  last several changes plus one per earlier day) that auto-restore if the
+  primary store is ever emptied; and (4) a manual **Backup & restore** file
+  (`Download backup file` / `Restore from a backup file`). The app **nudges
+  you to download a backup** every so often, the export includes any
+  in-progress game, restoring **merges** (never overwrites), and writes are
+  **quota-safe** — if storage fills up, old snapshots are pruned and you're
+  warned rather than silently losing data.
+
 ### Cross-device sync (optional)
 
 To sync saved puzzles across devices, connect a Redis store:
