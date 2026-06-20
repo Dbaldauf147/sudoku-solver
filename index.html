@@ -228,10 +228,10 @@
         </div>
       </div>
 
-      <div class="row setup-extra library" hidden>
+      <div class="row setup-extra library">
         <button id="load">Saved games</button>
       </div>
-      <div class="row setup-extra">
+      <div class="row setup-extra catalog-row">
         <select id="catalog" title="Built-in puzzles"></select>
         <button id="play">Play from catalog</button>
       </div>
@@ -1179,7 +1179,7 @@
       // updates the library entry that was auto-saved when the screenshot was loaded.
       difficultyEl.addEventListener("change", syncActiveSavedGame);
       sourceEl.addEventListener("input", syncActiveSavedGame);
-      const loadBtn = document.getElementById("load"), libraryEl = document.querySelector(".library"), libraryPanel = document.getElementById("savedGames");
+      const loadBtn = document.getElementById("load"), libraryPanel = document.getElementById("savedGames");
       function lsGet(key) { try { return JSON.parse(localStorage.getItem(key)) || []; } catch { return []; } }
       function lsSet(key, v) {
         localStorage.setItem(key, JSON.stringify(v));
@@ -1268,7 +1268,6 @@
       const syncNote = () => (cloudOn ? " and synced across your devices" : " on this device");
       function renderLibrary() {
         const games = lsGet(STORE_KEY);
-        libraryEl.hidden = games.length === 0;
         loadBtn.textContent = games.length ? `Saved games (${games.length})` : "Saved games";
         if (!libraryPanel.hidden) renderLibraryPanel();
       }
