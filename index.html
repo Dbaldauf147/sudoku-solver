@@ -158,6 +158,11 @@
       .saved-row .saved-edit { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
       .saved-row .saved-edit select, .saved-row .saved-edit input { padding: 6px 10px; font-size: 0.85rem; }
       .saved-row .saved-edit input { max-width: 130px; }
+      .saved-row .saved-left { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+      .saved-row .share-check { width: 18px; height: 18px; flex-shrink: 0; cursor: pointer; }
+      .lib-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 4px 0 10px; }
+      .lib-tools label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 0.9rem; cursor: pointer; }
+      .lib-tools .spacer { flex: 1; }
       .hintline { color: var(--muted); font-size: 0.8rem; margin: 6px 0 0; }
       .spark { position: relative; height: 48px; margin: 8px 0 6px; }
       .spark svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
@@ -1133,24 +1138,28 @@
 
       // ---- share a catalogue with another user (publishes the library under a short code) ----
       const shareModal = document.getElementById("shareModal");
+      let pendingShareGames = null; // when set, "Create a share link" shares just this subset
       function genShareCode() {
         const alpha = "abcdefghjkmnpqrstuvwxyz23456789"; // omit easily-confused chars
         return [...crypto.getRandomValues(new Uint8Array(8))].map((b) => alpha[b % alpha.length]).join("");
       }
-      function openShare(prefill) {
+      function openShare(prefill, games) {
+        pendingShareGames = games && games.length ? games : null;
         document.getElementById("shareCreated").hidden = true;
         document.getElementById("shareImportCode").value = prefill || "";
-        const n = lsGet(STORE_KEY).length;
+        const n = (pendingShareGames || lsGet(STORE_KEY)).length;
         document.getElementById("shareMsg").textContent = !cloudOn
           ? "Sharing by code needs cloud sync, which isn't set up here yet. You can still share via Backup & restore — download a file and send it."
           : prefill
             ? "Someone shared a catalogue with you. Press “Import this code” to add their puzzles to yours (nothing you have is replaced)."
-            : `Create a link to share your ${n} saved puzzle${n === 1 ? "" : "s"} with someone, or paste a code below to import a catalogue shared with you.`;
+            : pendingShareGames
+              ? `Press “Create a share link” to share the ${n} selected puzzle${n === 1 ? "" : "s"}, then send the code or link.`
+              : `Create a link to share your ${n} saved puzzle${n === 1 ? "" : "s"} with someone, or paste a code below to import a catalogue shared with you.`;
         shareModal.hidden = false;
       }
       document.getElementById("shareBtn").addEventListener("click", () => openShare());
       document.getElementById("shareCreate").addEventListener("click", async () => {
-        const games = lsGet(STORE_KEY);
+        const games = pendingShareGames || lsGet(STORE_KEY);
         if (!games.length) { document.getElementById("shareMsg").textContent = "You have no saved puzzles to share yet — save some first."; return; }
         if (!cloudOn) { document.getElementById("shareMsg").textContent = "Sharing by code needs cloud sync. Use Backup & restore to share a file instead."; return; }
         const code = genShareCode();
@@ -1487,13 +1496,23 @@
             </div>`;
           } else {
             rows += `<div class="saved-row">
-              <div class="saved-meta"><b>${esc(g.difficulty)}</b> · ${esc(g.source)}<br><span class="k">${esc(time)}</span></div>
+              <label class="saved-left">
+                <input type="checkbox" class="share-check" data-id="${esc(g.id)}" title="Select to share" />
+                <span class="saved-meta"><b>${esc(g.difficulty)}</b> · ${esc(g.source)}<br><span class="k">${esc(time)}</span></span>
+              </label>
               <div class="saved-actions"><button class="load-one" data-id="${esc(g.id)}">Load</button><button class="edit-one" data-id="${esc(g.id)}">Edit</button><button class="del-one" data-id="${esc(g.id)}">Delete</button></div>
             </div>`;
           }
         }
-        libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Saved games <span class="k">(${games.length})</span></h2>${rows}`;
+        const tools = `<div class="lib-tools"><label><input type="checkbox" id="selAll" /> Select all</label><span class="spacer"></span><button id="shareSel" class="primary">Share selected</button></div>`;
+        libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Saved games <span class="k">(${games.length})</span></h2>${tools}${rows}`;
         document.getElementById("lb").onclick = closeLibrary;
+        document.getElementById("selAll").onchange = (e) => libraryPanel.querySelectorAll(".share-check").forEach((c) => (c.checked = e.target.checked));
+        document.getElementById("shareSel").onclick = () => {
+          const ids = [...libraryPanel.querySelectorAll(".share-check:checked")].map((c) => c.dataset.id);
+          const all = lsGet(STORE_KEY);
+          openShare(null, ids.length ? all.filter((g) => ids.includes(g.id)) : all);
+        };
         libraryPanel.querySelectorAll(".load-one").forEach((b) => (b.onclick = () => loadSavedGame(b.dataset.id)));
         libraryPanel.querySelectorAll(".edit-one").forEach((b) => (b.onclick = () => { editingId = b.dataset.id; renderLibraryPanel(); }));
         libraryPanel.querySelectorAll(".cancel-one").forEach((b) => (b.onclick = () => { editingId = null; renderLibraryPanel(); }));
