@@ -224,6 +224,7 @@
             <button id="edit">Edit puzzle</button>
             <button id="clear">Clear board</button>
             <button id="profileBtn">Profile</button>
+            <button id="shareBtn">Share catalogue</button>
             <button id="backupBtn">Backup &amp; restore</button>
           </div>
         </div>
@@ -323,6 +324,31 @@
             <button id="backupDownload" class="primary">Download backup file</button>
             <label class="file backup-restore">Restore from a backup file<input id="backupFile" type="file" accept="application/json,.json" /></label>
             <button id="backupClose">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="shareModal" class="overlay" hidden>
+        <div class="modal profile-modal">
+          <h2>Share catalogue</h2>
+          <p id="shareMsg" class="body"></p>
+          <div id="shareCreated" hidden>
+            <label>Share code
+              <input id="shareCode" readonly />
+            </label>
+            <label>Share link
+              <input id="shareLink" readonly />
+            </label>
+            <button id="shareCopy" class="primary" style="width:100%">Copy link</button>
+          </div>
+          <hr style="border:none;border-top:1px solid var(--line);margin:16px 0" />
+          <label>Import a catalogue someone shared
+            <input id="shareImportCode" placeholder="Enter a share code" autocapitalize="none" spellcheck="false" />
+          </label>
+          <div class="actions backup-actions">
+            <button id="shareCreate" class="primary">Create a share link</button>
+            <button id="shareImport">Import this code</button>
+            <button id="shareClose">Close</button>
           </div>
         </div>
       </div>
@@ -432,6 +458,8 @@
         }
         const bk = document.getElementById("backupModal");
         if (bk && !bk.hidden) { if (e.key === "Escape" || e.key === "Enter") bk.hidden = true; return; }
+        const sh = document.getElementById("shareModal");
+        if (sh && !sh.hidden) { if (e.key === "Escape") sh.hidden = true; return; } // let inputs receive digits/letters
         const pm = document.getElementById("pauseModal");
         if (pm && !pm.hidden) {
           if (e.key === "Enter" || e.key === "Escape") document.getElementById("resumeBtn").click();
@@ -1102,6 +1130,63 @@
       });
       document.getElementById("backupClose").addEventListener("click", () => { backupModal.hidden = true; });
       backupModal.addEventListener("click", (e) => { if (e.target === backupModal) backupModal.hidden = true; });
+
+      // ---- share a catalogue with another user (publishes the library under a short code) ----
+      const shareModal = document.getElementById("shareModal");
+      function genShareCode() {
+        const alpha = "abcdefghjkmnpqrstuvwxyz23456789"; // omit easily-confused chars
+        return [...crypto.getRandomValues(new Uint8Array(8))].map((b) => alpha[b % alpha.length]).join("");
+      }
+      function openShare(prefill) {
+        document.getElementById("shareCreated").hidden = true;
+        document.getElementById("shareImportCode").value = prefill || "";
+        const n = lsGet(STORE_KEY).length;
+        document.getElementById("shareMsg").textContent = !cloudOn
+          ? "Sharing by code needs cloud sync, which isn't set up here yet. You can still share via Backup & restore — download a file and send it."
+          : prefill
+            ? "Someone shared a catalogue with you. Press “Import this code” to add their puzzles to yours (nothing you have is replaced)."
+            : `Create a link to share your ${n} saved puzzle${n === 1 ? "" : "s"} with someone, or paste a code below to import a catalogue shared with you.`;
+        shareModal.hidden = false;
+      }
+      document.getElementById("shareBtn").addEventListener("click", () => openShare());
+      document.getElementById("shareCreate").addEventListener("click", async () => {
+        const games = lsGet(STORE_KEY);
+        if (!games.length) { document.getElementById("shareMsg").textContent = "You have no saved puzzles to share yet — save some first."; return; }
+        if (!cloudOn) { document.getElementById("shareMsg").textContent = "Sharing by code needs cloud sync. Use Backup & restore to share a file instead."; return; }
+        const code = genShareCode();
+        try {
+          const r = await fetch(`/api/games?collection=share&profile=${code}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ games }) });
+          if (!r.ok) throw new Error();
+          document.getElementById("shareCode").value = code;
+          document.getElementById("shareLink").value = `${location.origin}${location.pathname}?share=${code}`;
+          document.getElementById("shareCreated").hidden = false;
+          document.getElementById("shareMsg").textContent = `Shared ${games.length} puzzle${games.length === 1 ? "" : "s"}. Send the code or link — the other person imports it from this same screen.`;
+        } catch { document.getElementById("shareMsg").textContent = "Couldn't create the share link. Please try again."; }
+      });
+      document.getElementById("shareCopy").addEventListener("click", () => {
+        const btn = document.getElementById("shareCopy");
+        navigator.clipboard?.writeText(document.getElementById("shareLink").value).then(() => {
+          btn.textContent = "Copied!"; setTimeout(() => (btn.textContent = "Copy link"), 1500);
+        }, () => {});
+      });
+      async function importShare(raw) {
+        const code = String(raw || "").trim().replace(/.*share=/, "").replace(/[^a-zA-Z0-9_-]/g, "");
+        if (!code) { document.getElementById("shareMsg").textContent = "Enter a share code (or link) first."; return; }
+        if (!cloudOn) { document.getElementById("shareMsg").textContent = "Importing a shared code needs cloud sync."; return; }
+        try {
+          const r = await fetch(`/api/games?collection=share&profile=${code}`);
+          if (!r.ok) throw new Error();
+          const shared = (await r.json()).games || [];
+          if (!shared.length) { document.getElementById("shareMsg").textContent = "That code has no puzzles — it may be wrong or expired."; return; }
+          const merged = mergeCollections(lsGet(STORE_KEY), shared, (g) => g.id || gridKey(g.grid), (a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+          lsSet(STORE_KEY, merged); cloudSave("library", merged);
+          document.getElementById("shareMsg").textContent = `Imported ${shared.length} puzzle${shared.length === 1 ? "" : "s"} — your catalogue now has ${merged.length}. Reloading…`;
+          setTimeout(() => location.reload(), 1100);
+        } catch { document.getElementById("shareMsg").textContent = "Couldn't import that code. Double-check it and try again."; }
+      }
+      document.getElementById("shareImport").addEventListener("click", () => importShare(document.getElementById("shareImportCode").value));
+      document.getElementById("shareClose").addEventListener("click", () => { shareModal.hidden = true; });
+      shareModal.addEventListener("click", (e) => { if (e.target === shareModal) shareModal.hidden = true; });
 
       // Gear dropdown
       const gearMenu = document.getElementById("gearMenu");
@@ -1895,7 +1980,11 @@
       // ---- init ----
       select(0, 0);
       if (!restoreActiveGame()) renderPencils();
-      initStores();
+      initStores().then(() => {
+        // Opening a ?share=<code> link offers to import that shared catalogue.
+        const code = new URLSearchParams(location.search).get("share");
+        if (code) openShare(code);
+      });
     </script>
   </body>
 </html>
