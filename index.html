@@ -4,6 +4,31 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Sudoku Coach</title>
+    <script>
+      // Diagnostic: surface any uncaught error on-screen (a syntax/runtime error in the main
+      // script would otherwise fail silently and leave every button dead). Separate <script>
+      // so a parse error in the main script still triggers this handler.
+      (function () {
+        function show(msg) {
+          try {
+            var d = document.getElementById("__errbar");
+            if (!d) {
+              d = document.createElement("div");
+              d.id = "__errbar";
+              d.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#dc2626;color:#fff;font:12px/1.4 ui-monospace,monospace;padding:8px 10px;white-space:pre-wrap;max-height:45vh;overflow:auto";
+              (document.body || document.documentElement).appendChild(d);
+            }
+            d.textContent += msg + "\n";
+          } catch (e) {}
+        }
+        window.addEventListener("error", function (e) {
+          show("⚠ JS error: " + (e.message || (e.error && e.error.message) || "unknown") + (e.filename ? " @" + String(e.filename).split("/").pop() + ":" + e.lineno + ":" + e.colno : ""));
+        });
+        window.addEventListener("unhandledrejection", function (e) {
+          show("⚠ Promise rejection: " + (e.reason && e.reason.message ? e.reason.message : e.reason));
+        });
+      })();
+    </script>
     <style>
       :root {
         --bg: #ffffff; --panel: #f3f4f6; --line: #d7dbe2; --thick: #9aa3b2;
@@ -404,6 +429,19 @@
       // and an unguarded read here would halt the whole script (dead buttons). Default to on.
       let hlMatches = true;
       try { hlMatches = localStorage.getItem("sudoku-coach:hlmatches") !== "off"; } catch {}
+      // Profile/storage keys are declared up here, before any load-time code (e.g. the "Playing as"
+      // chip) reads `profile` — a `let` read before its declaration throws and would halt the script.
+      const PROFILE_KEY = "sudoku-coach:profile";
+      let profile = null;
+      try { profile = JSON.parse(localStorage.getItem(PROFILE_KEY)) || null; } catch {}
+      let STORE_KEY, STATS_KEY, ACTIVE_KEY;
+      function applyProfileKeys() {
+        const suffix = profile && profile.id ? ":" + profile.id : "";
+        STORE_KEY = "sudoku-coach:games" + suffix;
+        STATS_KEY = "sudoku-coach:stats" + suffix;
+        ACTIVE_KEY = "sudoku-coach:active" + suffix;
+      }
+      applyProfileKeys();
       let session = null, timerId = null;
 
       function blank(v) { return Array.from({ length: 9 }, () => Array(9).fill(v)); }
@@ -1317,17 +1355,8 @@
       }
 
       // ---- saved library + cloud (collections: library, stats) ----
-      // ---- profile: namespaces local + cloud storage so each player keeps their own history/stats ----
-      const PROFILE_KEY = "sudoku-coach:profile";
-      let profile = (() => { try { return JSON.parse(localStorage.getItem(PROFILE_KEY)) || null; } catch { return null; } })();
-      let STORE_KEY, STATS_KEY, ACTIVE_KEY;
-      function applyProfileKeys() {
-        const suffix = profile && profile.id ? ":" + profile.id : "";
-        STORE_KEY = "sudoku-coach:games" + suffix;
-        STATS_KEY = "sudoku-coach:stats" + suffix;
-        ACTIVE_KEY = "sudoku-coach:active" + suffix;
-      }
-      applyProfileKeys();
+      // ---- profile: namespaces local + cloud storage (PROFILE_KEY/profile/keys are declared near
+      // the top of the script so load-time code can read them safely) ----
       // A profile id is derived from name + passphrase so the cloud key isn't guessable without the passphrase.
       async function deriveProfileId(name, pass) {
         const data = new TextEncoder().encode(name.trim().toLowerCase() + " " + (pass || ""));
@@ -1405,7 +1434,7 @@
       // If both library and stats are empty but a snapshot holds data, restore the most recent non-empty one.
       function recoverFromBackupIfEmpty() {
         if ((lsGet(STORE_KEY).length) || (lsGet(STATS_KEY).length)) return false;
-        const snaps = JSON.parse(localStorage.getItem(backupKey()) || "[]");
+        let snaps = []; try { snaps = JSON.parse(localStorage.getItem(backupKey()) || "[]"); } catch { return false; }
         const snap = snaps.find((s) => (s.library && s.library.length) || (s.stats && s.stats.length));
         if (!snap) return false;
         lsSet(STORE_KEY, snap.library || []); cloudSave("library", snap.library || []);
@@ -2002,7 +2031,7 @@
         // Opening a ?share=<code> link offers to import that shared catalogue.
         const code = new URLSearchParams(location.search).get("share");
         if (code) openShare(code);
-      });
+      }).catch(() => {}); // init/cloud problems must never break the already-wired UI
     </script>
   </body>
 </html>
