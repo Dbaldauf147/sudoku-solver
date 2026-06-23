@@ -251,6 +251,7 @@
           <div id="gearMenu" class="dropdown" hidden>
             <button id="start">Start solving</button>
             <button id="statsBtn">Stats</button>
+            <button id="techBtn">Techniques</button>
             <button id="check">Check entries</button>
             <button id="hlToggle">Highlight matches: On</button>
             <button id="reveal">Reveal solution</button>
@@ -300,6 +301,7 @@
       <div id="stats" class="stats" hidden></div>
       <div id="savedGames" class="stats" hidden></div>
       <div id="history" class="stats" hidden></div>
+      <div id="techniques" class="stats" hidden></div>
 
       <div id="modal" class="overlay" hidden>
         <div class="modal">
@@ -1362,7 +1364,7 @@
       document.getElementById("start").addEventListener("click", startSolving);
       function startSolving() {
         if (solving) return showExplain("Already solving", "Press Edit puzzle first if you want to change the clues.", "info");
-        closeLibrary(); closeHistory();
+        closeLibrary(); closeHistory(); closeTechniques();
         const grid = readGrid();
         if (grid.flat().filter(Boolean).length < 17) return showExplain("Need more clues", "Enter the givens first (a proper Sudoku has at least 17).", "bad");
         if (hasConflict(grid)) return showExplain("That puzzle has a conflict", "Two of the same digit share a row, column, or box. Fix it first.", "bad");
@@ -1610,7 +1612,7 @@
       });
 
       document.getElementById("check").addEventListener("click", () => {
-        closeStats(); closeLibrary(); closeHistory();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle, then I can check your entries.", "info");
         let wrong = 0, filled = 0;
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
@@ -1623,7 +1625,7 @@
       });
 
       document.getElementById("reveal").addEventListener("click", () => {
-        closeStats(); closeLibrary(); closeHistory();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle first.", "info");
         finalizeSession(false);
         writeGrid(solution);
@@ -1637,7 +1639,7 @@
       function resetToEdit() {
         session = null; clearInterval(timerId); timerId = null; undoStack = []; activeSavedGame = null;
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal");
-        document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory();
+        document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory(); closeTechniques();
         pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].classList.remove("given", "wrong", "solved"); marks[r][c].clear(); }
         renderPencils();
@@ -1890,7 +1892,7 @@
         if (sameDay(d, yest)) return "Yesterday";
         return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
       }
-      function openLibrary() { closeStats(); closeHistory(); editingId = null; renderLibraryPanel(); libraryPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
+      function openLibrary() { closeStats(); closeHistory(); closeTechniques(); editingId = null; renderLibraryPanel(); libraryPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
       function closeLibrary() { if (!libraryPanel.hidden) { editingId = null; libraryPanel.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
       let editingId = null;
       const DIFFICULTIES = ["Easy", "Medium", "Hard"];
@@ -1969,7 +1971,7 @@
       const historyPanel = document.getElementById("history"), historyBtn = document.getElementById("historyBtn");
       let histEditing = null;
       function closeHistory() { if (!historyPanel.hidden) { histEditing = null; historyPanel.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
-      function openHistory() { closeStats(); closeLibrary(); closeHistory(); histEditing = null; renderHistory(); historyPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
+      function openHistory() { closeStats(); closeLibrary(); closeHistory(); closeTechniques(); histEditing = null; renderHistory(); historyPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
       function renderHistory() {
         const games = lsGet(STATS_KEY);
         if (!games.length) {
@@ -2015,7 +2017,7 @@
         histEditing = null; renderHistory();
       }
       function openGameDeepDive(i) {
-        closeHistory(); closeLibrary();
+        closeHistory(); closeLibrary(); closeTechniques();
         renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none";
         const pick = document.getElementById("gamePick");
         if (pick) { pick.value = String(i); renderDeepDive(lsGet(STATS_KEY)[i]); }
@@ -2192,8 +2194,80 @@
       document.getElementById("exModal").addEventListener("click", (e) => { if (e.target.id === "exModal") e.currentTarget.hidden = true; });
       function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
       document.getElementById("statsBtn").addEventListener("click", () => {
-        if (statsEl.hidden) { closeLibrary(); closeHistory(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
+        if (statsEl.hidden) { closeLibrary(); closeHistory(); closeTechniques(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
         else closeStats();
+      });
+
+      // ---- techniques reference panel (a glossary of every method the coach recognizes) ----
+      // Grouped roughly by difficulty; each name matches the labels recorded in stats so the
+      // colours and the tap-through example line up with what gets tracked while you play.
+      const TECH_CATALOG = [
+        ["Basics", ["Full house", "Naked single", "Hidden single"]],
+        ["Intersections", ["Pointing pair", "Pointing triple", "Locked candidate"]],
+        ["Naked subsets", ["Naked pair", "Naked triple", "Naked quad"]],
+        ["Hidden subsets", ["Hidden pair", "Hidden triple", "Hidden quad"]],
+        ["Fish", ["X-wing", "Swordfish", "Jellyfish"]],
+        ["Single-digit & colouring", ["Skyscraper", "Two-string kite", "Simple colouring"]],
+        ["Wings", ["XY-wing", "XYZ-wing", "W-wing"]],
+        ["Chains", ["Remote pairs", "XY-chain"]],
+        ["Beyond", ["Advanced"]],
+      ];
+      const TECH_INFO = {
+        "Full house": "The last empty cell in a row, column, or box — only one digit can go there.",
+        "Naked single": "A cell left with just one candidate once its row, column, and box are accounted for.",
+        "Hidden single": "A digit that fits only one cell of a unit, even if that cell still shows other candidates.",
+        "Pointing pair": "A digit confined to one row or column within a box, removing it from that line outside the box.",
+        "Pointing triple": "The three-cell version of a pointing pair.",
+        "Locked candidate": "A digit confined to one box within a row or column, removing it elsewhere in that box (claiming).",
+        "Naked pair": "Two cells in a unit holding the same two candidates, clearing those digits from the rest of the unit.",
+        "Naked triple": "Three cells that share just three candidates between them.",
+        "Naked quad": "Four cells that share just four candidates between them.",
+        "Hidden pair": "Two candidates that appear only in the same two cells of a unit.",
+        "Hidden triple": "Three candidates restricted to the same three cells.",
+        "Hidden quad": "Four candidates restricted to the same four cells.",
+        "X-wing": "A digit pinned to the same two columns across two rows (or vice versa), enabling eliminations.",
+        "Swordfish": "The three-row/column version of the X-wing.",
+        "Jellyfish": "The four-row/column version of the X-wing.",
+        "Skyscraper": "Two strong links in one digit sharing a base line; the far ends clear cells that see both.",
+        "Two-string kite": "A row link and a column link for one digit joined through a shared box.",
+        "Simple colouring": "Colouring a digit's strong-link chain to expose contradictions and eliminations.",
+        "XY-wing": "A two-candidate pivot with two pincers, removing a shared digit any cell seeing both pincers can't hold.",
+        "XYZ-wing": "A three-candidate pivot with two pincers that all share one digit.",
+        "W-wing": "Two matching pairs joined by a strong link, clearing their shared digit from common peers.",
+        "Remote pairs": "A chain of identical pairs whose alternating digits clear cells seeing both ends.",
+        "XY-chain": "A chain of two-candidate cells that forces one end to a value — the general form of the XY-wing.",
+        "Advanced": "Anything past the methods above (uniqueness, ALS, forcing chains, and friends). Still tracked as one bucket for now.",
+      };
+      function closeTechniques() {
+        const p = document.getElementById("techniques");
+        if (p && !p.hidden) { p.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; }
+      }
+      function openTechniques() {
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques();
+        renderTechniques();
+        document.getElementById("techniques").hidden = false;
+        boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none";
+      }
+      function renderTechniques() {
+        const counts = {};
+        for (const g of lsGet(STATS_KEY)) for (const m of (g.moves || [])) counts[m.tech] = (counts[m.tech] || 0) + 1;
+        let html = `<button id="techBack">← Back</button><h2>Techniques</h2><p class="hintline">Every method the coach can spot and log while you solve. Tap one for a visual example and the games where you've used it.</p>`;
+        for (const [group, items] of TECH_CATALOG) {
+          html += `<h3>${esc(group)}</h3><table class="grid">`;
+          for (const t of items) {
+            const c = counts[t] || 0, color = TECH_COLORS[t] || "#94a3b8";
+            html += `<tr class="trow" data-tech="${esc(t)}"><td><span style="color:${color}">●</span> <b>${esc(t)}</b><div class="k" style="margin-top:3px">${esc(TECH_INFO[t] || "")}</div></td><td style="white-space:nowrap;text-align:right">${c ? "×" + c : "—"}</td></tr>`;
+          }
+          html += `</table>`;
+        }
+        const panel = document.getElementById("techniques");
+        panel.innerHTML = html;
+        document.getElementById("techBack").onclick = () => document.getElementById("techBtn").click();
+        panel.querySelectorAll(".trow").forEach((row) => { row.onclick = () => openExample(row.dataset.tech); });
+      }
+      document.getElementById("techBtn").addEventListener("click", () => {
+        if (document.getElementById("techniques").hidden) openTechniques();
+        else closeTechniques();
       });
       function renderStats() {
         const games = lsGet(STATS_KEY);
