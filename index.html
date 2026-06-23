@@ -251,6 +251,7 @@
           <div id="gearMenu" class="dropdown" hidden>
             <button id="start">Start solving</button>
             <button id="statsBtn">Stats</button>
+            <button id="techBtn">Techniques</button>
             <button id="check">Check entries</button>
             <button id="hlToggle">Highlight matches: On</button>
             <button id="reveal">Reveal solution</button>
@@ -300,6 +301,7 @@
       <div id="stats" class="stats" hidden></div>
       <div id="savedGames" class="stats" hidden></div>
       <div id="history" class="stats" hidden></div>
+      <div id="techniques" class="stats" hidden></div>
 
       <div id="modal" class="overlay" hidden>
         <div class="modal">
@@ -674,6 +676,17 @@
         return M;
       }
       function cloneMap(M) { return M.map((row) => row.map((s) => new Set(s))); }
+      // Full house (a.k.a. last digit): the only empty cell left in a row, column, or box.
+      function findFullHouse(M, grid) {
+        for (const u of UNITS) {
+          const empties = u.cells.filter(([r, c]) => grid[r][c] === 0);
+          if (empties.length === 1) {
+            const [r, c] = empties[0], n = [...M[r][c]][0];
+            if (n) return { r, c, n, tech: "Full house", reason: `${loc(r, c)} is the last empty cell in ${u.name}, so it takes the one digit missing there — ${n}.` };
+          }
+        }
+        return null;
+      }
       function findNakedSingle(M, grid) {
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0 && M[r][c].size === 1) {
           const n = [...M[r][c]][0];
@@ -857,20 +870,297 @@
         }
         return null;
       }
+      // Jellyfish: the four-base-set fish, exactly like Swordfish but with four rows/columns.
+      function jellyfish(M, grid) {
+        for (let n = 1; n <= 9; n++) {
+          const rowCols = [];
+          for (let r = 0; r < 9; r++) { const cols = []; for (let c = 0; c < 9; c++) if (grid[r][c] === 0 && M[r][c].has(n)) cols.push(c); if (cols.length >= 2 && cols.length <= 4) rowCols.push([r, cols]); }
+          for (let i = 0; i < rowCols.length; i++) for (let j = i + 1; j < rowCols.length; j++) for (let k = j + 1; k < rowCols.length; k++) for (let l = k + 1; l < rowCols.length; l++) {
+            const rows = [rowCols[i], rowCols[j], rowCols[k], rowCols[l]], colSet = new Set();
+            for (const [, cols] of rows) for (const c of cols) colSet.add(c);
+            if (colSet.size !== 4) continue;
+            const rset = rows.map(([r]) => r), cols = [...colSet], elims = [];
+            for (let r = 0; r < 9; r++) if (!rset.includes(r)) for (const c of cols) if (grid[r][c] === 0 && M[r][c].has(n)) elims.push([r, c, n]);
+            if (elims.length) { const highlight = []; for (const [r, cs] of rows) for (const c of cs) highlight.push([r, c]); return { elims, highlight, tech: "Jellyfish", reason: `Jellyfish on ${n}: rows ${rset.map((r) => r + 1).join(", ")} confine ${n} to columns ${cols.map((c) => c + 1).join(", ")}, so ${n} is removed from those columns in other rows.` }; }
+          }
+          const colRows = [];
+          for (let c = 0; c < 9; c++) { const rs = []; for (let r = 0; r < 9; r++) if (grid[r][c] === 0 && M[r][c].has(n)) rs.push(r); if (rs.length >= 2 && rs.length <= 4) colRows.push([c, rs]); }
+          for (let i = 0; i < colRows.length; i++) for (let j = i + 1; j < colRows.length; j++) for (let k = j + 1; k < colRows.length; k++) for (let l = k + 1; l < colRows.length; l++) {
+            const colsT = [colRows[i], colRows[j], colRows[k], colRows[l]], rowSet = new Set();
+            for (const [, rs] of colsT) for (const r of rs) rowSet.add(r);
+            if (rowSet.size !== 4) continue;
+            const cset = colsT.map(([c]) => c), rows = [...rowSet], elims = [];
+            for (let c = 0; c < 9; c++) if (!cset.includes(c)) for (const r of rows) if (grid[r][c] === 0 && M[r][c].has(n)) elims.push([r, c, n]);
+            if (elims.length) { const highlight = []; for (const [c, rs] of colsT) for (const r of rs) highlight.push([r, c]); return { elims, highlight, tech: "Jellyfish", reason: `Jellyfish on ${n}: columns ${cset.map((c) => c + 1).join(", ")} confine ${n} to rows ${rows.map((r) => r + 1).join(", ")}, so ${n} is removed from those rows in other columns.` }; }
+          }
+        }
+        return null;
+      }
+      // W-wing: two cells with the same pair {X, Y} that don't see each other, joined by a
+      // strong link on Y (a unit where Y has exactly two spots, one seeing each cell). One of
+      // the pair must then be X, so X is removed from any cell seeing both.
+      function wWing(M, grid) {
+        const biv = [];
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0 && M[r][c].size === 2) biv.push([r, c, [...M[r][c]].sort((a, b) => a - b)]);
+        for (let i = 0; i < biv.length; i++) for (let j = i + 1; j < biv.length; j++) {
+          const [ar, ac, av] = biv[i], [br, bc, bv] = biv[j];
+          if (av[0] !== bv[0] || av[1] !== bv[1]) continue;
+          if (sees(ar, ac, br, bc)) continue;
+          for (const Y of av) {
+            const X = av.find((d) => d !== Y);
+            for (const u of UNITS) {
+              const yspots = u.cells.filter(([r, c]) => grid[r][c] === 0 && M[r][c].has(Y));
+              if (yspots.length !== 2) continue;
+              const [L1, L2] = yspots, isAB = ([r, c]) => (r === ar && c === ac) || (r === br && c === bc);
+              if (isAB(L1) || isAB(L2)) continue;
+              const link = (sees(L1[0], L1[1], ar, ac) && sees(L2[0], L2[1], br, bc)) || (sees(L1[0], L1[1], br, bc) && sees(L2[0], L2[1], ar, ac));
+              if (!link) continue;
+              const elims = [];
+              for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+                if (grid[r][c] !== 0 || !M[r][c].has(X)) continue;
+                if ((r === ar && c === ac) || (r === br && c === bc)) continue;
+                if (sees(ar, ac, r, c) && sees(br, bc, r, c)) elims.push([r, c, X]);
+              }
+              if (elims.length) return { elims, highlight: [[ar, ac], [br, bc], L1, L2], tech: "W-wing", reason: `W-wing: ${loc(ar, ac)} and ${loc(br, bc)} both hold {${av.join(", ")}}, linked by ${Y} in ${u.name}, so one of them must be ${X} — ${X} is removed from cells seeing both.` };
+            }
+          }
+        }
+        return null;
+      }
+      // Simple colouring: 2-colour a digit's conjugate-pair chain, then eliminate where one colour
+      // contradicts itself (two same-colour cells in a unit) or any cell sees both colours.
+      function simpleColoring(M, grid) {
+        for (let n = 1; n <= 9; n++) {
+          const adj = new Map(), ensure = (k) => { if (!adj.has(k)) adj.set(k, []); return adj.get(k); };
+          for (const u of UNITS) {
+            const spots = u.cells.filter(([r, c]) => grid[r][c] === 0 && M[r][c].has(n));
+            if (spots.length === 2) { const a = spots[0][0] * 9 + spots[0][1], b = spots[1][0] * 9 + spots[1][1]; ensure(a).push(b); ensure(b).push(a); }
+          }
+          const seen = new Set();
+          for (const start of adj.keys()) {
+            if (seen.has(start)) continue;
+            const color = new Map([[start, 0]]); seen.add(start);
+            const queue = [start];
+            while (queue.length) { const cur = queue.shift(); for (const nb of adj.get(cur)) if (!color.has(nb)) { color.set(nb, color.get(cur) ^ 1); seen.add(nb); queue.push(nb); } }
+            const cells = [...color.keys()].map((k) => [Math.floor(k / 9), k % 9, color.get(k)]);
+            const highlight = cells.map(([r, c]) => [r, c]);
+            // Rule 2 (colour wrap): two same-colour cells share a unit, so that colour is all false.
+            for (const wrapColor of [0, 1]) {
+              const same = cells.filter((x) => x[2] === wrapColor);
+              let conflict = false;
+              for (let a = 0; a < same.length && !conflict; a++) for (let b = a + 1; b < same.length; b++) if (sees(same[a][0], same[a][1], same[b][0], same[b][1])) { conflict = true; break; }
+              if (conflict) return { elims: same.map(([r, c]) => [r, c, n]), highlight, tech: "Simple colouring", reason: `Colouring the ${n} conjugate-pair chain, two same-colour cells share a unit — so that colour can't be ${n}, which is removed from all of them.` };
+            }
+            // Rule 4 (colour trap): an outside cell seeing both colours can't be the digit.
+            const color0 = cells.filter((x) => x[2] === 0), color1 = cells.filter((x) => x[2] === 1), elims = [];
+            for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+              if (grid[r][c] !== 0 || !M[r][c].has(n) || color.has(r * 9 + c)) continue;
+              if (color0.some(([cr, cc]) => sees(cr, cc, r, c)) && color1.some(([cr, cc]) => sees(cr, cc, r, c))) elims.push([r, c, n]);
+            }
+            if (elims.length) return { elims, highlight, tech: "Simple colouring", reason: `Colouring the ${n} conjugate-pair chain: any cell seeing both colours can't be ${n}, so ${n} is removed there.` };
+          }
+        }
+        return null;
+      }
+      // XY-chain: a chain of two-candidate cells, each link sharing a value, whose ends both carry
+      // Z. One end must be Z, so Z is removed from any cell seeing both ends. Generalises XY-wing.
+      function xyChain(M, grid) {
+        const biv = [];
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0 && M[r][c].size === 2) biv.push([r, c, [...M[r][c]]]);
+        const MAX = 7;
+        for (const [sr, sc, sv] of biv) {
+          for (const Z of sv) {
+            const startOut = sv.find((d) => d !== Z);
+            const stack = [{ out: startOut, path: new Set([sr * 9 + sc]), chain: [[sr, sc]] }];
+            while (stack.length) {
+              const st = stack.pop(), [er, ec] = st.chain[st.chain.length - 1];
+              if (st.chain.length >= 3 && st.out === Z) {
+                const elims = [];
+                for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+                  if (grid[r][c] !== 0 || !M[r][c].has(Z) || st.path.has(r * 9 + c)) continue;
+                  if (sees(sr, sc, r, c) && sees(er, ec, r, c)) elims.push([r, c, Z]);
+                }
+                if (elims.length) return { elims, highlight: st.chain.map(([r, c]) => [r, c]), tech: "XY-chain", reason: `XY-chain on ${Z}: a chain of two-candidate cells from ${loc(sr, sc)} to ${loc(er, ec)} forces one end to be ${Z}, so ${Z} is removed from cells seeing both ends.` };
+              }
+              if (st.chain.length >= MAX) continue;
+              for (const [nr, nc, nv] of biv) {
+                const key = nr * 9 + nc;
+                if (st.path.has(key) || !nv.includes(st.out) || !sees(er, ec, nr, nc)) continue;
+                const np = new Set(st.path); np.add(key);
+                stack.push({ out: nv.find((d) => d !== st.out), path: np, chain: [...st.chain, [nr, nc]] });
+              }
+            }
+          }
+        }
+        return null;
+      }
+      // Naked quad: four cells in a unit collectively holding only four candidates.
+      function nakedQuad(M, grid) {
+        for (const u of UNITS) {
+          const cells = u.cells.filter(([r, c]) => grid[r][c] === 0 && M[r][c].size >= 2 && M[r][c].size <= 4);
+          for (let i = 0; i < cells.length; i++) for (let j = i + 1; j < cells.length; j++) for (let k = j + 1; k < cells.length; k++) for (let l = k + 1; l < cells.length; l++) {
+            const quad = [cells[i], cells[j], cells[k], cells[l]], union = new Set();
+            for (const [r, c] of quad) for (const n of M[r][c]) union.add(n);
+            if (union.size !== 4) continue;
+            const digits = [...union], elims = [];
+            for (const [r, c] of u.cells) {
+              if (grid[r][c] !== 0 || quad.some(([qr, qc]) => qr === r && qc === c)) continue;
+              for (const n of digits) if (M[r][c].has(n)) elims.push([r, c, n]);
+            }
+            if (elims.length) return { elims, highlight: quad, tech: "Naked quad", reason: `${quad.map(([r, c]) => loc(r, c)).join(", ")} in ${u.name} only hold {${digits.join(", ")}}, so those digits are removed from the rest of the ${u.kind}.` };
+          }
+        }
+        return null;
+      }
+      // Hidden quad: four candidates that can only go in four cells of a unit.
+      function hiddenQuad(M, grid) {
+        for (const u of UNITS) {
+          const empties = u.cells.filter(([r, c]) => grid[r][c] === 0), spots = {};
+          for (let n = 1; n <= 9; n++) spots[n] = empties.filter(([r, c]) => M[r][c].has(n));
+          const digits = [];
+          for (let n = 1; n <= 9; n++) if (spots[n].length >= 2 && spots[n].length <= 4) digits.push(n);
+          for (let i = 0; i < digits.length; i++) for (let j = i + 1; j < digits.length; j++) for (let k = j + 1; k < digits.length; k++) for (let l = k + 1; l < digits.length; l++) {
+            const quad = [digits[i], digits[j], digits[k], digits[l]], cellSet = new Set();
+            for (const n of quad) for (const [r, c] of spots[n]) cellSet.add(r * 9 + c);
+            if (cellSet.size !== 4) continue;
+            const cells = [...cellSet].map((v) => [Math.floor(v / 9), v % 9]), elims = [];
+            for (const [r, c] of cells) for (const n of M[r][c]) if (!quad.includes(n)) elims.push([r, c, n]);
+            if (elims.length) return { elims, highlight: cells, tech: "Hidden quad", reason: `In ${u.name}, ${quad.join(", ")} can only go in ${cells.map(([r, c]) => loc(r, c)).join(", ")}, so every other candidate is removed from those cells.` };
+          }
+        }
+        return null;
+      }
+      // XYZ-wing: a three-candidate pivot {X,Y,Z} with two bivalue pincers {X,Z} and {Y,Z};
+      // Z is removed from any cell that sees the pivot and both pincers.
+      function xyzWing(M, grid) {
+        const tri = [], biv = [];
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+          if (grid[r][c] !== 0) continue;
+          if (M[r][c].size === 3) tri.push([r, c, [...M[r][c]]]);
+          else if (M[r][c].size === 2) biv.push([r, c, [...M[r][c]]]);
+        }
+        for (const [pr, pc, pv] of tri) {
+          const pincers = biv.filter(([r, c, v]) => sees(pr, pc, r, c) && v.every((d) => pv.includes(d)));
+          for (let i = 0; i < pincers.length; i++) for (let j = i + 1; j < pincers.length; j++) {
+            const [ar, ac, av] = pincers[i], [br, bc, bv] = pincers[j];
+            const shared = av.filter((d) => bv.includes(d));
+            if (shared.length !== 1) continue;
+            if (new Set([...av, ...bv]).size !== 3) continue;
+            const Z = shared[0], elims = [];
+            for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+              if (grid[r][c] !== 0 || !M[r][c].has(Z)) continue;
+              if ((r === pr && c === pc) || (r === ar && c === ac) || (r === br && c === bc)) continue;
+              if (sees(pr, pc, r, c) && sees(ar, ac, r, c) && sees(br, bc, r, c)) elims.push([r, c, Z]);
+            }
+            if (elims.length) return { elims, highlight: [[pr, pc], [ar, ac], [br, bc]], tech: "XYZ-wing", reason: `XYZ-wing: pivot ${loc(pr, pc)} {${pv.join(", ")}} with pincers ${loc(ar, ac)} and ${loc(br, bc)} all share ${Z}, so ${Z} is removed from any cell seeing all three.` };
+          }
+        }
+        return null;
+      }
+      // Skyscraper: one digit with two strong links (in two rows, or two columns) that share a
+      // base line; the two far ends mean one of them is the digit, clearing cells that see both.
+      function skyscraper(M, grid) {
+        for (let n = 1; n <= 9; n++) {
+          const tryDir = (lines, makeCell, isRow) => {
+            for (let i = 0; i < lines.length; i++) for (let j = i + 1; j < lines.length; j++) {
+              const [la, a] = lines[i], [lb, b] = lines[j];
+              const common = a.filter((x) => b.includes(x));
+              if (common.length !== 1) continue;
+              const base = common[0], ta = a.find((x) => x !== base), tb = b.find((x) => x !== base);
+              if (ta === tb) continue; // shared far line too → that's an X-wing
+              const t1 = makeCell(la, ta), t2 = makeCell(lb, tb), elims = [];
+              for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+                if (grid[r][c] !== 0 || !M[r][c].has(n)) continue;
+                if ((r === t1[0] && c === t1[1]) || (r === t2[0] && c === t2[1])) continue;
+                if (sees(t1[0], t1[1], r, c) && sees(t2[0], t2[1], r, c)) elims.push([r, c, n]);
+              }
+              if (elims.length) return { elims, highlight: [makeCell(la, base), makeCell(lb, base), t1, t2], tech: "Skyscraper", reason: `Skyscraper on ${n}: two ${isRow ? "rows" : "columns"} share a base ${isRow ? "column" : "row"} ${base + 1}, so one of ${loc(t1[0], t1[1])}/${loc(t2[0], t2[1])} is ${n} — ${n} is removed from cells seeing both.` };
+            }
+            return null;
+          };
+          const rowLines = [];
+          for (let r = 0; r < 9; r++) { const cs = []; for (let c = 0; c < 9; c++) if (grid[r][c] === 0 && M[r][c].has(n)) cs.push(c); if (cs.length === 2) rowLines.push([r, cs]); }
+          let res = tryDir(rowLines, (r, c) => [r, c], true); if (res) return res;
+          const colLines = [];
+          for (let c = 0; c < 9; c++) { const rs = []; for (let r = 0; r < 9; r++) if (grid[r][c] === 0 && M[r][c].has(n)) rs.push(r); if (rs.length === 2) colLines.push([c, rs]); }
+          res = tryDir(colLines, (c, r) => [r, c], false); if (res) return res;
+        }
+        return null;
+      }
+      // Two-string kite: a row strong link and a column strong link for one digit whose near ends
+      // share a box; the cell seeing both far ends can't be the digit.
+      function twoStringKite(M, grid) {
+        for (let n = 1; n <= 9; n++) {
+          const rowPairs = [], colPairs = [];
+          for (let r = 0; r < 9; r++) { const cs = []; for (let c = 0; c < 9; c++) if (grid[r][c] === 0 && M[r][c].has(n)) cs.push(c); if (cs.length === 2) rowPairs.push([r, cs]); }
+          for (let c = 0; c < 9; c++) { const rs = []; for (let r = 0; r < 9; r++) if (grid[r][c] === 0 && M[r][c].has(n)) rs.push(r); if (rs.length === 2) colPairs.push([c, rs]); }
+          for (const [r, cs] of rowPairs) for (const [c, rs] of colPairs) {
+            for (const rc of cs) for (const cr of rs) {
+              if (boxIndex(r, rc) !== boxIndex(cr, c)) continue;       // near ends share a box
+              if (r === cr && rc === c) continue;                      // distinct cells
+              const farRow = [r, cs.find((x) => x !== rc)];            // far end on the row
+              const farCol = [rs.find((x) => x !== cr), c];            // far end on the column
+              const tr = farCol[0], tc = farRow[1];                   // cell seeing both far ends
+              if ((tr === farRow[0] && tc === farRow[1]) || (tr === farCol[0] && tc === farCol[1])) continue;
+              if (tr === r && tc === rc) continue; if (tr === cr && tc === c) continue;
+              if (grid[tr][tc] !== 0 || !M[tr][tc].has(n)) continue;
+              if (!(sees(tr, tc, farRow[0], farRow[1]) && sees(tr, tc, farCol[0], farCol[1]))) continue;
+              return { elims: [[tr, tc, n]], highlight: [[r, rc], [cr, c], farRow, farCol], tech: "Two-string kite", reason: `Two-string kite on ${n}: a row link in row ${r + 1} and a column link in column ${c + 1} meet in box ${boxIndex(r, rc)}, so ${loc(tr, tc)} sees both far ends and can't be ${n}.` };
+            }
+          }
+        }
+        return null;
+      }
+      // Remote pairs: a chain of cells that all share the same two candidates {X,Y}. The digits
+      // alternate along the chain, so any cell seeing two opposite-end cells can hold neither.
+      function remotePairs(M, grid) {
+        const byPair = new Map();
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0 && M[r][c].size === 2) {
+          const key = [...M[r][c]].sort((a, b) => a - b).join(",");
+          (byPair.get(key) || byPair.set(key, []).get(key)).push([r, c]);
+        }
+        for (const [key, group] of byPair) {
+          if (group.length < 4) continue; // shorter chains are just naked pairs / XY-wings
+          const [X, Y] = key.split(",").map(Number);
+          const adj = group.map(() => []);
+          for (let i = 0; i < group.length; i++) for (let j = i + 1; j < group.length; j++) if (sees(group[i][0], group[i][1], group[j][0], group[j][1])) { adj[i].push(j); adj[j].push(i); }
+          const seen = new Array(group.length).fill(false);
+          for (let s = 0; s < group.length; s++) {
+            if (seen[s]) continue;
+            const color = new Array(group.length).fill(-1); color[s] = 0; seen[s] = true;
+            const comp = [s], q = [s]; let bipartite = true;
+            while (q.length) { const cur = q.shift(); for (const nb of adj[cur]) { if (color[nb] === -1) { color[nb] = color[cur] ^ 1; seen[nb] = true; comp.push(nb); q.push(nb); } else if (color[nb] === color[cur]) bipartite = false; } }
+            if (!bipartite || comp.length < 4) continue;
+            const c0 = comp.filter((i) => color[i] === 0).map((i) => group[i]);
+            const c1 = comp.filter((i) => color[i] === 1).map((i) => group[i]);
+            if (!c0.length || !c1.length) continue;
+            const inChain = new Set(comp.map((i) => group[i][0] * 9 + group[i][1])), elims = [];
+            for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+              if (grid[r][c] !== 0 || inChain.has(r * 9 + c)) continue;
+              if (c0.some(([cr, cc]) => sees(cr, cc, r, c)) && c1.some(([cr, cc]) => sees(cr, cc, r, c))) {
+                if (M[r][c].has(X)) elims.push([r, c, X]);
+                if (M[r][c].has(Y)) elims.push([r, c, Y]);
+              }
+            }
+            if (elims.length) return { elims, highlight: comp.map((i) => group[i]), tech: "Remote pairs", reason: `Remote pairs on {${X}, ${Y}}: a chain of identical pairs alternates the two digits, so any cell seeing both ends can hold neither — ${X} and ${Y} are removed there.` };
+          }
+        }
+        return null;
+      }
       function applyElims(M, elims) { const N = cloneMap(M); for (const [r, c, n] of elims) N[r][c].delete(n); return N; }
 
       function findHint(grid) {
         const M = candMap(grid);
-        let s = findNakedSingle(M, grid) || findHiddenSingle(M, grid);
+        let s = findFullHouse(M, grid) || findNakedSingle(M, grid) || findHiddenSingle(M, grid);
         if (s) return { kind: "place", ...s, highlight: [[s.r, s.c]], reason: `${s.tech}: ${s.reason}` };
-        for (const tech of [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, xWing, xyWing, swordfish]) {
+        for (const tech of [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, nakedQuad, hiddenQuad, xWing, skyscraper, twoStringKite, xyWing, xyzWing, wWing, swordfish, jellyfish, simpleColoring, remotePairs, xyChain]) {
           const e = tech(M, grid); if (!e) continue;
           const after = findNakedSingle(applyElims(M, e.elims), grid) || findHiddenSingle(applyElims(M, e.elims), grid);
           if (after) return { kind: "place", r: after.r, c: after.c, n: after.n, tech: e.tech, highlight: e.highlight.concat([[after.r, after.c]]), reason: `${e.tech}: ${e.reason} That leaves ${loc(after.r, after.c)} = ${after.n} (${after.tech.toLowerCase()}).` };
           return { kind: "eliminate", tech: e.tech, highlight: e.highlight, reason: `${e.tech}: ${e.reason} Update your candidate marks, then look again.` };
         }
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0)
-          return { kind: "place", r, c, n: solution[r][c], tech: "Advanced", highlight: [[r, c]], reason: `This needs a technique beyond the ones I explain (e.g. an XY-chain). The answer is ${solution[r][c]} — place it and the simpler steps reopen.` };
+          return { kind: "place", r, c, n: solution[r][c], tech: "Advanced", highlight: [[r, c]], reason: `This needs a technique beyond the ones I explain (e.g. a forcing chain or ALS move). The answer is ${solution[r][c]} — place it and the simpler steps reopen.` };
         return null;
       }
 
@@ -920,13 +1210,15 @@
       }
 
       function describeCorrect(M, grid, r, c, n) {
+        for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c) && u.cells.every(([rr, cc]) => (rr === r && cc === c) || grid[rr][cc] !== 0))
+          return { tech: "Full house", body: `${loc(r, c)} was the last empty cell in ${u.name}, so it takes the only digit missing there.` };
         if (M[r][c].size === 1) return { tech: "Naked single", body: `the other eight digits all already appear in ${loc(r, c)}'s row, column, or box, leaving ${n}.` };
         for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
           const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && M[rr][cc].has(n));
           if (spots.length === 1) return { tech: "Hidden single", body: `${n} can't go in any other empty cell of ${u.name}, so it must be here.` };
         }
         // No single-cell proof yet — try one round of an advanced elimination and see if it pins this cell.
-        for (const tech of [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, xWing, xyWing, swordfish]) {
+        for (const tech of [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, nakedQuad, hiddenQuad, xWing, skyscraper, twoStringKite, xyWing, xyzWing, wWing, swordfish, jellyfish, simpleColoring, remotePairs, xyChain]) {
           const e = tech(M, grid); if (!e) continue;
           const N = applyElims(M, e.elims);
           if (N[r][c].size === 1 && [...N[r][c]][0] === n)
@@ -937,7 +1229,7 @@
               return { tech: e.tech, body: `${e.reason} That leaves ${loc(r, c)} as the only spot for ${n} in ${u.name}.` };
           }
         }
-        return { tech: "Advanced", body: `${n} matches the solution. It follows from a technique beyond the ones I name here, or once a few more neighbors are filled in.` };
+        return { tech: "Advanced", body: `${n} matches the solution. It follows from a technique beyond the ones I name here (such as a forcing chain or ALS move), or once a few more neighbors are filled in.` };
       }
       function handleMove(r, c) {
         inputs[r][c].classList.remove("wrong");
@@ -1072,7 +1364,7 @@
       document.getElementById("start").addEventListener("click", startSolving);
       function startSolving() {
         if (solving) return showExplain("Already solving", "Press Edit puzzle first if you want to change the clues.", "info");
-        closeLibrary(); closeHistory();
+        closeLibrary(); closeHistory(); closeTechniques();
         const grid = readGrid();
         if (grid.flat().filter(Boolean).length < 17) return showExplain("Need more clues", "Enter the givens first (a proper Sudoku has at least 17).", "bad");
         if (hasConflict(grid)) return showExplain("That puzzle has a conflict", "Two of the same digit share a row, column, or box. Fix it first.", "bad");
@@ -1320,7 +1612,7 @@
       });
 
       document.getElementById("check").addEventListener("click", () => {
-        closeStats(); closeLibrary(); closeHistory();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle, then I can check your entries.", "info");
         let wrong = 0, filled = 0;
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
@@ -1333,7 +1625,7 @@
       });
 
       document.getElementById("reveal").addEventListener("click", () => {
-        closeStats(); closeLibrary(); closeHistory();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle first.", "info");
         finalizeSession(false);
         writeGrid(solution);
@@ -1347,7 +1639,7 @@
       function resetToEdit() {
         session = null; clearInterval(timerId); timerId = null; undoStack = []; activeSavedGame = null;
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal");
-        document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory();
+        document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory(); closeTechniques();
         pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].classList.remove("given", "wrong", "solved"); marks[r][c].clear(); }
         renderPencils();
@@ -1600,7 +1892,7 @@
         if (sameDay(d, yest)) return "Yesterday";
         return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
       }
-      function openLibrary() { closeStats(); closeHistory(); editingId = null; renderLibraryPanel(); libraryPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
+      function openLibrary() { closeStats(); closeHistory(); closeTechniques(); editingId = null; renderLibraryPanel(); libraryPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
       function closeLibrary() { if (!libraryPanel.hidden) { editingId = null; libraryPanel.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
       let editingId = null;
       const DIFFICULTIES = ["Easy", "Medium", "Hard"];
@@ -1679,7 +1971,7 @@
       const historyPanel = document.getElementById("history"), historyBtn = document.getElementById("historyBtn");
       let histEditing = null;
       function closeHistory() { if (!historyPanel.hidden) { histEditing = null; historyPanel.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
-      function openHistory() { closeStats(); closeLibrary(); closeHistory(); histEditing = null; renderHistory(); historyPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
+      function openHistory() { closeStats(); closeLibrary(); closeHistory(); closeTechniques(); histEditing = null; renderHistory(); historyPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
       function renderHistory() {
         const games = lsGet(STATS_KEY);
         if (!games.length) {
@@ -1725,7 +2017,7 @@
         histEditing = null; renderHistory();
       }
       function openGameDeepDive(i) {
-        closeHistory(); closeLibrary();
+        closeHistory(); closeLibrary(); closeTechniques();
         renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none";
         const pick = document.getElementById("gamePick");
         if (pick) { pick.value = String(i); renderDeepDive(lsGet(STATS_KEY)[i]); }
@@ -1763,10 +2055,14 @@
       });
 
       // ---- stats / deep dive ----
-      const TECH_COLORS = { "Naked single": "#4ade80", "Hidden single": "#6ea8fe", "Pointing pair": "#f59e0b",
+      const TECH_COLORS = { "Full house": "#86efac", "Naked single": "#4ade80", "Hidden single": "#6ea8fe", "Pointing pair": "#f59e0b",
         "Pointing triple": "#f59e0b", "Locked candidate": "#f59e0b", "Box/line reduction": "#f59e0b",
         "Naked pair": "#a78bfa", "Hidden pair": "#a78bfa", "Naked triple": "#7c3aed", "Hidden triple": "#7c3aed",
-        "X-wing": "#ec4899", "Swordfish": "#db2777", "XY-wing": "#14b8a6",
+        "Naked quad": "#6d28d9", "Hidden quad": "#6d28d9",
+        "X-wing": "#ec4899", "Swordfish": "#db2777", "Jellyfish": "#be185d",
+        "Skyscraper": "#0ea5e9", "Two-string kite": "#0284c7",
+        "XY-wing": "#14b8a6", "XYZ-wing": "#0d9488", "W-wing": "#0f766e",
+        "Simple colouring": "#f97316", "Remote pairs": "#ea580c", "XY-chain": "#c2410c",
         "Advanced": "#94a3b8", "Other": "#94a3b8", "Mistake": "#ff6b6b" };
       function median(arr) { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
       function errorsIn(g) { return typeof g.errors === "number" ? g.errors : g.moves.filter((m) => !m.correct).length; }
@@ -1836,6 +2132,58 @@
         "X-wing": { focus: ["1,2", "1,6", "5,2", "5,6"], elim: ["3,2", "7,6"],
           marks: { "1,2": [5], "1,6": [5], "5,2": [5], "5,6": [5], "3,2": [5], "7,6": [5] }, struck: { "3,2": [5], "7,6": [5] },
           caption: "In rows 2 and 6, digit 5 is pinned to the same two columns (3 and 7) — an X-wing. 5 can then be removed from those columns in every other row (crossed out)." },
+        "Full house": { givens: { "0,0": 1, "0,1": 2, "0,2": 3, "1,0": 4, "1,2": 6, "2,0": 7, "2,1": 8, "2,2": 9 },
+          target: ["1,1"], marks: { "1,1": [5] },
+          caption: "Eight of the nine cells in this box are filled, so the last one can only be the missing digit, 5 — a full house." },
+        "Pointing triple": { givens: { "1,0": 5, "1,1": 6, "1,2": 7, "2,0": 8, "2,1": 9, "2,2": 1 },
+          focus: ["0,0", "0,1", "0,2"], elim: ["0,5", "0,8"],
+          marks: { "0,0": [2, 3], "0,1": [3, 4], "0,2": [2, 3, 4], "0,5": [3, 7], "0,8": [3, 9] }, struck: { "0,5": [3], "0,8": [3] },
+          caption: "With the rest of the box filled, 3 can only sit in these three top-row cells. So 3 is removed from the rest of that row (crossed out) — a pointing triple." },
+        "Locked candidate": { givens: { "0,3": 1, "0,4": 2, "0,5": 3, "0,6": 5, "0,7": 6, "0,8": 7 },
+          focus: ["0,0", "0,1", "0,2"], elim: ["1,1", "2,2"], marks: { "0,0": [4, 8, 9], "0,1": [4, 8, 9], "0,2": [4, 8, 9], "1,1": [4], "2,2": [4] }, struck: { "1,1": [4], "2,2": [4] },
+          caption: "In the top row, 4 only fits inside the highlighted box, so it's removed from that box's other cells (crossed out) — a locked candidate (claiming)." },
+        "Naked triple": { focus: ["0,0", "0,1", "0,2"], elim: ["0,5", "0,7"],
+          marks: { "0,0": [1, 2], "0,1": [2, 3], "0,2": [1, 3], "0,5": [1, 4, 5], "0,7": [3, 5, 6] }, struck: { "0,5": [1], "0,7": [3] },
+          caption: "These three cells share only {1, 2, 3} between them, so those digits are removed from the rest of the row (crossed out) — a naked triple." },
+        "Naked quad": { focus: ["0,0", "0,1", "0,2", "0,3"], elim: ["0,6", "0,8"],
+          marks: { "0,0": [1, 2], "0,1": [2, 3], "0,2": [3, 4], "0,3": [1, 4], "0,6": [2, 5, 8], "0,8": [4, 7] }, struck: { "0,6": [2], "0,8": [4] },
+          caption: "Four cells holding only {1, 2, 3, 4} between them lock those digits in, so they're removed from the rest of the row (crossed out) — a naked quad." },
+        "Hidden triple": { focus: ["0,0", "0,1", "0,2"],
+          marks: { "0,0": [4, 5, 1, 8], "0,1": [5, 6, 2], "0,2": [4, 6, 9] }, struck: { "0,0": [1, 8], "0,1": [2], "0,2": [9] },
+          caption: "4, 5 and 6 can only appear in these three cells of the row, so every other candidate there is removed (crossed out) — a hidden triple." },
+        "Hidden quad": { focus: ["0,0", "0,1", "0,2", "0,3"],
+          marks: { "0,0": [3, 4, 1], "0,1": [4, 5, 7], "0,2": [5, 6, 2], "0,3": [3, 6, 8] }, struck: { "0,0": [1], "0,1": [7], "0,2": [2], "0,3": [8] },
+          caption: "3, 4, 5 and 6 are restricted to these four cells, so their other candidates fall away (crossed out) — a hidden quad." },
+        "Swordfish": { focus: ["0,1", "0,4", "4,4", "4,7", "8,1", "8,7"], elim: ["2,1", "6,4", "3,7"],
+          marks: { "0,1": [5], "0,4": [5], "4,4": [5], "4,7": [5], "8,1": [5], "8,7": [5], "2,1": [5], "6,4": [5], "3,7": [5] }, struck: { "2,1": [5], "6,4": [5], "3,7": [5] },
+          caption: "Digit 5 in rows 1, 5 and 9 is confined to columns 2, 5 and 8. So 5 is removed from those columns in every other row (crossed out) — a swordfish." },
+        "Jellyfish": { focus: ["0,1", "0,3", "3,3", "3,6", "5,6", "5,8", "8,8", "8,1"], elim: ["2,1", "4,3", "6,6", "7,8"],
+          marks: { "0,1": [3], "0,3": [3], "3,3": [3], "3,6": [3], "5,6": [3], "5,8": [3], "8,8": [3], "8,1": [3], "2,1": [3], "4,3": [3], "6,6": [3], "7,8": [3] }, struck: { "2,1": [3], "4,3": [3], "6,6": [3], "7,8": [3] },
+          caption: "Across rows 1, 4, 6 and 9, digit 3 is locked to columns 2, 4, 7 and 9. So 3 is cleared from those columns in all other rows (crossed out) — a jellyfish." },
+        "Skyscraper": { focus: ["0,2", "6,2", "0,5", "6,8"], elim: ["0,8", "6,5"],
+          marks: { "0,2": [7], "6,2": [7], "0,5": [7], "6,8": [7], "0,8": [7], "6,5": [7] }, struck: { "0,8": [7], "6,5": [7] },
+          caption: "In rows 1 and 7, digit 7 sits in only two cells each and shares column 3 as a base. One far end must be 7, so 7 is removed from any cell seeing both (crossed out) — a skyscraper." },
+        "Two-string kite": { focus: ["0,2", "0,7", "2,0", "8,0"], elim: ["8,7"],
+          marks: { "0,2": [4], "0,7": [4], "2,0": [4], "8,0": [4], "8,7": [4] }, struck: { "8,7": [4] },
+          caption: "A row link in row 1 and a column link in column 1 for digit 4 meet in the top-left box. Following the chain, the cell seeing both far ends can't be 4 (crossed out) — a two-string kite." },
+        "Simple colouring": { focus: ["0,0", "4,0", "4,6", "8,6"], elim: ["0,6", "8,0"],
+          marks: { "0,0": [2], "4,0": [2], "4,6": [2], "8,6": [2], "0,6": [2], "8,0": [2] }, struck: { "0,6": [2], "8,0": [2] },
+          caption: "Two-colouring digit 2 along its conjugate pairs, any cell seeing both colours — here R1C7 and R9C1 — can't be 2 (crossed out). Simple colouring." },
+        "XY-wing": { focus: ["4,4", "4,1", "1,4"], elim: ["1,1"],
+          marks: { "4,4": [1, 2], "4,1": [1, 3], "1,4": [2, 3], "1,1": [3, 5, 7] }, struck: { "1,1": [3] },
+          caption: "Pivot R5C5 {1, 2} forces a 3 onto one pincer: if it's 1, R5C2 is 3; if 2, R2C5 is 3. So a cell seeing both pincers can't be 3 (crossed out) — an XY-wing." },
+        "XYZ-wing": { focus: ["0,0", "0,2", "2,0"], elim: ["1,1"],
+          marks: { "0,0": [1, 2, 3], "0,2": [1, 3], "2,0": [2, 3], "1,1": [3, 4, 8] }, struck: { "1,1": [3] },
+          caption: "Pivot R1C1 {1, 2, 3} with pincers {1, 3} and {2, 3} all share 3. Whichever value the pivot takes, a 3 lands on one of the three, so a cell seeing all of them can't be 3 (crossed out) — an XYZ-wing." },
+        "W-wing": { focus: ["0,0", "4,4", "0,2", "4,2"], elim: ["0,4", "4,0"],
+          marks: { "0,0": [1, 2], "4,4": [1, 2], "0,2": [2], "4,2": [2], "0,4": [1, 6, 8], "4,0": [1, 5, 9] }, struck: { "0,4": [1], "4,0": [1] },
+          caption: "R1C1 and R5C5 both hold {1, 2} and are linked by the two 2s in column 3, so one of them must be 1. Any cell seeing both loses 1 (crossed out) — a W-wing." },
+        "Remote pairs": { focus: ["0,0", "0,3", "4,3", "4,7"], elim: ["0,7", "4,0"],
+          marks: { "0,0": [3, 7], "0,3": [3, 7], "4,3": [3, 7], "4,7": [3, 7], "0,7": [3, 7, 5], "4,0": [3, 7, 2] }, struck: { "0,7": [3, 7], "4,0": [3, 7] },
+          caption: "A chain of {3, 7} pairs alternates the two digits along its length. The ends are opposite colours, so any cell seeing both can hold neither (crossed out) — remote pairs." },
+        "XY-chain": { focus: ["0,0", "0,4", "4,4"], elim: ["4,0"],
+          marks: { "0,0": [1, 3], "0,4": [1, 2], "4,4": [2, 3], "4,0": [3, 5, 9] }, struck: { "4,0": [3] },
+          caption: "Linking two-candidate cells — {1, 3} → {1, 2} → {2, 3} — forces a 3 onto one end of the chain, so a cell seeing both ends can't be 3 (crossed out) — an XY-chain." },
       };
       function renderMiniBoard(container, ex) {
         container.innerHTML = "";
@@ -1867,7 +2215,7 @@
           board.innerHTML = "";
           document.getElementById("exCaption").textContent = tech === "Mistake"
             ? "These are entries that didn't match the solution. There's no rule to learn here — slow down and verify a digit before placing it."
-            : "This move follows from the puzzle's unique solution (an advanced technique, or simply filling neighbors first) rather than one named rule.";
+            : (TECH_INFO[tech] || "This move follows from the puzzle's unique solution (an advanced technique, or simply filling neighbors first) rather than one named rule.");
         }
         renderTechGames(tech);
         document.getElementById("exModal").hidden = false;
@@ -1898,8 +2246,80 @@
       document.getElementById("exModal").addEventListener("click", (e) => { if (e.target.id === "exModal") e.currentTarget.hidden = true; });
       function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
       document.getElementById("statsBtn").addEventListener("click", () => {
-        if (statsEl.hidden) { closeLibrary(); closeHistory(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
+        if (statsEl.hidden) { closeLibrary(); closeHistory(); closeTechniques(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
         else closeStats();
+      });
+
+      // ---- techniques reference panel (a glossary of every method the coach recognizes) ----
+      // Grouped roughly by difficulty; each name matches the labels recorded in stats so the
+      // colours and the tap-through example line up with what gets tracked while you play.
+      const TECH_CATALOG = [
+        ["Basics", ["Full house", "Naked single", "Hidden single"]],
+        ["Intersections", ["Pointing pair", "Pointing triple", "Locked candidate"]],
+        ["Naked subsets", ["Naked pair", "Naked triple", "Naked quad"]],
+        ["Hidden subsets", ["Hidden pair", "Hidden triple", "Hidden quad"]],
+        ["Fish", ["X-wing", "Swordfish", "Jellyfish"]],
+        ["Single-digit & colouring", ["Skyscraper", "Two-string kite", "Simple colouring"]],
+        ["Wings", ["XY-wing", "XYZ-wing", "W-wing"]],
+        ["Chains", ["Remote pairs", "XY-chain"]],
+        ["Beyond", ["Advanced"]],
+      ];
+      const TECH_INFO = {
+        "Full house": "The last empty cell in a row, column, or box — only one digit can go there.",
+        "Naked single": "A cell left with just one candidate once its row, column, and box are accounted for.",
+        "Hidden single": "A digit that fits only one cell of a unit, even if that cell still shows other candidates.",
+        "Pointing pair": "A digit confined to one row or column within a box, removing it from that line outside the box.",
+        "Pointing triple": "The three-cell version of a pointing pair.",
+        "Locked candidate": "A digit confined to one box within a row or column, removing it elsewhere in that box (claiming).",
+        "Naked pair": "Two cells in a unit holding the same two candidates, clearing those digits from the rest of the unit.",
+        "Naked triple": "Three cells that share just three candidates between them.",
+        "Naked quad": "Four cells that share just four candidates between them.",
+        "Hidden pair": "Two candidates that appear only in the same two cells of a unit.",
+        "Hidden triple": "Three candidates restricted to the same three cells.",
+        "Hidden quad": "Four candidates restricted to the same four cells.",
+        "X-wing": "A digit pinned to the same two columns across two rows (or vice versa), enabling eliminations.",
+        "Swordfish": "The three-row/column version of the X-wing.",
+        "Jellyfish": "The four-row/column version of the X-wing.",
+        "Skyscraper": "Two strong links in one digit sharing a base line; the far ends clear cells that see both.",
+        "Two-string kite": "A row link and a column link for one digit joined through a shared box.",
+        "Simple colouring": "Colouring a digit's strong-link chain to expose contradictions and eliminations.",
+        "XY-wing": "A two-candidate pivot with two pincers, removing a shared digit any cell seeing both pincers can't hold.",
+        "XYZ-wing": "A three-candidate pivot with two pincers that all share one digit.",
+        "W-wing": "Two matching pairs joined by a strong link, clearing their shared digit from common peers.",
+        "Remote pairs": "A chain of identical pairs whose alternating digits clear cells seeing both ends.",
+        "XY-chain": "A chain of two-candidate cells that forces one end to a value — the general form of the XY-wing.",
+        "Advanced": "Anything past the methods above (uniqueness, ALS, forcing chains, and friends). Still tracked as one bucket for now.",
+      };
+      function closeTechniques() {
+        const p = document.getElementById("techniques");
+        if (p && !p.hidden) { p.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; }
+      }
+      function openTechniques() {
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques();
+        renderTechniques();
+        document.getElementById("techniques").hidden = false;
+        boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none";
+      }
+      function renderTechniques() {
+        const counts = {};
+        for (const g of lsGet(STATS_KEY)) for (const m of (g.moves || [])) counts[m.tech] = (counts[m.tech] || 0) + 1;
+        let html = `<button id="techBack">← Back</button><h2>Techniques</h2><p class="hintline">Every method the coach can spot and log while you solve. Tap one for a visual example and the games where you've used it.</p>`;
+        for (const [group, items] of TECH_CATALOG) {
+          html += `<h3>${esc(group)}</h3><table class="grid">`;
+          for (const t of items) {
+            const c = counts[t] || 0, color = TECH_COLORS[t] || "#94a3b8";
+            html += `<tr class="trow" data-tech="${esc(t)}"><td><span style="color:${color}">●</span> <b>${esc(t)}</b><div class="k" style="margin-top:3px">${esc(TECH_INFO[t] || "")}</div></td><td style="white-space:nowrap;text-align:right">${c ? "×" + c : "—"}</td></tr>`;
+          }
+          html += `</table>`;
+        }
+        const panel = document.getElementById("techniques");
+        panel.innerHTML = html;
+        document.getElementById("techBack").onclick = () => document.getElementById("techBtn").click();
+        panel.querySelectorAll(".trow").forEach((row) => { row.onclick = () => openExample(row.dataset.tech); });
+      }
+      document.getElementById("techBtn").addEventListener("click", () => {
+        if (document.getElementById("techniques").hidden) openTechniques();
+        else closeTechniques();
       });
       function renderStats() {
         const games = lsGet(STATS_KEY);
