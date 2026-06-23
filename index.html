@@ -2132,6 +2132,58 @@
         "X-wing": { focus: ["1,2", "1,6", "5,2", "5,6"], elim: ["3,2", "7,6"],
           marks: { "1,2": [5], "1,6": [5], "5,2": [5], "5,6": [5], "3,2": [5], "7,6": [5] }, struck: { "3,2": [5], "7,6": [5] },
           caption: "In rows 2 and 6, digit 5 is pinned to the same two columns (3 and 7) — an X-wing. 5 can then be removed from those columns in every other row (crossed out)." },
+        "Full house": { givens: { "0,0": 1, "0,1": 2, "0,2": 3, "1,0": 4, "1,2": 6, "2,0": 7, "2,1": 8, "2,2": 9 },
+          target: ["1,1"], marks: { "1,1": [5] },
+          caption: "Eight of the nine cells in this box are filled, so the last one can only be the missing digit, 5 — a full house." },
+        "Pointing triple": { givens: { "1,0": 5, "1,1": 6, "1,2": 7, "2,0": 8, "2,1": 9, "2,2": 1 },
+          focus: ["0,0", "0,1", "0,2"], elim: ["0,5", "0,8"],
+          marks: { "0,0": [2, 3], "0,1": [3, 4], "0,2": [2, 3, 4], "0,5": [3, 7], "0,8": [3, 9] }, struck: { "0,5": [3], "0,8": [3] },
+          caption: "With the rest of the box filled, 3 can only sit in these three top-row cells. So 3 is removed from the rest of that row (crossed out) — a pointing triple." },
+        "Locked candidate": { givens: { "0,3": 1, "0,4": 2, "0,5": 3, "0,6": 5, "0,7": 6, "0,8": 7 },
+          focus: ["0,0", "0,1", "0,2"], elim: ["1,1", "2,2"], marks: { "0,0": [4, 8, 9], "0,1": [4, 8, 9], "0,2": [4, 8, 9], "1,1": [4], "2,2": [4] }, struck: { "1,1": [4], "2,2": [4] },
+          caption: "In the top row, 4 only fits inside the highlighted box, so it's removed from that box's other cells (crossed out) — a locked candidate (claiming)." },
+        "Naked triple": { focus: ["0,0", "0,1", "0,2"], elim: ["0,5", "0,7"],
+          marks: { "0,0": [1, 2], "0,1": [2, 3], "0,2": [1, 3], "0,5": [1, 4, 5], "0,7": [3, 5, 6] }, struck: { "0,5": [1], "0,7": [3] },
+          caption: "These three cells share only {1, 2, 3} between them, so those digits are removed from the rest of the row (crossed out) — a naked triple." },
+        "Naked quad": { focus: ["0,0", "0,1", "0,2", "0,3"], elim: ["0,6", "0,8"],
+          marks: { "0,0": [1, 2], "0,1": [2, 3], "0,2": [3, 4], "0,3": [1, 4], "0,6": [2, 5, 8], "0,8": [4, 7] }, struck: { "0,6": [2], "0,8": [4] },
+          caption: "Four cells holding only {1, 2, 3, 4} between them lock those digits in, so they're removed from the rest of the row (crossed out) — a naked quad." },
+        "Hidden triple": { focus: ["0,0", "0,1", "0,2"],
+          marks: { "0,0": [4, 5, 1, 8], "0,1": [5, 6, 2], "0,2": [4, 6, 9] }, struck: { "0,0": [1, 8], "0,1": [2], "0,2": [9] },
+          caption: "4, 5 and 6 can only appear in these three cells of the row, so every other candidate there is removed (crossed out) — a hidden triple." },
+        "Hidden quad": { focus: ["0,0", "0,1", "0,2", "0,3"],
+          marks: { "0,0": [3, 4, 1], "0,1": [4, 5, 7], "0,2": [5, 6, 2], "0,3": [3, 6, 8] }, struck: { "0,0": [1], "0,1": [7], "0,2": [2], "0,3": [8] },
+          caption: "3, 4, 5 and 6 are restricted to these four cells, so their other candidates fall away (crossed out) — a hidden quad." },
+        "Swordfish": { focus: ["0,1", "0,4", "4,4", "4,7", "8,1", "8,7"], elim: ["2,1", "6,4", "3,7"],
+          marks: { "0,1": [5], "0,4": [5], "4,4": [5], "4,7": [5], "8,1": [5], "8,7": [5], "2,1": [5], "6,4": [5], "3,7": [5] }, struck: { "2,1": [5], "6,4": [5], "3,7": [5] },
+          caption: "Digit 5 in rows 1, 5 and 9 is confined to columns 2, 5 and 8. So 5 is removed from those columns in every other row (crossed out) — a swordfish." },
+        "Jellyfish": { focus: ["0,1", "0,3", "3,3", "3,6", "5,6", "5,8", "8,8", "8,1"], elim: ["2,1", "4,3", "6,6", "7,8"],
+          marks: { "0,1": [3], "0,3": [3], "3,3": [3], "3,6": [3], "5,6": [3], "5,8": [3], "8,8": [3], "8,1": [3], "2,1": [3], "4,3": [3], "6,6": [3], "7,8": [3] }, struck: { "2,1": [3], "4,3": [3], "6,6": [3], "7,8": [3] },
+          caption: "Across rows 1, 4, 6 and 9, digit 3 is locked to columns 2, 4, 7 and 9. So 3 is cleared from those columns in all other rows (crossed out) — a jellyfish." },
+        "Skyscraper": { focus: ["0,2", "6,2", "0,5", "6,8"], elim: ["0,8", "6,5"],
+          marks: { "0,2": [7], "6,2": [7], "0,5": [7], "6,8": [7], "0,8": [7], "6,5": [7] }, struck: { "0,8": [7], "6,5": [7] },
+          caption: "In rows 1 and 7, digit 7 sits in only two cells each and shares column 3 as a base. One far end must be 7, so 7 is removed from any cell seeing both (crossed out) — a skyscraper." },
+        "Two-string kite": { focus: ["0,2", "0,7", "2,0", "8,0"], elim: ["8,7"],
+          marks: { "0,2": [4], "0,7": [4], "2,0": [4], "8,0": [4], "8,7": [4] }, struck: { "8,7": [4] },
+          caption: "A row link in row 1 and a column link in column 1 for digit 4 meet in the top-left box. Following the chain, the cell seeing both far ends can't be 4 (crossed out) — a two-string kite." },
+        "Simple colouring": { focus: ["0,0", "4,0", "4,6", "8,6"], elim: ["0,6", "8,0"],
+          marks: { "0,0": [2], "4,0": [2], "4,6": [2], "8,6": [2], "0,6": [2], "8,0": [2] }, struck: { "0,6": [2], "8,0": [2] },
+          caption: "Two-colouring digit 2 along its conjugate pairs, any cell seeing both colours — here R1C7 and R9C1 — can't be 2 (crossed out). Simple colouring." },
+        "XY-wing": { focus: ["4,4", "4,1", "1,4"], elim: ["1,1"],
+          marks: { "4,4": [1, 2], "4,1": [1, 3], "1,4": [2, 3], "1,1": [3, 5, 7] }, struck: { "1,1": [3] },
+          caption: "Pivot R5C5 {1, 2} forces a 3 onto one pincer: if it's 1, R5C2 is 3; if 2, R2C5 is 3. So a cell seeing both pincers can't be 3 (crossed out) — an XY-wing." },
+        "XYZ-wing": { focus: ["0,0", "0,2", "2,0"], elim: ["1,1"],
+          marks: { "0,0": [1, 2, 3], "0,2": [1, 3], "2,0": [2, 3], "1,1": [3, 4, 8] }, struck: { "1,1": [3] },
+          caption: "Pivot R1C1 {1, 2, 3} with pincers {1, 3} and {2, 3} all share 3. Whichever value the pivot takes, a 3 lands on one of the three, so a cell seeing all of them can't be 3 (crossed out) — an XYZ-wing." },
+        "W-wing": { focus: ["0,0", "4,4", "0,2", "4,2"], elim: ["0,4", "4,0"],
+          marks: { "0,0": [1, 2], "4,4": [1, 2], "0,2": [2], "4,2": [2], "0,4": [1, 6, 8], "4,0": [1, 5, 9] }, struck: { "0,4": [1], "4,0": [1] },
+          caption: "R1C1 and R5C5 both hold {1, 2} and are linked by the two 2s in column 3, so one of them must be 1. Any cell seeing both loses 1 (crossed out) — a W-wing." },
+        "Remote pairs": { focus: ["0,0", "0,3", "4,3", "4,7"], elim: ["0,7", "4,0"],
+          marks: { "0,0": [3, 7], "0,3": [3, 7], "4,3": [3, 7], "4,7": [3, 7], "0,7": [3, 7, 5], "4,0": [3, 7, 2] }, struck: { "0,7": [3, 7], "4,0": [3, 7] },
+          caption: "A chain of {3, 7} pairs alternates the two digits along its length. The ends are opposite colours, so any cell seeing both can hold neither (crossed out) — remote pairs." },
+        "XY-chain": { focus: ["0,0", "0,4", "4,4"], elim: ["4,0"],
+          marks: { "0,0": [1, 3], "0,4": [1, 2], "4,4": [2, 3], "4,0": [3, 5, 9] }, struck: { "4,0": [3] },
+          caption: "Linking two-candidate cells — {1, 3} → {1, 2} → {2, 3} — forces a 3 onto one end of the chain, so a cell seeing both ends can't be 3 (crossed out) — an XY-chain." },
       };
       function renderMiniBoard(container, ex) {
         container.innerHTML = "";
@@ -2163,7 +2215,7 @@
           board.innerHTML = "";
           document.getElementById("exCaption").textContent = tech === "Mistake"
             ? "These are entries that didn't match the solution. There's no rule to learn here — slow down and verify a digit before placing it."
-            : "This move follows from the puzzle's unique solution (an advanced technique, or simply filling neighbors first) rather than one named rule.";
+            : (TECH_INFO[tech] || "This move follows from the puzzle's unique solution (an advanced technique, or simply filling neighbors first) rather than one named rule.");
         }
         renderTechGames(tech);
         document.getElementById("exModal").hidden = false;
