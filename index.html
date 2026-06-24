@@ -882,8 +882,10 @@
           if (after) return { kind: "place", r: after.r, c: after.c, n: after.n, tech: e.tech, highlight: e.highlight.concat([[after.r, after.c]]), reason: `${e.tech}: ${e.reason} That leaves ${loc(after.r, after.c)} = ${after.n} (${after.tech.toLowerCase()}).` };
           return { kind: "eliminate", tech: e.tech, highlight: e.highlight, reason: `${e.tech}: ${e.reason} Update your candidate marks, then look again.` };
         }
-        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0)
-          return { kind: "place", r, c, n: solution[r][c], tech: "Advanced", highlight: [[r, c]], reason: `This needs a technique beyond the ones I explain (e.g. an XY-chain). The answer is ${solution[r][c]} — place it and the simpler steps reopen.` };
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0) {
+          const d = describeCorrect(M, grid, r, c, solution[r][c]);
+          return { kind: "place", r, c, n: solution[r][c], tech: d.tech, highlight: [[r, c]], reason: `${d.tech}: ${d.body} The answer is ${solution[r][c]} — place it and the simpler steps reopen.` };
+        }
         return null;
       }
 
@@ -932,25 +934,66 @@
         saveActiveGame();
       }
 
+      // Hardest-first ordering of every named technique, used to credit a move to the
+      // most advanced technique its deduction actually relies on.
+      const TECH_RANK = ["Naked single", "Hidden single", "Pointing pair", "Pointing triple",
+        "Locked candidate", "Box/line reduction", "Naked pair", "Hidden pair", "Naked triple",
+        "Hidden triple", "X-wing", "XY-wing", "Swordfish"];
+      const techRank = (t) => { const i = TECH_RANK.indexOf(t); return i === -1 ? TECH_RANK.length : i; };
+      // The first naked/hidden single in (W, g) that isn't the cell we're explaining.
+      function placeableSingle(W, g, er, ec) {
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++)
+          if (!(r === er && c === ec) && g[r][c] === 0 && W[r][c].size === 1) return { r, c, n: [...W[r][c]][0] };
+        for (const u of UNITS) for (let n = 1; n <= 9; n++) {
+          const spots = u.cells.filter(([r, c]) => g[r][c] === 0 && W[r][c].has(n));
+          if (spots.length === 1 && !(spots[0][0] === er && spots[0][1] === ec)) return { r: spots[0][0], c: spots[0][1], n };
+        }
+        return null;
+      }
+      // Place a forced single into the working grid/candidate map, pruning it from peers.
+      function fillSingle(W, g, r, c, n) {
+        g[r][c] = n;
+        for (let i = 0; i < 9; i++) { W[r][i].delete(n); W[i][c].delete(n); }
+        const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3;
+        for (let i = br; i < br + 3; i++) for (let j = bc; j < bc + 3; j++) W[i][j].delete(n);
+        W[r][c] = new Set();
+      }
+      // Explain why placing n at (r,c) is correct. We solve forward from the current board
+      // with the named techniques — propagating every basic single and elimination — until
+      // this cell is forced, then credit the move to the hardest technique the chain needed.
+      // Every move therefore lands in a real technique bucket; there's no "Advanced" catch-all.
       function describeCorrect(M, grid, r, c, n) {
-        if (M[r][c].size === 1) return { tech: "Naked single", body: `the other eight digits all already appear in ${loc(r, c)}'s row, column, or box, leaving ${n}.` };
-        for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
-          const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && M[rr][cc].has(n));
-          if (spots.length === 1) return { tech: "Hidden single", body: `${n} can't go in any other empty cell of ${u.name}, so it must be here.` };
-        }
-        // No single-cell proof yet — try one round of an advanced elimination and see if it pins this cell.
-        for (const tech of [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, xWing, xyWing, swordfish]) {
-          const e = tech(M, grid); if (!e) continue;
-          const N = applyElims(M, e.elims);
-          if (N[r][c].size === 1 && [...N[r][c]][0] === n)
-            return { tech: e.tech, body: `${e.reason} That leaves ${n} as the only candidate for ${loc(r, c)}.` };
-          for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
-            const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && N[rr][cc].has(n));
-            if (spots.length === 1 && spots[0][0] === r && spots[0][1] === c)
-              return { tech: e.tech, body: `${e.reason} That leaves ${loc(r, c)} as the only spot for ${n} in ${u.name}.` };
+        const W = cloneMap(M), g = grid.map((row) => row.slice());
+        let hardest = null, hardestReason = null;
+        const advanced = [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, xWing, xyWing, swordfish];
+        const credit = (basicBody, chainTail) => hardest
+          ? { tech: hardest, body: `${hardestReason} ${chainTail}` }
+          : { tech: basicBody.tech, body: basicBody.body };
+        for (let guard = 0; guard < 1000; guard++) {
+          if (W[r][c].size === 1) {
+            return credit(
+              { tech: "Naked single", body: `the other eight digits all already appear in ${loc(r, c)}'s row, column, or box, leaving ${n}.` },
+              `That leaves ${n} as the only candidate for ${loc(r, c)}.`);
           }
+          const hu = UNITS.find((u) => u.cells.some(([rr, cc]) => rr === r && cc === c) &&
+            u.cells.filter(([rr, cc]) => g[rr][cc] === 0 && W[rr][cc].has(n)).length === 1);
+          if (hu) {
+            return credit(
+              { tech: "Hidden single", body: `${n} can't go in any other empty cell of ${hu.name}, so it must be here.` },
+              `That leaves ${loc(r, c)} as the only spot for ${n} in ${hu.name}.`);
+          }
+          const s = placeableSingle(W, g, r, c);
+          if (s) { fillSingle(W, g, s.r, s.c, s.n); continue; }
+          let e = null;
+          for (const tech of advanced) { const out = tech(W, g); if (out && out.elims.length) { e = out; break; } }
+          if (!e) break; // stuck for the implemented techniques (rare for the shipped puzzles)
+          for (const [er, ec, en] of e.elims) W[er][ec].delete(en);
+          if (techRank(e.tech) >= (hardest ? techRank(hardest) : -1)) { hardest = e.tech; hardestReason = e.reason; }
         }
-        return { tech: "Advanced", body: `${n} matches the solution. It follows from a technique beyond the ones I name here, or once a few more neighbors are filled in.` };
+        // Couldn't pin it outright: credit the hardest technique that helped, or — if the cell
+        // simply needed a few neighbours filled first — frame it as a single.
+        if (hardest) return { tech: hardest, body: `${hardestReason} ${n} then follows for ${loc(r, c)} once that's combined with the surrounding cells.` };
+        return { tech: "Naked single", body: `${n} is forced here once a few neighbouring cells are filled in — every other digit then appears in ${loc(r, c)}'s row, column, or box.` };
       }
       function handleMove(r, c) {
         inputs[r][c].classList.remove("wrong");
