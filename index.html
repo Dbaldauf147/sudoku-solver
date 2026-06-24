@@ -79,6 +79,8 @@
         font-size: 1.1rem; background: var(--panel); border: 1px solid var(--line);
         border-radius: 8px; padding: 6px 12px; }
       .timer b { color: var(--accent); }
+      .error-meter { cursor: pointer; user-select: none; }
+      .error-meter:hover, .error-meter:focus-visible { border-color: var(--accent); outline: none; }
 
       .board {
         display: grid; grid-template-columns: repeat(9, 1fr); aspect-ratio: 1;
@@ -242,7 +244,7 @@
     <main>
       <div class="topbar">
         <div class="tabs">
-          <label class="file">Import screenshot<input id="file" type="file" accept="image/*" /></label>
+          <label class="file" title="Pick one screenshot to play now, or select several to bulk-import them all to your library">Import screenshot<input id="file" type="file" accept="image/*" multiple /></label>
           <button id="historyBtn">History</button>
           <button id="whoami" class="whoami" title="Profile — tap to switch or sign in">Playing as: Guest</button>
         </div>
@@ -286,7 +288,7 @@
           <button id="modeCandidate">Candidate</button>
           <span class="meters">
             <span class="timer">⏱ <b id="timer">0:00</b></span>
-            <span class="timer">✗ <b id="errors">0</b></span>
+            <span class="timer error-meter" id="errorMeter" title="Made a fat-finger mistake? Tap to take one off your error count" role="button" tabindex="0">✗ <b id="errors">0</b></span>
           </span>
         </div>
         <div class="keys" id="keys"></div>
@@ -328,6 +330,17 @@
           <p>The timer is stopped and the board is hidden. Resume when you're ready.</p>
           <div class="actions">
             <button id="resumeBtn" class="primary">Resume</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="errorModal" class="overlay" hidden>
+        <div class="modal">
+          <h2>Undo an error?</h2>
+          <p>If you mis-tapped or fat-fingered a digit, you can take one error off this game's count so it doesn't skew your stats.</p>
+          <div class="actions">
+            <button id="errorCancel">Cancel</button>
+            <button id="errorUndo" class="primary">Fat finger — don't count it</button>
           </div>
         </div>
       </div>
@@ -1051,6 +1064,33 @@
         pauseTimer(true); pauseModal.hidden = false;
       });
       document.getElementById("resumeBtn").addEventListener("click", () => { pauseModal.hidden = true; resumeTimer(true); });
+      // ---- "fat finger" error undo: tap the ✗ counter to take one mistyped digit off this game's count ----
+      function undoLastError() {
+        if (!session || (session.errors || 0) <= 0) return false;
+        session.errors -= 1;
+        errorsEl.textContent = session.errors;
+        // Drop the most recent wrong move so the per-game timeline in Stats matches the lowered count.
+        for (let i = session.moves.length - 1; i >= 0; i--) {
+          if (!session.moves[i].correct) { session.moves.splice(i, 1); break; }
+        }
+        saveActiveGame();
+        return true;
+      }
+      const errorModal = document.getElementById("errorModal");
+      function openErrorUndo() {
+        if (!session) return showExplain("Not solving", "Errors are only counted while you're solving a puzzle.", "info");
+        if ((session.errors || 0) <= 0) return showExplain("No errors to undo", "Your error count is already 0 for this game.", "info");
+        errorModal.hidden = false;
+      }
+      const errorMeter = document.getElementById("errorMeter");
+      errorMeter.addEventListener("click", openErrorUndo);
+      errorMeter.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openErrorUndo(); } });
+      document.getElementById("errorCancel").addEventListener("click", () => { errorModal.hidden = true; });
+      document.getElementById("errorUndo").addEventListener("click", () => {
+        errorModal.hidden = true;
+        if (undoLastError()) showExplain("Error uncounted", "That fat-finger mistake won't count against this game.", "ok");
+      });
+      errorModal.addEventListener("click", (e) => { if (e.target === errorModal) errorModal.hidden = true; });
       function recordMove(r, c, n, correct, tech) {
         if (!session) return;
         const t = activeElapsed(), dt = t - session.lastT; session.lastT = t;
@@ -2007,21 +2047,64 @@
       }
 
       // ---- image import ----
-      // Screenshots are read by Claude Vision via the serverless endpoint.
-      document.getElementById("file").addEventListener("change", async (e) => {
-        const file = e.target.files[0]; if (!file) return;
-        if (solving) { e.target.value = ""; return showExplain("Already solving", "Press Edit puzzle first, then import a new screenshot.", "info"); }
+      // Screenshots are read by Claude Vision via the serverless endpoint. Picking one file
+      // loads it onto the board to play now; picking several bulk-imports them all to the library.
+      async function parseImageFile(file) {
+        const dataUrl = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
+        const r = await fetch("/api/parse-sudoku-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: String(dataUrl).split(",")[1], media_type: file.type || "image/png" }) });
+        const data = await r.json();
+        if (!r.ok) { let msg = data.error || "Failed to read image"; if (data.diagnostic) msg += ` (key defined: ${data.diagnostic.defined}, length: ${data.diagnostic.length}, matching vars: ${(data.diagnostic.anthropicVars || []).join(", ") || "none"})`; throw new Error(msg); }
+        return data.grid;
+      }
+      const isBlankGrid = (grid) => grid.every((row) => row.every((c) => !c));
+      async function importSingle(file) {
         showExplain("Reading puzzle…", "Claude Vision is reading the grid from your screenshot.", "info");
         try {
-          const dataUrl = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
-          const r = await fetch("/api/parse-sudoku-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: String(dataUrl).split(",")[1], media_type: file.type || "image/png" }) });
-          const data = await r.json();
-          if (!r.ok) { let msg = data.error || "Failed to read image"; if (data.diagnostic) msg += ` (key defined: ${data.diagnostic.defined}, length: ${data.diagnostic.length}, matching vars: ${(data.diagnostic.anthropicVars || []).join(", ") || "none"})`; throw new Error(msg); }
-          writeGrid(data.grid); renderPencils();
+          const grid = await parseImageFile(file);
+          writeGrid(grid); renderPencils();
           const added = autoSaveImport(readGrid());
           showReady(`Grid imported and ${added ? "saved to your library" : "matched to a puzzle already in your library"}${syncNote()}. Fix any misread digits and set the difficulty and source below — edits update the saved copy. Then start the timer.`);
         } catch (err) { showExplain("Couldn't read the image", (err.message || "Unknown error") + " — you can still type the puzzle in by hand.", "bad"); }
-        finally { e.target.value = ""; }
+      }
+      // Bulk import: read every screenshot (a few at a time), saving each new grid straight to the
+      // library with the current default difficulty/source. Nothing is loaded onto the board.
+      async function importBulk(files) {
+        const total = files.length;
+        const diff = difficultyEl.value || "Medium";
+        const src = (sourceEl.value || "Unknown").trim() || "Unknown";
+        let done = 0, added = 0, dup = 0; const failed = [];
+        const render = () => showExplain("Bulk importing…", `Read ${done} of ${total}. Claude Vision is reading each screenshot — this can take a moment for a big batch.`, "info");
+        render();
+        const queue = files.map((file, i) => ({ file, i }));
+        async function worker() {
+          let job;
+          while ((job = queue.shift())) {
+            try {
+              const grid = await parseImageFile(job.file);
+              if (isBlankGrid(grid)) throw new Error("no digits found");
+              if (saveGameIfNew(grid, diff, src)) added++; else dup++;
+            } catch { failed.push(job.file.name || `image ${job.i + 1}`); }
+            done++; render();
+          }
+        }
+        await Promise.all(Array.from({ length: Math.min(3, total) }, worker));
+        const parts = [];
+        if (added) parts.push(`${added} new puzzle${added === 1 ? "" : "s"} saved`);
+        if (dup) parts.push(`${dup} already in your library`);
+        if (failed.length) parts.push(`${failed.length} couldn't be read`);
+        let body = (parts.join(" · ") || "Nothing to import") + `${syncNote()}.`;
+        if (added) body += ` They're saved as ${diff} · ${src} — open Saved games to play any of them, or edit the difficulty and source there.`;
+        if (failed.length) { const names = failed.slice(0, 5).join(", ") + (failed.length > 5 ? `, +${failed.length - 5} more` : ""); body += ` Couldn't read: ${names}. Re-import those individually to fix any misreads.`; }
+        showExplain(added ? "Bulk import done" : (failed.length ? "Bulk import finished" : "Nothing new"), body, added ? "ok" : (failed.length ? "bad" : "info"));
+        if (added) openLibrary();
+      }
+      document.getElementById("file").addEventListener("change", async (e) => {
+        const files = [...e.target.files]; if (!files.length) { e.target.value = ""; return; }
+        if (solving) { e.target.value = ""; return showExplain("Already solving", "Press Edit puzzle first, then import a new screenshot.", "info"); }
+        try {
+          if (files.length === 1) await importSingle(files[0]);
+          else await importBulk(files);
+        } finally { e.target.value = ""; }
       });
 
       // ---- init ----
