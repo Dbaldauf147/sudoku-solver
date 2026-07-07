@@ -62,11 +62,15 @@
       button:disabled { opacity: 0.45; cursor: not-allowed; }
       label.file input { display: none; }
       .library select { flex: 1; min-width: 160px; }
+      .lib-tabs { display: flex; gap: 6px; margin: 12px 0 16px; flex-wrap: wrap; }
+      .lib-tabs .lib-tab { flex: 1; min-width: 96px; }
+      .lib-tabs .lib-tab.on { background: var(--sel); border-color: var(--accent); color: var(--text); font-weight: 600; }
 
       .topbar { position: relative; display: flex; flex-wrap: wrap; align-items: center;
         gap: 10px; margin-bottom: 14px; padding-right: 54px; }
       .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
       .tabs button, .tabs label.file { padding: 8px 13px; font-size: 0.9rem; }
+      .home { font-weight: 600; }
       .whoami { color: var(--muted); font-weight: 600; }
       .whoami.signed { color: var(--accent); border-color: var(--accent); }
       .menu { position: absolute; top: 0; right: 0; }
@@ -265,8 +269,9 @@
     <main>
       <div class="topbar">
         <div class="tabs">
+          <button id="homeBtn" class="home" title="Back to your game">🏠 Home</button>
           <label class="file">Import screenshot<input id="file" type="file" accept="image/*" /></label>
-          <button id="historyBtn">History</button>
+          <button id="libraryBtn">Game library</button>
           <button id="whoami" class="whoami" title="Profile — tap to switch or sign in">Playing as: Guest</button>
         </div>
         <div class="menu">
@@ -286,14 +291,6 @@
             <button id="backupBtn">Backup &amp; restore</button>
           </div>
         </div>
-      </div>
-
-      <div class="row setup-extra library">
-        <button id="load">Saved games</button>
-      </div>
-      <div class="row setup-extra catalog-row">
-        <select id="catalog" title="Built-in puzzles"></select>
-        <button id="play">Play from catalog</button>
       </div>
 
       <div class="row solving">
@@ -323,8 +320,7 @@
       </div>
 
       <div id="stats" class="stats" hidden></div>
-      <div id="savedGames" class="stats" hidden></div>
-      <div id="history" class="stats" hidden></div>
+      <div id="gameLibrary" class="stats" hidden></div>
 
       <div id="modal" class="overlay" hidden>
         <div class="modal">
@@ -1136,7 +1132,7 @@
       const pauseModal = document.getElementById("pauseModal");
       // The board is "covered" whenever an in-app panel (Stats / Saved games / History) is showing
       // over it — the game isn't visible, so it counts as swiping away from the Sudoku page.
-      function boardCovered() { return !statsEl.hidden || !libraryPanel.hidden || !historyPanel.hidden; }
+      function boardCovered() { return !statsEl.hidden || !libraryPanel.hidden; }
       // Auto-pause reconciler: the clock should run only while you're actually looking at the board.
       // It stops whenever the tab is hidden (backgrounded) or a panel covers the board, and resumes
       // when you come back — but never overrides a manual pause. Driven from visibilitychange and
@@ -1595,7 +1591,7 @@
       // updates the library entry that was auto-saved when the screenshot was loaded.
       difficultyEl.addEventListener("change", syncActiveSavedGame);
       sourceEl.addEventListener("input", syncActiveSavedGame);
-      const loadBtn = document.getElementById("load"), libraryPanel = document.getElementById("savedGames");
+      const libraryPanel = document.getElementById("gameLibrary");
       function lsGet(key) {
         try { const v = JSON.parse(localStorage.getItem(key)); return Array.isArray(v) ? v : []; } catch { return []; }
       }
@@ -1747,9 +1743,10 @@
       window.addEventListener("online", () => Object.keys(cloudQueue).forEach((c) => { cloudRetry[c] = 0; scheduleCloudFlush(c, 0); }));
       const syncNote = () => (cloudOn ? " and synced across your devices" : " on this device");
       function renderLibrary() {
-        const games = lsGet(STORE_KEY);
-        loadBtn.textContent = games.length ? `Saved games (${games.length})` : "Saved games";
-        if (!libraryPanel.hidden) renderLibraryPanel();
+        if (libraryPanel.hidden) return;
+        if (libTab === "saved") renderSavedTab();
+        else if (libTab === "history") renderHistoryTab();
+        else renderGameLibrary();
       }
       async function initStores() {
         try {
@@ -1816,7 +1813,9 @@
         g.source = (sourceEl.value || "Unknown").trim() || "Unknown";
         lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
       }
-      // ---- saved-games history panel (opened from the Load button) ----
+      // ---- unified Game library panel: Saved games · Play history · Catalogue ----
+      const libraryBtn = document.getElementById("libraryBtn");
+      let libTab = "saved";
       function savedDateHeader(ts) {
         const d = new Date(ts), now = new Date(), sameDay = (a, b) => a.toDateString() === b.toDateString();
         const yest = new Date(now); yest.setDate(now.getDate() - 1);
@@ -1824,16 +1823,51 @@
         if (sameDay(d, yest)) return "Yesterday";
         return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
       }
-      function openLibrary() { closeStats(); closeHistory(); editingId = null; renderLibraryPanel(); libraryPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
-      function closeLibrary() { if (!libraryPanel.hidden) { editingId = null; libraryPanel.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause(); } }
-      let editingId = null;
+      function openLibrary(tab) {
+        closeStats();
+        if (tab) libTab = tab;
+        editingId = null; histEditing = null;
+        libraryPanel.hidden = false; renderGameLibrary();
+        boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause();
+      }
+      function closeLibrary() {
+        if (!libraryPanel.hidden) {
+          editingId = null; histEditing = null; libraryPanel.hidden = true;
+          boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause();
+        }
+      }
+      // History now lives inside the library as a tab; keep these names for existing call sites.
+      function openHistory() { openLibrary("history"); }
+      function closeHistory() { closeLibrary(); }
+
+      let editingId = null, histEditing = null;
       const DIFFICULTIES = ["Easy", "Medium", "Hard"];
       function diffOptions(sel) { return DIFFICULTIES.map((d) => `<option value="${d}"${d === sel ? " selected" : ""}>${d}</option>`).join(""); }
-      function renderLibraryPanel() {
+
+      // Renders the panel shell (back button, tab bar) and delegates the body to the active tab.
+      function renderGameLibrary() {
+        if (libraryPanel.hidden) return;
+        const counts = { saved: lsGet(STORE_KEY).length, history: lsGet(STATS_KEY).length, catalog: CATALOG.length };
+        const tab = (id, label) => `<button class="lib-tab${libTab === id ? " on" : ""}" data-tab="${id}">${label} <span class="k">(${counts[id]})</span></button>`;
+        libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Game library</h2>` +
+          `<div class="lib-tabs">${tab("saved", "Saved")}${tab("history", "History")}${tab("catalog", "Catalogue")}</div>` +
+          `<div id="libContent"></div>`;
+        document.getElementById("lb").onclick = closeLibrary;
+        libraryPanel.querySelectorAll(".lib-tab").forEach((b) => (b.onclick = () => {
+          libTab = b.dataset.tab; editingId = null; histEditing = null; renderGameLibrary();
+        }));
+        if (libTab === "history") renderHistoryTab();
+        else if (libTab === "catalog") renderCatalogTab();
+        else renderSavedTab();
+      }
+
+      // ---- Saved games tab ----
+      function renderSavedTab() {
+        const content = document.getElementById("libContent"); if (!content) return;
         const games = [...lsGet(STORE_KEY)].sort((a, b) => b.savedAt - a.savedAt);
         if (!games.length) {
-          libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Saved games</h2><div class="card">No saved games yet. Import a screenshot and it's saved here automatically — newest first, grouped by date.</div>`;
-          document.getElementById("lb").onclick = closeLibrary; return;
+          content.innerHTML = `<div class="card">No saved games yet. Import a screenshot and it's saved here automatically — newest first, grouped by date.</div>`;
+          return;
         }
         let rows = "", lastHeader = null;
         for (const g of games) {
@@ -1861,22 +1895,21 @@
           }
         }
         const tools = `<div class="lib-tools"><label><input type="checkbox" id="selAll" /> Select all</label><span class="spacer"></span><button id="shareSel" class="primary">Share selected</button></div>`;
-        libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Saved games <span class="k">(${games.length})</span></h2>${tools}${rows}`;
-        document.getElementById("lb").onclick = closeLibrary;
-        document.getElementById("selAll").onchange = (e) => libraryPanel.querySelectorAll(".share-check").forEach((c) => (c.checked = e.target.checked));
+        content.innerHTML = `${tools}${rows}`;
+        document.getElementById("selAll").onchange = (e) => content.querySelectorAll(".share-check").forEach((c) => (c.checked = e.target.checked));
         document.getElementById("shareSel").onclick = () => {
-          const ids = [...libraryPanel.querySelectorAll(".share-check:checked")].map((c) => c.dataset.id);
+          const ids = [...content.querySelectorAll(".share-check:checked")].map((c) => c.dataset.id);
           const all = lsGet(STORE_KEY);
           openShare(null, ids.length ? all.filter((g) => ids.includes(g.id)) : all);
         };
-        libraryPanel.querySelectorAll(".load-one").forEach((b) => (b.onclick = () => loadSavedGame(b.dataset.id)));
-        libraryPanel.querySelectorAll(".edit-one").forEach((b) => (b.onclick = () => { editingId = b.dataset.id; renderLibraryPanel(); }));
-        libraryPanel.querySelectorAll(".cancel-one").forEach((b) => (b.onclick = () => { editingId = null; renderLibraryPanel(); }));
-        libraryPanel.querySelectorAll(".save-one").forEach((b) => (b.onclick = () => {
+        content.querySelectorAll(".load-one").forEach((b) => (b.onclick = () => loadSavedGame(b.dataset.id)));
+        content.querySelectorAll(".edit-one").forEach((b) => (b.onclick = () => { editingId = b.dataset.id; renderSavedTab(); }));
+        content.querySelectorAll(".cancel-one").forEach((b) => (b.onclick = () => { editingId = null; renderSavedTab(); }));
+        content.querySelectorAll(".save-one").forEach((b) => (b.onclick = () => {
           const row = b.closest(".saved-row");
           saveSavedGameEdit(b.dataset.id, row.querySelector(".edit-diff").value, row.querySelector(".edit-source").value);
         }));
-        libraryPanel.querySelectorAll(".del-one").forEach((b) => (b.onclick = () => deleteSavedGame(b.dataset.id)));
+        content.querySelectorAll(".del-one").forEach((b) => (b.onclick = () => deleteSavedGame(b.dataset.id)));
       }
       function saveSavedGameEdit(id, difficulty, source) {
         const games = lsGet(STORE_KEY);
@@ -1884,7 +1917,7 @@
         g.difficulty = difficulty;
         g.source = (source || "Unknown").trim() || "Unknown";
         lsSet(STORE_KEY, games); cloudSave("library", games);
-        editingId = null; renderLibrary();
+        editingId = null; renderSavedTab();
       }
       function loadSavedGame(id) {
         const game = lsGet(STORE_KEY).find((g) => g.id === id); if (!game) return;
@@ -1895,20 +1928,16 @@
       }
       function deleteSavedGame(id) {
         const games = lsGet(STORE_KEY).filter((g) => g.id !== id); lsSet(STORE_KEY, games); cloudSave("library", games);
-        renderLibrary();
+        renderSavedTab();
       }
-      loadBtn.addEventListener("click", () => { if (libraryPanel.hidden) openLibrary(); else closeLibrary(); });
 
-      // ---- play-history panel (every game you've finished or revealed, by date) ----
-      const historyPanel = document.getElementById("history"), historyBtn = document.getElementById("historyBtn");
-      let histEditing = null;
-      function closeHistory() { if (!historyPanel.hidden) { histEditing = null; historyPanel.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause(); } }
-      function openHistory() { closeStats(); closeLibrary(); closeHistory(); histEditing = null; renderHistory(); historyPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
-      function renderHistory() {
+      // ---- Play history tab (every game you've finished or revealed, by date) ----
+      function renderHistoryTab() {
+        const content = document.getElementById("libContent"); if (!content) return;
         const games = lsGet(STATS_KEY);
         if (!games.length) {
-          historyPanel.innerHTML = `<button id="hb">← Back</button><h2>Play history</h2><div class="card">No games played yet. Finish a puzzle (or use Reveal solution) and it'll be logged here by date — with its difficulty, time, and error count.</div>`;
-          document.getElementById("hb").onclick = closeHistory; return;
+          content.innerHTML = `<div class="card">No games played yet. Finish a puzzle (or use Reveal solution) and it'll be logged here by date — with its difficulty, time, and error count.</div>`;
+          return;
         }
         let rows = "", lastHeader = null;
         games.forEach((g, i) => {
@@ -1930,12 +1959,11 @@
             </div>`;
           }
         });
-        historyPanel.innerHTML = `<button id="hb">← Back</button><h2>Play history <span class="k">(${games.length})</span></h2>${rows}`;
-        document.getElementById("hb").onclick = closeHistory;
-        historyPanel.querySelectorAll(".hist-view").forEach((b) => (b.onclick = () => openGameDeepDive(Number(b.dataset.i))));
-        historyPanel.querySelectorAll(".hist-edit").forEach((b) => (b.onclick = () => { histEditing = Number(b.dataset.i); renderHistory(); }));
-        historyPanel.querySelectorAll(".hist-cancel").forEach((b) => (b.onclick = () => { histEditing = null; renderHistory(); }));
-        historyPanel.querySelectorAll(".hist-save").forEach((b) => (b.onclick = () => {
+        content.innerHTML = rows;
+        content.querySelectorAll(".hist-view").forEach((b) => (b.onclick = () => openGameDeepDive(Number(b.dataset.i))));
+        content.querySelectorAll(".hist-edit").forEach((b) => (b.onclick = () => { histEditing = Number(b.dataset.i); renderHistoryTab(); }));
+        content.querySelectorAll(".hist-cancel").forEach((b) => (b.onclick = () => { histEditing = null; renderHistoryTab(); }));
+        content.querySelectorAll(".hist-save").forEach((b) => (b.onclick = () => {
           const row = b.closest(".saved-row");
           saveHistoryEdit(Number(b.dataset.i), row.querySelector(".edit-diff").value, row.querySelector(".edit-source").value);
         }));
@@ -1946,15 +1974,41 @@
         games[i].difficulty = difficulty;
         games[i].source = (source || "Unknown").trim() || "Unknown";
         lsSet(STATS_KEY, games); cloudSave("stats", games);
-        histEditing = null; renderHistory();
+        histEditing = null; renderHistoryTab();
       }
       function openGameDeepDive(i) {
-        closeHistory(); closeLibrary();
+        closeLibrary();
         renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none";
         const pick = document.getElementById("gamePick");
         if (pick) { pick.value = String(i); renderDeepDive(lsGet(STATS_KEY)[i]); }
       }
-      historyBtn.addEventListener("click", () => { if (historyPanel.hidden) openHistory(); else closeHistory(); });
+
+      // ---- Catalogue tab (built-in puzzles shipped with the app) ----
+      function renderCatalogTab() {
+        const content = document.getElementById("libContent"); if (!content) return;
+        let rows = "";
+        CATALOG.forEach((p, i) => {
+          rows += `<div class="saved-row">
+            <div class="saved-meta"><b>${esc(p.difficulty)}</b> · #${p.n}<br><span class="k">${p.date ? esc(fmtCatalogDate(p.date)) : "Built-in"}</span></div>
+            <div class="saved-actions"><button class="cat-play" data-i="${i}">Play</button></div>
+          </div>`;
+        });
+        content.innerHTML = `<div class="card">Built-in puzzles — pick one to play from scratch.</div>${rows}`;
+        content.querySelectorAll(".cat-play").forEach((b) => (b.onclick = () => playCatalog(Number(b.dataset.i))));
+      }
+      function playCatalog(i) {
+        const p = CATALOG[i]; if (!p) return;
+        closeLibrary();
+        resetToEdit(); writeGrid(p.grid); difficultyEl.value = p.difficulty; sourceEl.value = "Catalog"; renderPencils();
+        showReady(`Catalog · ${p.difficulty} #${p.n}${p.date ? " · " + fmtCatalogDate(p.date) : ""} loaded. Start the timer and play it from scratch?`);
+      }
+
+      libraryBtn.addEventListener("click", () => { if (libraryPanel.hidden) openLibrary(); else closeLibrary(); });
+
+      // Home: close any open panel (stats or the game library) and return to the game board.
+      document.getElementById("homeBtn").addEventListener("click", () => {
+        closeMenu(); closeStats(); closeLibrary();
+      });
 
       // ---- built-in catalog (shipped with the app, available to every user) ----
       // Each entry: [difficulty, 81-char puzzle, date (YYYY-MM-DD)].
@@ -1977,14 +2031,8 @@
         const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
         return `${months[m - 1]} ${d}, ${y}`;
       }
+      // Built-in puzzles are surfaced in the Game library's Catalogue tab (see renderCatalogTab).
       const CATALOG = CATALOG_RAW.filter(([, s]) => s.length === 81).map(([difficulty, s, date], i) => ({ difficulty, grid: parsePuzzle(s), date, n: i + 1 }));
-      const catalogEl = document.getElementById("catalog");
-      CATALOG.forEach((p, i) => { const o = document.createElement("option"); o.value = i; o.textContent = `Catalog · ${p.difficulty} #${p.n}${p.date ? " · " + fmtCatalogDate(p.date) : ""}`; catalogEl.appendChild(o); });
-      document.getElementById("play").addEventListener("click", () => {
-        const p = CATALOG[Number(catalogEl.value)]; if (!p) return;
-        resetToEdit(); writeGrid(p.grid); difficultyEl.value = p.difficulty; sourceEl.value = "Catalog"; renderPencils();
-        showReady(`Catalog · ${p.difficulty} #${p.n}${p.date ? " · " + fmtCatalogDate(p.date) : ""} loaded. Start the timer and play it from scratch?`);
-      });
 
       // ---- stats / deep dive ----
       const TECH_COLORS = { "Naked single": "#4ade80", "Hidden single": "#6ea8fe", "Pointing pair": "#f59e0b",
