@@ -82,6 +82,9 @@
       .dropdown[hidden] { display: none; }
       .dropdown button { border: none; border-radius: 0; text-align: left; background: transparent; padding: 12px 14px; font-weight: 500; }
       .dropdown button:hover { background: var(--panel); }
+      .syncline { padding: 10px 14px; font-size: 0.78rem; color: var(--muted); border-top: 1px solid var(--line); line-height: 1.3; }
+      .syncline.on { color: var(--ok); }
+      .syncline.off { color: var(--muted); }
       .timer { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums;
         font-size: 1.1rem; background: var(--panel); border: 1px solid var(--line);
         border-radius: 8px; padding: 6px 12px; }
@@ -296,6 +299,7 @@
             <button id="profileBtn">Profile</button>
             <button id="shareBtn">Share catalogue</button>
             <button id="backupBtn">Backup &amp; restore</button>
+            <div id="syncStatus" class="syncline" title="Where your saved games and history are stored">Checking sync…</div>
           </div>
         </div>
       </div>
@@ -1749,6 +1753,20 @@
       // Re-push anything still pending the moment the network comes back.
       window.addEventListener("online", () => Object.keys(cloudQueue).forEach((c) => { cloudRetry[c] = 0; scheduleCloudFlush(c, 0); }));
       const syncNote = () => (cloudOn ? " and synced across your devices" : " on this device");
+      // Surface whether cloud sync is live so the user can tell if data will follow them across devices.
+      let syncChecked = false;
+      function updateSyncStatus() {
+        const el = document.getElementById("syncStatus"); if (!el) return;
+        if (!syncChecked) { el.textContent = "Checking sync…"; el.classList.remove("on", "off"); return; }
+        if (cloudOn) {
+          const who = profile && profile.name ? `as ${profile.name}` : "as Guest";
+          el.textContent = `☁ Synced across your devices (${who})`;
+          el.classList.add("on"); el.classList.remove("off");
+        } else {
+          el.textContent = "▢ This device only — cloud sync off";
+          el.classList.add("off"); el.classList.remove("on");
+        }
+      }
       function renderLibrary() {
         if (libraryPanel.hidden) return;
         if (libTab === "saved") renderSavedTab();
@@ -1773,6 +1791,7 @@
         // Backup layer 3: if cloud + local both came back empty, fall back to the newest local snapshot.
         if (recoverFromBackupIfEmpty()) showExplain("Recovered your data", "Your saved games and history were restored from an automatic local backup.", "ok");
         else snapshotData(); // keep a fresh baseline snapshot of the merged state
+        syncChecked = true; updateSyncStatus();
         renderLibrary();
       }
       // Union local + cloud so neither an empty cloud nor a stale device can wipe the other's data.
