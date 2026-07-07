@@ -89,10 +89,11 @@
         border-radius: 6px; overflow: hidden;
       }
       .cell { position: relative; background: var(--panel); }
+      .cell.hint-unit { background: #eef4ff; }
       .cell.selected { background: var(--sel); }
       .cell.same { background: #eef2ff; }
       .cell.hint { background: #cfe0ff; box-shadow: inset 0 0 0 2px var(--accent); }
-      .cell.peer { background: #e8eefc; }
+      .cell.peer { background: #d3e2ff; box-shadow: inset 0 0 0 1px var(--accent); }
       .cell.conflict-unit { background: #fde4e4; }
       .cell.conflict { background: #f8a9a9; box-shadow: inset 0 0 0 2px var(--bad); }
       .cell.conflict-src { box-shadow: inset 0 0 0 2px var(--bad); z-index: 1; }
@@ -140,7 +141,7 @@
       .explain.hint { border-left-color: var(--accent); }
       .explain.info { border-left-color: var(--muted); }
       .explain .title { font-weight: 600; margin: 0 0 6px; }
-      .explain .body { color: var(--muted); line-height: 1.5; margin: 0; }
+      .explain .body { color: var(--muted); line-height: 1.5; margin: 0; white-space: pre-line; }
       .explain .tech { color: var(--accent); font-weight: 600; }
       .explain button { margin-top: 12px; padding: 7px 14px; font-size: 0.9rem; }
 
@@ -275,6 +276,7 @@
             <button id="statsBtn">Stats</button>
             <button id="check">Check entries</button>
             <button id="hlToggle">Highlight matches: On</button>
+            <button id="errToggle">Error highlighting: On</button>
             <button id="resetGame">Reset game</button>
             <button id="reveal">Reveal solution</button>
             <button id="edit">Edit puzzle</button>
@@ -464,6 +466,9 @@
       // and an unguarded read here would halt the whole script (dead buttons). Default to on.
       let hlMatches = true;
       try { hlMatches = localStorage.getItem("sudoku-coach:hlmatches") !== "off"; } catch {}
+      // Error highlighting: when on, wrong entries flag red and clashing units highlight. Default on.
+      let errorFlags = true;
+      try { errorFlags = localStorage.getItem("sudoku-coach:errorflags") !== "off"; } catch {}
       // Profile/storage keys are declared up here, before any load-time code (e.g. the "Playing as"
       // chip) reads `profile` — a `let` read before its declaration throws and would halt the script.
       const PROFILE_KEY = "sudoku-coach:profile";
@@ -612,7 +617,7 @@
         const { r, c, value, marks: m } = last;
         inputs[r][c].value = value; marks[r][c] = new Set(m);
         inputs[r][c].classList.remove("wrong", "solved");
-        if (value && Number(value) !== solution[r][c]) inputs[r][c].classList.add("wrong");
+        if (errorFlags && value && Number(value) !== solution[r][c]) inputs[r][c].classList.add("wrong");
         renderPencils(); select(r, c);
         showExplain("Undid last action", `Restored ${loc(r, c)}.`, "info");
       }
@@ -943,9 +948,10 @@
         if (tech) { const span = document.createElement("span"); span.className = "tech"; span.textContent = tech + " — "; b.append(span, document.createTextNode(body)); }
         else b.textContent = body;
         explainEl.append(t, b);
-        if (action) { const btn = document.createElement("button"); btn.textContent = action.label; btn.onclick = action.onClick; explainEl.append(btn); }
+        const actions = !action ? [] : Array.isArray(action) ? action : [action];
+        for (const a of actions) { if (!a) continue; const btn = document.createElement("button"); btn.textContent = a.label; btn.onclick = a.onClick; explainEl.append(btn); }
       }
-      function clearHighlights() { for (const row of cellEls) for (const el of row) el.classList.remove("hint", "peer", "conflict", "conflict-unit", "conflict-src"); }
+      function clearHighlights() { for (const row of cellEls) for (const el of row) el.classList.remove("hint", "peer", "hint-unit", "conflict", "conflict-unit", "conflict-src"); }
       function clearConflicts() { for (const row of cellEls) for (const el of row) el.classList.remove("conflict", "conflict-unit", "conflict-src"); }
       // Find the already-placed cells that clash with putting n at (r,c), and which units (row/column/box) they violate.
       function findConflicts(grid, r, c, n) {
@@ -1020,20 +1026,25 @@
           tech = pendingTech || d.tech;
           showExplain(`✓ ${loc(r, c)} = ${n} is correct`, d.body, "ok", null, tech);
         } else {
-          inputs[r][c].classList.add("wrong");
           tech = "Mistake";
           if (session) { session.errors = (session.errors || 0) + 1; errorsEl.textContent = session.errors; }
-          const conf = findConflicts(grid, r, c, n);
-          let body;
-          if (conf.cells.length) {
-            showConflicts(r, c, conf);
-            const where = listUnits(conf.cells.map((cc) => loc(cc.r, cc.c)));
-            const u = listUnits(conf.units);
-            body = `${n} is already in this ${u} — at ${where}. I've highlighted the clashing ${conf.cells.length > 1 ? "cells" : "cell"} and the ${u} in red: a ${u} can't hold two ${n}s.`;
+          if (errorFlags) {
+            inputs[r][c].classList.add("wrong");
+            const conf = findConflicts(grid, r, c, n);
+            let body;
+            if (conf.cells.length) {
+              showConflicts(r, c, conf);
+              const where = listUnits(conf.cells.map((cc) => loc(cc.r, cc.c)));
+              const u = listUnits(conf.units);
+              body = `${n} is already in this ${u} — at ${where}. I've highlighted the clashing ${conf.cells.length > 1 ? "cells" : "cell"} and the ${u} in red: a ${u} can't hold two ${n}s.`;
+            } else {
+              body = `${n} doesn't break a rule yet, but it isn't what this cell resolves to — it would make the puzzle impossible later. Press Hint for a cell you can prove.`;
+            }
+            showExplain(`✗ ${loc(r, c)} = ${n} won't work`, body, "bad");
           } else {
-            body = `${n} doesn't break a rule yet, but it isn't what this cell resolves to — it would make the puzzle impossible later. Press Hint for a cell you can prove.`;
+            // Error highlighting off: accept the entry without red flags (it's still logged for stats).
+            showExplain(`${loc(r, c)} = ${n} placed`, "Error highlighting is off, so I won't mark mistakes on the board. Use Check entries or Hint to verify when you're ready.", "info");
           }
-          showExplain(`✗ ${loc(r, c)} = ${n} won't work`, body, "bad");
         }
         recordMove(r, c, n, correct, tech);
         saveActiveGame();   // persist the updated error count and move log now (renderPencils saved before this ran)
@@ -1397,6 +1408,30 @@
         else for (const row of cellEls) for (const el of row) el.classList.remove("same");
       });
 
+      // Error-highlighting setting: when off, wrong entries aren't flagged red on the board.
+      const errToggle = document.getElementById("errToggle");
+      function renderErrToggle() { errToggle.textContent = `Error highlighting: ${errorFlags ? "On" : "Off"}`; }
+      renderErrToggle();
+      // Repaint the board's red flags to match the current setting (clears them when off,
+      // restores them for any wrong entries when on).
+      function refreshErrorFlags() {
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+          if (givens[r][c]) continue;
+          const v = Number(inputs[r][c].value) || 0;
+          const wrong = solving && solution && v && v !== solution[r][c];
+          inputs[r][c].classList.toggle("wrong", !!(errorFlags && wrong));
+        }
+        if (!errorFlags) clearConflicts();
+      }
+      errToggle.addEventListener("click", () => {
+        errorFlags = !errorFlags;
+        try { localStorage.setItem("sudoku-coach:errorflags", errorFlags ? "on" : "off"); } catch {}
+        renderErrToggle();
+        refreshErrorFlags();
+        showExplain(errorFlags ? "Error highlighting on" : "Error highlighting off",
+          errorFlags ? "Wrong entries will flag red again, with the clashing row, column, or box." : "Mistakes won't be marked on the board. Use Check entries or Hint to verify when you want.", "info");
+      });
+
       document.getElementById("undo").addEventListener("click", undo);
 
       document.getElementById("autonotes").addEventListener("click", () => {
@@ -1410,20 +1445,72 @@
         showExplain(any ? "Notes cleared" : "Notes filled", any ? "Pencil marks removed." : "Filled every empty cell with its possible digits. Switch to Candidate mode to refine them.", "info");
       });
 
+      // Tint the whole row/column/box a technique operates on, so the reasoning is visible on the board.
+      // Units shared by 2+ of the technique's cells are shown; a lone target cell shows its three units.
+      function highlightHintUnits(hint) {
+        const cells = hint.highlight || [], rc = {}, cc = {}, bc = {};
+        for (const [r, c] of cells) { rc[r] = (rc[r] || 0) + 1; cc[c] = (cc[c] || 0) + 1; const b = boxIndex(r, c) - 1; bc[b] = (bc[b] || 0) + 1; }
+        const rows = new Set(), cols = new Set(), boxes = new Set();
+        for (const k in rc) if (rc[k] >= 2) rows.add(+k);
+        for (const k in cc) if (cc[k] >= 2) cols.add(+k);
+        for (const k in bc) if (bc[k] >= 2) boxes.add(+k);
+        if (hint.kind === "place" && !rows.size && !cols.size && !boxes.size) { rows.add(hint.r); cols.add(hint.c); boxes.add(boxIndex(hint.r, hint.c) - 1); }
+        rows.forEach((r) => { for (let c = 0; c < 9; c++) cellEls[r][c].classList.add("hint-unit"); });
+        cols.forEach((c) => { for (let r = 0; r < 9; r++) cellEls[r][c].classList.add("hint-unit"); });
+        boxes.forEach((b) => { const br = Math.floor(b / 3) * 3, bc2 = (b % 3) * 3; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) cellEls[br + i][bc2 + j].classList.add("hint-unit"); });
+      }
+      function renderHintHighlights(hint) {
+        clearHighlights();
+        highlightHintUnits(hint);
+        for (const [r, c] of hint.highlight) { cellEls[r][c].classList.remove("hint-unit"); cellEls[r][c].classList.add("peer"); }
+        if (hint.kind === "place") { cellEls[hint.r][hint.c].classList.remove("peer"); cellEls[hint.r][hint.c].classList.add("hint"); }
+      }
+      // A fuller, step-by-step version of a hint: for a naked single it rules out every other digit with
+      // where each is already used; for a hidden single it walks each other cell in the unit; for a
+      // technique it spells out the elimination that frees the cell.
+      function detailedHintText(hint) {
+        const grid = progressGrid();
+        if (hint.kind !== "place") return `${hint.reason}\n\nApply those removals to your candidate marks (or press Auto notes), then scan again — a naked or hidden single usually appears.`;
+        const { r, c, n } = hint, cand = candidates(grid, r, c);
+        const blockerFor = (rr, cc, d) => {
+          for (let i = 0; i < 9; i++) if (i !== cc && grid[rr][i] === d) return `row ${rr + 1} (${loc(rr, i)})`;
+          for (let i = 0; i < 9; i++) if (i !== rr && grid[i][cc] === d) return `column ${cc + 1} (${loc(i, cc)})`;
+          const br = Math.floor(rr / 3) * 3, bc = Math.floor(cc / 3) * 3;
+          for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if ((br + i !== rr || bc + j !== cc) && grid[br + i][bc + j] === d) return `box ${boxIndex(rr, cc)} (${loc(br + i, bc + j)})`;
+          return null;
+        };
+        if (cand.length === 1) {
+          const lines = [];
+          for (let d = 1; d <= 9; d++) { if (d === n) continue; const w = blockerFor(r, c, d); lines.push(`  ${d} — ${w ? "already in " + w : "—"}`); }
+          return `Ruling out each digit for ${loc(r, c)}:\n${lines.join("\n")}\nEvery digit but ${n} is taken, so ${loc(r, c)} = ${n} (a naked single).`;
+        }
+        for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
+          const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && candidates(grid, rr, cc).includes(n));
+          if (spots.length === 1 && spots[0][0] === r && spots[0][1] === c) {
+            const others = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && !(rr === r && cc === c));
+            const lines = others.map(([rr, cc]) => { const w = blockerFor(rr, cc, n); return `  ${loc(rr, cc)} — ${w ? "no (" + n + " in " + w + ")" : "open"}`; });
+            return `Where can ${n} go in ${u.name}?\n${lines.join("\n")}\nOnly ${loc(r, c)} is left, so ${n} goes there (a hidden single).`;
+          }
+        }
+        return `${hint.reason}\n\nThat elimination is what frees ${loc(r, c)} — apply it to your notes and ${loc(r, c)} = ${n} becomes forced.`;
+      }
+      function showHintExplain(hint, detailed) {
+        const body = detailed ? detailedHintText(hint) : hint.reason;
+        const stepAction = detailed ? null : { label: "Explain step by step", onClick: () => showHintExplain(hint, true) };
+        if (hint.kind === "place") {
+          const placeAction = { label: `Place ${hint.n} in ${loc(hint.r, hint.c)}`, onClick: () => { pendingTech = hint.tech; setValue(hint.r, hint.c, hint.n); } };
+          showExplain(detailed ? `Why ${loc(hint.r, hint.c)} = ${hint.n}?` : `Hint: ${loc(hint.r, hint.c)} = ${hint.n}`, body, "hint", [placeAction, stepAction], hint.tech);
+        } else {
+          showExplain(detailed ? "Step by step" : "Hint: eliminate candidates", body, "hint", [stepAction], hint.tech);
+        }
+      }
       document.getElementById("hint").addEventListener("click", () => {
         const hint = findHint(progressGrid());
         if (!hint) return showExplain("Nothing left to place", "The grid is complete.", "ok");
         if (session) { session.hints = (session.hints || 0) + 1; saveActiveGame(); }
-        clearHighlights();
-        for (const [r, c] of hint.highlight) cellEls[r][c].classList.add("peer");
-        if (hint.kind === "place") {
-          cellEls[hint.r][hint.c].classList.remove("peer"); cellEls[hint.r][hint.c].classList.add("hint");
-          lastHint = hint; select(hint.r, hint.c);
-          showExplain(`Hint: ${loc(hint.r, hint.c)} = ${hint.n}`, hint.reason, "hint", {
-            label: `Place ${hint.n} in ${loc(hint.r, hint.c)}`,
-            onClick: () => { pendingTech = hint.tech; setValue(hint.r, hint.c, hint.n); },
-          }, hint.tech);
-        } else showExplain("Hint: eliminate candidates", hint.reason, "hint", null, hint.tech);
+        renderHintHighlights(hint);
+        if (hint.kind === "place") { lastHint = hint; select(hint.r, hint.c); }
+        showHintExplain(hint, false);
       });
 
       document.getElementById("check").addEventListener("click", () => {
@@ -1604,7 +1691,7 @@
           inputs[r][c].value = st.values[r][c] || "";
           inputs[r][c].classList.toggle("given", !!givens[r][c]);
           inputs[r][c].classList.remove("wrong", "solved");
-          if (!givens[r][c] && inputs[r][c].value && Number(inputs[r][c].value) !== solution[r][c]) inputs[r][c].classList.add("wrong");
+          if (errorFlags && !givens[r][c] && inputs[r][c].value && Number(inputs[r][c].value) !== solution[r][c]) inputs[r][c].classList.add("wrong");
           marks[r][c] = new Set((st.marks && st.marks[r] && st.marks[r][c]) || []);
         }
         // Time away from the app doesn't count: rebase so active time resumes from where it stood.
