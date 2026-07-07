@@ -1016,6 +1016,7 @@
           showExplain(`✗ ${loc(r, c)} = ${n} won't work`, body, "bad");
         }
         recordMove(r, c, n, correct, tech);
+        saveActiveGame();   // persist the updated error count and move log now (renderPencils saved before this ran)
         pendingTech = null;
         if (correct) checkComplete();
       }
@@ -1069,8 +1070,8 @@
         return now - session.startedAt - session.pausedMs - (session.pauseStart ? now - session.pauseStart : 0);
       }
       function startTimer() {
-        timerEl.textContent = "0:00";
         clearInterval(timerId);
+        timerEl.textContent = fmtTime(activeElapsed());   // paint current time at once (no 0:00 flash on resume)
         timerId = setInterval(() => { timerEl.textContent = fmtTime(activeElapsed()); }, 500);
       }
       function pauseTimer(manual) {
@@ -1089,10 +1090,24 @@
         saveActiveGame();
       }
       const pauseModal = document.getElementById("pauseModal");
-      document.addEventListener("visibilitychange", () => {
-        if (!solving || !session) return;
-        document.hidden ? pauseTimer(false) : resumeTimer(false);
-      });
+      // The board is "covered" whenever an in-app panel (Stats / Saved games / History) is showing
+      // over it — the game isn't visible, so it counts as swiping away from the Sudoku page.
+      function boardCovered() { return !statsEl.hidden || !libraryPanel.hidden || !historyPanel.hidden; }
+      // Auto-pause reconciler: the clock should run only while you're actually looking at the board.
+      // It stops whenever the tab is hidden (backgrounded) or a panel covers the board, and resumes
+      // when you come back — but never overrides a manual pause. Driven from visibilitychange and
+      // from every panel open/close, so overlapping causes (e.g. hide the tab while Stats is open)
+      // resolve correctly instead of a blind resume.
+      function syncAutoPause() {
+        if (!solving || !session || session.manualPaused) return;
+        const shouldPause = document.hidden || boardCovered();
+        if (shouldPause && !session.pauseStart) pauseTimer(false);
+        else if (!shouldPause && session.pauseStart) resumeTimer(false);
+      }
+      document.addEventListener("visibilitychange", syncAutoPause);
+      // Final save when the page is being backgrounded/unloaded (covers mobile app-switch and bfcache),
+      // in case visibilitychange's pause save didn't land.
+      window.addEventListener("pagehide", () => { if (solving && session) saveActiveGame(); });
       document.getElementById("pause").addEventListener("click", () => {
         if (!session) return showExplain("Not solving", "Start a puzzle before pausing.", "info");
         pauseTimer(true); pauseModal.hidden = false;
@@ -1416,6 +1431,7 @@
         session = { difficulty: session.difficulty, source: session.source, startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, moves: [] };
         errorsEl.textContent = "0"; pauseModal.hidden = true;
         clearHighlights(); setMode("normal"); startTimer(); renderPencils();
+        syncAutoPause();   // if a panel happens to be covering the board, keep the fresh timer paused
         const first = (() => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) return [r, c]; return [0, 0]; })();
         select(first[0], first[1]);
         showExplain("Game reset", "Back to the starting clues with a fresh timer. Solve it your way.", "info");
@@ -1676,8 +1692,8 @@
         if (sameDay(d, yest)) return "Yesterday";
         return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
       }
-      function openLibrary() { closeStats(); closeHistory(); editingId = null; renderLibraryPanel(); libraryPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
-      function closeLibrary() { if (!libraryPanel.hidden) { editingId = null; libraryPanel.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
+      function openLibrary() { closeStats(); closeHistory(); editingId = null; renderLibraryPanel(); libraryPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
+      function closeLibrary() { if (!libraryPanel.hidden) { editingId = null; libraryPanel.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause(); } }
       let editingId = null;
       const DIFFICULTIES = ["Easy", "Medium", "Hard"];
       function diffOptions(sel) { return DIFFICULTIES.map((d) => `<option value="${d}"${d === sel ? " selected" : ""}>${d}</option>`).join(""); }
@@ -1754,8 +1770,8 @@
       // ---- play-history panel (every game you've finished or revealed, by date) ----
       const historyPanel = document.getElementById("history"), historyBtn = document.getElementById("historyBtn");
       let histEditing = null;
-      function closeHistory() { if (!historyPanel.hidden) { histEditing = null; historyPanel.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
-      function openHistory() { closeStats(); closeLibrary(); closeHistory(); histEditing = null; renderHistory(); historyPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
+      function closeHistory() { if (!historyPanel.hidden) { histEditing = null; historyPanel.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause(); } }
+      function openHistory() { closeStats(); closeLibrary(); closeHistory(); histEditing = null; renderHistory(); historyPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
       function renderHistory() {
         const games = lsGet(STATS_KEY);
         if (!games.length) {
@@ -1989,9 +2005,9 @@
       }
       document.getElementById("exClose").addEventListener("click", () => { document.getElementById("exModal").hidden = true; });
       document.getElementById("exModal").addEventListener("click", (e) => { if (e.target.id === "exModal") e.currentTarget.hidden = true; });
-      function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
+      function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause(); } }
       document.getElementById("statsBtn").addEventListener("click", () => {
-        if (statsEl.hidden) { closeLibrary(); closeHistory(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
+        if (statsEl.hidden) { closeLibrary(); closeHistory(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
         else closeStats();
       });
       function renderStats() {
