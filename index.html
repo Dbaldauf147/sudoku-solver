@@ -256,6 +256,7 @@
             <button id="statsBtn">Stats</button>
             <button id="check">Check entries</button>
             <button id="hlToggle">Highlight matches: On</button>
+            <button id="resetGame">Reset game</button>
             <button id="reveal">Reveal solution</button>
             <button id="edit">Edit puzzle</button>
             <button id="clear">Clear board</button>
@@ -331,6 +332,17 @@
           <p>The timer is stopped and the board is hidden. Resume when you're ready.</p>
           <div class="actions">
             <button id="resumeBtn" class="primary">Resume</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="resetModal" class="overlay" hidden>
+        <div class="modal">
+          <h2>Reset this game?</h2>
+          <p>This clears every digit and note you've entered and restarts the timer, leaving just the original clues. The puzzle stays in your library, and this can't be undone.</p>
+          <div class="actions">
+            <button id="resetCancel">Keep playing</button>
+            <button id="resetConfirm" class="primary">Reset game</button>
           </div>
         </div>
       </div>
@@ -1379,6 +1391,35 @@
 
       document.getElementById("edit").addEventListener("click", resetToEdit);
       document.getElementById("clear").addEventListener("click", () => { for (const row of inputs) for (const i of row) i.value = ""; resetToEdit(); });
+
+      // Reset the *current* game back to its starting clues (keeps the puzzle; wipes your progress).
+      // Gated behind a confirmation so it can't be triggered by accident.
+      const resetModal = document.getElementById("resetModal");
+      document.getElementById("resetGame").addEventListener("click", () => {
+        if (!solving || !session) return showExplain("No game to reset", "Start a puzzle first — reset brings an in-progress game back to its clues.", "info");
+        resetModal.hidden = false;
+      });
+      document.getElementById("resetCancel").addEventListener("click", () => { resetModal.hidden = true; });
+      resetModal.addEventListener("click", (e) => { if (e.target === resetModal) resetModal.hidden = true; });
+      document.getElementById("resetConfirm").addEventListener("click", () => { resetModal.hidden = true; resetGame(); });
+      function resetGame() {
+        if (!solving || !session) return;
+        // Clear everything the player added; keep the clues, solution, difficulty, and source.
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+          if (!givens[r][c]) inputs[r][c].value = "";
+          inputs[r][c].classList.remove("wrong", "solved");
+          marks[r][c].clear();
+        }
+        // Fresh session: timer restarts from zero, errors and move log wiped.
+        clearInterval(timerId); timerId = null;
+        undoStack = []; lastHint = null;
+        session = { difficulty: session.difficulty, source: session.source, startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, moves: [] };
+        errorsEl.textContent = "0"; pauseModal.hidden = true;
+        clearHighlights(); setMode("normal"); startTimer(); renderPencils();
+        const first = (() => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) return [r, c]; return [0, 0]; })();
+        select(first[0], first[1]);
+        showExplain("Game reset", "Back to the starting clues with a fresh timer. Solve it your way.", "info");
+      }
       function resetToEdit() {
         session = null; clearInterval(timerId); timerId = null; undoStack = []; activeSavedGame = null;
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal");
