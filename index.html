@@ -31,10 +31,13 @@
     </script>
     <style>
       :root {
-        --bg: #ffffff; --panel: #f3f4f6; --line: #d7dbe2; --thick: #9aa3b2;
+        --bg: #e8eaed; --panel: #f3f4f6; --line: #d7dbe2; --thick: #9aa3b2;
         --text: #1d2330; --muted: #5b6472; --accent: #2563eb; --given: #0b1020;
         --user: #2563eb; --ok: #16a34a; --bad: #dc2626; --pencil: #1f2937;
         --sel: #dbe7ff;
+        /* One shared colour for every Sudoku digit — board, keypad, and hint mini-boards.
+           Givens stay distinguishable by bold weight rather than a different colour. */
+        --num: #1d2330;
       }
       * { box-sizing: border-box; }
       body {
@@ -95,17 +98,17 @@
       .cell.conflict-src { box-shadow: inset 0 0 0 2px var(--bad); z-index: 1; }
       .cell-input {
         position: absolute; inset: 0; width: 100%; height: 100%; background: transparent;
-        border: none; color: var(--user); font-size: clamp(1rem, 5vw, 1.6rem);
+        border: none; color: var(--num); font-size: clamp(1rem, 5vw, 1.6rem);
         text-align: center; outline: none; cursor: pointer; caret-color: transparent;
         z-index: 2;
       }
-      .cell-input.given { color: var(--given); font-weight: 700; cursor: default; pointer-events: none; }
+      .cell-input.given { color: var(--num); font-weight: 700; cursor: default; pointer-events: none; }
       .cell-input.wrong { color: var(--bad); }
-      .cell-input.solved { color: var(--user); }
+      .cell-input.solved { color: var(--num); }
       .pencil {
         position: absolute; inset: 0; display: grid;
         grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
-        font-size: clamp(0.4rem, 1.5vw, 0.56rem); line-height: 1; color: var(--pencil); font-weight: 700;
+        font-size: clamp(0.4rem, 1.5vw, 0.56rem); line-height: 1; color: var(--num); font-weight: 700;
         pointer-events: none; z-index: 1;
       }
       .pencil span { display: flex; align-items: center; justify-content: center; }
@@ -124,7 +127,7 @@
       .modes .meters .timer { flex: 1 1 0; min-width: 4em; justify-content: center; font-size: 1rem; }
       #errors { color: var(--bad); }
       .keys { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
-      .keys button { padding: 14px 0; font-size: 1.15rem; }
+      .keys button { padding: 14px 0; font-size: 1.15rem; color: var(--num); }
       .keys button.clear { color: var(--bad); }
       .keys button.done { text-decoration: line-through; opacity: 0.4; }
 
@@ -201,15 +204,15 @@
       .miniboard { display: grid; grid-template-columns: repeat(9, 1fr); width: 100%; max-width: 290px;
         margin: 0 auto 14px; aspect-ratio: 1; background: var(--thick); border: 2px solid var(--thick);
         gap: 1px; border-radius: 4px; overflow: hidden; }
-      .mcell { background: #fff; position: relative; display: flex; align-items: center; justify-content: center;
-        font-size: clamp(0.7rem, 3.2vw, 1.05rem); color: var(--given); font-weight: 700; }
+      .mcell { background: var(--panel); position: relative; display: flex; align-items: center; justify-content: center;
+        font-size: clamp(0.7rem, 3.2vw, 1.05rem); color: var(--num); font-weight: 700; }
       .mcell.m-target { background: #bbf7d0; }
       .mcell.m-focus { background: #cfe0ff; }
       .mcell.m-elim { background: #fee2e2; }
       .mcell[data-col="2"], .mcell[data-col="5"] { box-shadow: inset -2px 0 0 var(--thick); }
       .mcell[data-row="2"], .mcell[data-row="5"] { box-shadow: inset 0 -2px 0 var(--thick); }
       .mpencil { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(3, 1fr);
-        grid-template-rows: repeat(3, 1fr); font-size: clamp(0.34rem, 1.4vw, 0.5rem); color: var(--pencil); font-weight: 700; }
+        grid-template-rows: repeat(3, 1fr); font-size: clamp(0.34rem, 1.4vw, 0.5rem); color: var(--num); font-weight: 700; }
       .mpencil span { display: flex; align-items: center; justify-content: center; }
       .mpencil span.struck { color: var(--bad); text-decoration: line-through; }
 
@@ -857,13 +860,39 @@
         }
         return null;
       }
+      function xyzWing(M, grid) {
+        const empties = [];
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0) empties.push([r, c, [...M[r][c]]]);
+        const pivots = empties.filter(([, , v]) => v.length === 3), bivalue = empties.filter(([, , v]) => v.length === 2);
+        for (const [pr, pc, pv] of pivots) {
+          // Pincers are bivalue cells that see the pivot and whose candidates are a subset of the pivot's.
+          const pincers = bivalue.filter(([r, c, v]) => sees(pr, pc, r, c) && v.every((n) => pv.includes(n)));
+          for (let i = 0; i < pincers.length; i++) for (let j = i + 1; j < pincers.length; j++) {
+            const [ar, ac, av] = pincers[i], [br, bc, bv] = pincers[j];
+            if (new Set([...av, ...bv]).size !== 3) continue;   // together the pincers must cover all three pivot digits
+            const common = av.filter((n) => bv.includes(n));
+            if (common.length !== 1) continue;                  // they share exactly the Z digit
+            const Z = common[0], elims = [];
+            for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+              if (grid[r][c] !== 0 || !M[r][c].has(Z)) continue;
+              if ((r === pr && c === pc) || (r === ar && c === ac) || (r === br && c === bc)) continue;
+              if (sees(pr, pc, r, c) && sees(ar, ac, r, c) && sees(br, bc, r, c)) elims.push([r, c, Z]);
+            }
+            if (elims.length) return { elims, highlight: [[pr, pc], [ar, ac], [br, bc]], tech: "XYZ-wing", reason: `XYZ-wing: pivot ${loc(pr, pc)} {${pv.join(", ")}} with pincers ${loc(ar, ac)} and ${loc(br, bc)} that all share ${Z}, so ${Z} is removed from any cell that sees all three.` };
+          }
+        }
+        return null;
+      }
       function applyElims(M, elims) { const N = cloneMap(M); for (const [r, c, n] of elims) N[r][c].delete(n); return N; }
+      // The elimination techniques, simplest first. Shared by the hint engine and per-move attribution so
+      // both credit the same technique. A move only falls back to "Advanced" when none of these make progress.
+      const ELIM_TECHS = [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, xWing, xyWing, xyzWing, swordfish];
 
       function findHint(grid) {
         const M = candMap(grid);
         let s = findNakedSingle(M, grid) || findHiddenSingle(M, grid);
         if (s) return { kind: "place", ...s, highlight: [[s.r, s.c]], reason: `${s.tech}: ${s.reason}` };
-        for (const tech of [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, xWing, xyWing, swordfish]) {
+        for (const tech of ELIM_TECHS) {
           const e = tech(M, grid); if (!e) continue;
           const after = findNakedSingle(applyElims(M, e.elims), grid) || findHiddenSingle(applyElims(M, e.elims), grid);
           if (after) return { kind: "place", r: after.r, c: after.c, n: after.n, tech: e.tech, highlight: e.highlight.concat([[after.r, after.c]]), reason: `${e.tech}: ${e.reason} That leaves ${loc(after.r, after.c)} = ${after.n} (${after.tech.toLowerCase()}).` };
@@ -925,14 +954,20 @@
           const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && M[rr][cc].has(n));
           if (spots.length === 1) return { tech: "Hidden single", body: `${n} can't go in any other empty cell of ${u.name}, so it must be here.` };
         }
-        // No single-cell proof yet — try one round of an advanced elimination and see if it pins this cell.
-        for (const tech of [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, xWing, xyWing, swordfish]) {
-          const e = tech(M, grid); if (!e) continue;
-          const N = applyElims(M, e.elims);
-          if (N[r][c].size === 1 && [...N[r][c]][0] === n)
+        // No single-cell proof yet. Apply elimination techniques one at a time, accumulating their
+        // deductions, until this cell is pinned — then credit the technique that finally unlocked it.
+        // Iterating (rather than trying a single round) means moves that need several chained
+        // eliminations get named instead of being lumped into "Advanced".
+        let cur = M;
+        for (let step = 0; step < 60; step++) {
+          let e = null;
+          for (const tech of ELIM_TECHS) { e = tech(cur, grid); if (e) break; }
+          if (!e) break;                       // nothing more to deduce with the techniques we name
+          cur = applyElims(cur, e.elims);
+          if (cur[r][c].size === 1 && [...cur[r][c]][0] === n)
             return { tech: e.tech, body: `${e.reason} That leaves ${n} as the only candidate for ${loc(r, c)}.` };
           for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
-            const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && N[rr][cc].has(n));
+            const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && cur[rr][cc].has(n));
             if (spots.length === 1 && spots[0][0] === r && spots[0][1] === c)
               return { tech: e.tech, body: `${e.reason} That leaves ${loc(r, c)} as the only spot for ${n} in ${u.name}.` };
           }
@@ -1766,7 +1801,7 @@
       const TECH_COLORS = { "Naked single": "#4ade80", "Hidden single": "#6ea8fe", "Pointing pair": "#f59e0b",
         "Pointing triple": "#f59e0b", "Locked candidate": "#f59e0b", "Box/line reduction": "#f59e0b",
         "Naked pair": "#a78bfa", "Hidden pair": "#a78bfa", "Naked triple": "#7c3aed", "Hidden triple": "#7c3aed",
-        "X-wing": "#ec4899", "Swordfish": "#db2777", "XY-wing": "#14b8a6",
+        "X-wing": "#ec4899", "Swordfish": "#db2777", "XY-wing": "#14b8a6", "XYZ-wing": "#0d9488",
         "Advanced": "#94a3b8", "Other": "#94a3b8", "Mistake": "#ff6b6b" };
       function median(arr) { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
       function errorsIn(g) { return typeof g.errors === "number" ? g.errors : g.moves.filter((m) => !m.correct).length; }
@@ -1836,6 +1871,12 @@
         "X-wing": { focus: ["1,2", "1,6", "5,2", "5,6"], elim: ["3,2", "7,6"],
           marks: { "1,2": [5], "1,6": [5], "5,2": [5], "5,6": [5], "3,2": [5], "7,6": [5] }, struck: { "3,2": [5], "7,6": [5] },
           caption: "In rows 2 and 6, digit 5 is pinned to the same two columns (3 and 7) — an X-wing. 5 can then be removed from those columns in every other row (crossed out)." },
+        "XY-wing": { focus: ["0,0", "0,4", "2,1"], elim: ["2,4"],
+          marks: { "0,0": [1, 2], "0,4": [1, 3], "2,1": [2, 3], "2,4": [3, 5], "0,1": [7, 8] }, struck: { "2,4": [3] },
+          caption: "Pivot R1C1 {1,2} links two pincers — R1C5 {1,3} and R3C2 {2,3}. Whichever the pivot takes, one pincer becomes 3, so any cell seeing both pincers loses 3 (crossed out)." },
+        "XYZ-wing": { focus: ["0,0", "0,4", "1,1"], elim: ["0,1", "0,2"],
+          marks: { "0,0": [1, 2, 3], "0,4": [1, 3], "1,1": [2, 3], "0,1": [3, 4, 5], "0,2": [3, 6, 7] }, struck: { "0,1": [3], "0,2": [3] },
+          caption: "Pivot R1C1 {1,2,3} plus pincers R1C5 {1,3} and R2C2 {2,3} all share 3. Every cell that sees all three — here R1C2 and R1C3 — can't be 3 (crossed out) — an XYZ-wing." },
       };
       function renderMiniBoard(container, ex) {
         container.innerHTML = "";
@@ -1858,6 +1899,16 @@
         }
         container.appendChild(b);
       }
+      // Written explanations for named techniques that don't ship a mini-board example, so the pop-up
+      // never mislabels a real rule as an unnamed "advanced" move.
+      const TECH_TEXT = {
+        "Pointing triple": "Within one box a digit is confined to a single row (or column) — three cells of it. That digit can then be removed from the rest of that row or column outside the box.",
+        "Locked candidate": "In a row or column a digit only fits inside one box. Since it must go there, the digit is removed from that box's other cells.",
+        "Box/line reduction": "In a row or column a digit only fits inside one box, so the digit is removed from that box's other cells.",
+        "Naked triple": "Three cells in a unit together hold only three digits between them, so those three digits belong to those cells — they're removed from every other cell in the unit.",
+        "Hidden triple": "Three digits in a unit can only appear in the same three cells, so those cells must hold them — every other candidate is cleared from those three cells.",
+        "Swordfish": "A digit is confined to the same three columns across three rows (or vice-versa). It can then be removed from those columns in every other row.",
+      };
       function openExample(tech) {
         const ex = TECH_EXAMPLES[tech];
         document.getElementById("exTitle").textContent = tech;
@@ -1867,7 +1918,8 @@
           board.innerHTML = "";
           document.getElementById("exCaption").textContent = tech === "Mistake"
             ? "These are entries that didn't match the solution. There's no rule to learn here — slow down and verify a digit before placing it."
-            : "This move follows from the puzzle's unique solution (an advanced technique, or simply filling neighbors first) rather than one named rule.";
+            : TECH_TEXT[tech]
+            || "This move follows from the puzzle's unique solution (an advanced technique, or simply filling neighbors first) rather than one named rule.";
         }
         renderTechGames(tech);
         document.getElementById("exModal").hidden = false;
