@@ -1955,7 +1955,7 @@
           } else {
             rows += `<div class="saved-row">
               <div class="saved-meta"><b>${esc(g.difficulty || "—")}</b> · ${esc(g.source || "—")}<br><span class="k">${fmtTime(g.totalMs)} · ${errs} error${errs === 1 ? "" : "s"} · </span>${status}</div>
-              <div class="saved-actions"><button class="hist-view" data-i="${i}">Details</button><button class="hist-edit" data-i="${i}">Edit</button></div>
+              <div class="saved-actions"><button class="hist-view" data-i="${i}">Details</button><button class="hist-edit" data-i="${i}">Edit</button><button class="hist-del" data-i="${i}">Delete</button></div>
             </div>`;
           }
         });
@@ -1967,6 +1967,14 @@
           const row = b.closest(".saved-row");
           saveHistoryEdit(Number(b.dataset.i), row.querySelector(".edit-diff").value, row.querySelector(".edit-source").value);
         }));
+        content.querySelectorAll(".hist-del").forEach((b) => (b.onclick = () => deleteHistoryGame(Number(b.dataset.i))));
+      }
+      function deleteHistoryGame(i) {
+        const games = lsGet(STATS_KEY);
+        if (!games[i]) return;
+        games.splice(i, 1);
+        lsSet(STATS_KEY, games); cloudSave("stats", games);
+        histEditing = null; renderGameLibrary(); // rebuild so the History tab count stays accurate
       }
       function saveHistoryEdit(i, difficulty, source) {
         const games = lsGet(STATS_KEY);
