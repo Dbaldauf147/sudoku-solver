@@ -288,6 +288,7 @@
           <button id="gear" aria-label="Menu" title="Menu">⚙</button>
           <div id="gearMenu" class="dropdown" hidden>
             <button id="start">Start solving</button>
+            <button id="hint">Hint</button>
             <button id="statsBtn">Stats</button>
             <button id="check">Check entries</button>
             <button id="hlToggle">Highlight matches: On</button>
@@ -305,7 +306,6 @@
       </div>
 
       <div class="row solving">
-        <button id="hint" class="primary">Hint</button>
         <button id="undo">Undo</button>
         <button id="autonotes">Auto notes</button>
         <button id="pause">Pause</button>
@@ -1512,6 +1512,7 @@
         }
       }
       document.getElementById("hint").addEventListener("click", () => {
+        closeStats(); closeLibrary(); closeHistory(); // Hint now lives in the menu — make sure the board is visible
         const hint = findHint(progressGrid());
         if (!hint) return showExplain("Nothing left to place", "The grid is complete.", "ok");
         if (session) { session.hints = (session.hints || 0) + 1; saveActiveGame(); }
