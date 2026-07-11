@@ -84,6 +84,7 @@
       .dropdown button:hover { background: var(--panel); }
       .syncline { padding: 10px 14px; font-size: 0.78rem; color: var(--muted); border-top: 1px solid var(--line); line-height: 1.3; }
       .syncline.on { color: var(--ok); }
+      .inprog { color: var(--accent); font-weight: 600; font-size: 0.8rem; }
       .syncline.off { color: var(--muted); }
       .timer { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums;
         font-size: 1.1rem; background: var(--panel); border: 1px solid var(--line);
@@ -291,6 +292,7 @@
             <button id="hint">Hint</button>
             <button id="statsBtn">Stats</button>
             <button id="check">Check entries</button>
+            <button id="saveGame">Save game</button>
             <button id="hlToggle">Highlight matches: On</button>
             <button id="errToggle">Error highlighting: On</button>
             <button id="resetGame">Reset game</button>
@@ -1363,7 +1365,9 @@
         if (!cloudOn) { document.getElementById("shareMsg").textContent = "Sharing by code needs cloud sync. Use Backup & restore to share a file instead."; return; }
         const code = genShareCode();
         try {
-          const r = await fetch(`/api/games?collection=share&profile=${code}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ games }) });
+          // Share only the puzzle, not your in-progress state.
+          const shareGames = games.map(({ progress, ...rest }) => rest);
+          const r = await fetch(`/api/games?collection=share&profile=${code}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ games: shareGames }) });
           if (!r.ok) throw new Error();
           document.getElementById("shareCode").value = code;
           document.getElementById("shareLink").value = `${location.origin}${location.pathname}?share=${code}`;
@@ -1676,9 +1680,9 @@
 
       // ---- in-progress game persistence (survives closing the tab / reloading later) ----
       function clearActiveGame() { try { localStorage.removeItem(ACTIVE_KEY); } catch {} }
-      function saveActiveGame() {
-        if (!solving || !session) { clearActiveGame(); return; }
-        const state = {
+      // Snapshot of the game in progress — shared by the auto-save (ACTIVE_KEY) and the manual "Save game".
+      function currentGameState() {
+        return {
           values: inputs.map((row) => row.map((i) => i.value)),
           givens: givens.map((row) => row.slice()),
           marks: marks.map((row) => row.map((s) => [...s])),
@@ -1688,11 +1692,13 @@
           session: { difficulty: session.difficulty, source: session.source, errors: session.errors || 0, hints: session.hints || 0, lastT: session.lastT || 0, moves: session.moves || [] },
           savedAt: Date.now(),
         };
-        try { localStorage.setItem(ACTIVE_KEY, JSON.stringify(state)); } catch {}
       }
-      function restoreActiveGame() {
-        let st; try { st = JSON.parse(localStorage.getItem(ACTIVE_KEY)); } catch { st = null; }
-        if (!st || !st.values || !st.solution || !st.givens || !st.session) return false;
+      function saveActiveGame() {
+        if (!solving || !session) { clearActiveGame(); return; }
+        try { localStorage.setItem(ACTIVE_KEY, JSON.stringify(currentGameState())); } catch {}
+      }
+      // Load a saved in-progress snapshot (from ACTIVE_KEY auto-save or a library "Save game") onto the board.
+      function applyGameState(st) {
         resetToEdit();
         solution = st.solution; givens = st.givens;
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
@@ -1712,6 +1718,12 @@
         if (st.manualPaused) { pauseTimer(true); pauseModal.hidden = false; }
         else startTimer();
         timerEl.textContent = fmtTime(elapsed);
+        return elapsed;
+      }
+      function restoreActiveGame() {
+        let st; try { st = JSON.parse(localStorage.getItem(ACTIVE_KEY)); } catch { st = null; }
+        if (!st || !st.values || !st.solution || !st.givens || !st.session) return false;
+        applyGameState(st);
         showExplain("Welcome back", "Your in-progress puzzle was restored — pick up right where you left off.", "info");
         return true;
       }
@@ -1840,6 +1852,33 @@
         g.source = (sourceEl.value || "Unknown").trim() || "Unknown";
         lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
       }
+      // Manual "Save game": store the current progress in the library so it can be resumed later
+      // (and syncs across devices when cloud sync is on). Updates the puzzle's existing entry if present.
+      function saveInProgressGame() {
+        closeMenu();
+        if (!solving || !session) {
+          showExplain("No game to save", "Start a puzzle first — then Save game keeps your progress so you can resume it later.", "info");
+          return;
+        }
+        const progress = currentGameState();
+        // Reconstruct the puzzle's clue grid (numbers) from the locked given cells.
+        const clueGrid = givens.map((row, r) => row.map((isGiven, c) => (isGiven ? Number(inputs[r][c].value) || 0 : 0)));
+        const games = lsGet(STORE_KEY);
+        const key = gridKey(clueGrid);
+        let g = games.find((x) => gridKey(x.grid) === key);
+        if (g) {
+          g.progress = progress; g.savedAt = Date.now();
+          g.difficulty = session.difficulty; g.source = session.source;
+        } else {
+          g = { id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()), grid: clueGrid, difficulty: session.difficulty, source: session.source, savedAt: Date.now(), progress };
+          games.unshift(g);
+        }
+        activeSavedGame = g;
+        lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
+        saveActiveGame();
+        showExplain("Game saved", `Saved at ${fmtTime(progress.elapsed)} — resume it anytime from Game library → Saved${syncNote()}.`, "ok");
+      }
+      document.getElementById("saveGame").addEventListener("click", saveInProgressGame);
       // ---- unified Game library panel: Saved games · Play history · Catalogue ----
       const libraryBtn = document.getElementById("libraryBtn");
       let libTab = "saved";
@@ -1912,12 +1951,13 @@
               <div class="saved-actions"><button class="save-one" data-id="${esc(g.id)}">Save</button><button class="cancel-one" data-id="${esc(g.id)}">Cancel</button></div>
             </div>`;
           } else {
+            const inProg = g.progress ? `<br><span class="inprog">▶ in progress · ${fmtTime(g.progress.elapsed || 0)}</span>` : "";
             rows += `<div class="saved-row">
               <label class="saved-left">
                 <input type="checkbox" class="share-check" data-id="${esc(g.id)}" title="Select to share" />
-                <span class="saved-meta"><b>${esc(g.difficulty)}</b> · ${esc(g.source)}<br><span class="k">${esc(date)} · ${esc(time)}</span></span>
+                <span class="saved-meta"><b>${esc(g.difficulty)}</b> · ${esc(g.source)}<br><span class="k">${esc(date)} · ${esc(time)}</span>${inProg}</span>
               </label>
-              <div class="saved-actions"><button class="load-one" data-id="${esc(g.id)}">Load</button><button class="edit-one" data-id="${esc(g.id)}">Edit</button><button class="del-one" data-id="${esc(g.id)}">Delete</button></div>
+              <div class="saved-actions"><button class="load-one" data-id="${esc(g.id)}">${g.progress ? "Resume" : "Load"}</button><button class="edit-one" data-id="${esc(g.id)}">Edit</button><button class="del-one" data-id="${esc(g.id)}">Delete</button></div>
             </div>`;
           }
         }
@@ -1949,6 +1989,13 @@
       function loadSavedGame(id) {
         const game = lsGet(STORE_KEY).find((g) => g.id === id); if (!game) return;
         closeLibrary();
+        if (game.progress && game.progress.values && game.progress.solution) {
+          // Resume a saved-in-progress game right where it left off.
+          applyGameState(game.progress);
+          activeSavedGame = game; saveActiveGame();
+          showExplain("Resumed", `Back to ${game.source} · ${game.difficulty} at ${fmtTime(game.progress.elapsed || 0)} — pick up where you left off.`, "info");
+          return;
+        }
         resetToEdit(); writeGrid(game.grid); difficultyEl.value = game.difficulty; sourceEl.value = game.source; renderPencils();
         activeSavedGame = game;
         showReady(`${game.source} · ${game.difficulty} is loaded. Adjust difficulty or source if needed, then start the timer and play?`);
