@@ -37,7 +37,12 @@ answer.
     "where you spend time" breakdown of typical (median) time **per technique**
     so you can see what trips you up, and a per-game timeline that bars out the
     gap before each move and flags the slow ones. **Tap any technique** for a
-    pop-up with a visual example of how it works.
+    pop-up with a visual example of how it works. Stats has two tabs: **All
+    games** for these lifetime totals and trends, and **This game** — which
+    mirrors the same breakdown for the current (or most recent) game alone:
+    its time, accuracy, errors, and hints, how it stacks up against your best
+    at that difficulty, where its time went per technique, and its own
+    move-by-move timeline.
   - A **History** tab on the main page lists every game you've finished (or
     revealed), grouped by date, with its difficulty, source, time, and error
     count — tap **Details** on any entry to jump straight to that game's

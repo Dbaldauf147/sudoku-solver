@@ -2333,27 +2333,82 @@
         if (a) a.hidden = tab !== "all";
       }
       // "This game" pane: the live game if one's in progress, else the most recently recorded game.
+      // Mirrors every section of the "All games" tab, scoped to this single game.
       function thisGamePane(games) {
         const g = session
           ? { difficulty: session.difficulty, source: session.source, totalMs: activeElapsed(), errors: session.errors || 0, hints: session.hints || 0, moves: session.moves || [], live: true }
           : games[0];
         if (!g) return '<div class="card">No game yet. Start a puzzle and its live stats — time, errors, hints, and techniques — show here.</div>';
+        const d = g.difficulty || "";
         const status = g.live ? "in progress" : (g.solved ? "solved" : "revealed");
-        const errs = errorsIn(g), hints = g.hints || 0, movesN = (g.moves || []).length;
-        const byTech = {};
-        for (const m of (g.moves || [])) byTech[m.tech] = (byTech[m.tech] || 0) + 1;
-        const rows = Object.entries(byTech).sort((a, b) => b[1] - a[1])
-          .map(([t, c]) => `<tr><td><span style="color:${TECH_COLORS[t] || "#94a3b8"}">●</span> ${esc(t)}</td><td>${c}</td></tr>`).join("");
-        const prLine = g.isPR ? `<div class="pr-badge" style="margin:0 0 12px">🏆 Personal record — fastest ${esc(g.difficulty || "")} yet</div>` : "";
-        return `${prLine}
-          <div class="card"><b>${esc(g.difficulty || "—")}</b> · ${esc(g.source || "—")} · <span class="k">${status}</span></div>
-          <div class="statgrid">
+        const moves = g.moves || [];
+        const errs = errorsIn(g), hints = g.hints || 0, movesN = moves.length;
+        const correct = moves.filter((m) => m.correct).length;
+        const acc = movesN ? Math.round((correct / movesN) * 100) : 0;
+
+        // ----- overview (this game's headline numbers) -----
+        const prLine = g.isPR ? `<div class="pr-badge" style="margin:0 0 12px">🏆 Personal record — fastest ${esc(d)} yet</div>` : "";
+        const overview = `<div class="statgrid" style="grid-template-columns:repeat(2,1fr)">
             <div class="stat"><b>${fmtTime(g.totalMs || 0)}</b><span class="k">time</span></div>
+            <div class="stat"><b>${movesN ? acc + "%" : "—"}</b><span class="k">accuracy</span></div>
             <div class="stat"><b>${errs}</b><span class="k">error${errs === 1 ? "" : "s"}</span></div>
             <div class="stat"><b>${hints}</b><span class="k">hint${hints === 1 ? "" : "s"}</span></div>
           </div>
-          <div class="card"><span class="k">moves placed</span> ${movesN}</div>
-          ${rows ? `<h3>Techniques this game</h3><table class="grid"><tr><th>Technique</th><th>Moves</th></tr>${rows}</table>` : ""}`;
+          <div class="card"><span class="k">moves placed</span> ${movesN} · <span class="k">${correct} correct</span></div>`;
+
+        // ----- compared to your best (personal-records analog for one game) -----
+        const priorBest = games
+          .filter((x) => x !== g && x.solved && x.difficulty === d)
+          .reduce((a, x) => (a === null || x.totalMs < a.totalMs ? x : a), null);
+        let compare = "";
+        if (d && (g.solved || g.live)) {
+          if (g.isPR) {
+            compare = `<h3>Compared to your best</h3><div class="card">This is your fastest <b>${esc(d)}</b> solve yet. 🏆</div>`;
+          } else if (priorBest) {
+            const diff = (g.totalMs || 0) - priorBest.totalMs;
+            const note = diff <= 0
+              ? `<span class="trend down">on pace with your best</span>`
+              : `<span class="trend up">+${fmtTime(diff)} slower</span>`;
+            compare = `<h3>Compared to your best</h3><div class="card">Your best <b>${esc(d)}</b> is <span class="best" style="color:var(--accent);font-weight:800">${fmtTime(priorBest.totalMs)}</span> · this game ${fmtTime(g.totalMs || 0)} ${note}</div>`;
+          }
+        }
+
+        // ----- by-technique breakdown with typical time (where you spent time this game) -----
+        const byTech = {};
+        for (const m of moves) (byTech[m.tech] ||= []).push(m.dt);
+        const techRows = Object.entries(byTech).filter(([t]) => t !== "Mistake")
+          .map(([t, dts]) => ({ t, count: dts.length, med: median(dts) }))
+          .sort((a, b) => b.med - a.med);
+        const mistakes = (byTech["Mistake"] || []).length;
+        let techTable = "";
+        if (techRows.length || mistakes) {
+          techTable = `<h3>Where you spent time</h3><table class="grid"><tr><th>Technique</th><th>Moves</th><th>Typical time</th></tr>`;
+          for (const row of techRows) techTable += `<tr class="trow" data-tech="${esc(row.t)}"><td><span style="color:${TECH_COLORS[row.t] || "#94a3b8"}">●</span> ${esc(row.t)}</td><td>${row.count}</td><td>${fmtDt(row.med)}</td></tr>`;
+          if (mistakes) techTable += `<tr class="trow" data-tech="Mistake"><td><span style="color:${TECH_COLORS.Mistake}">●</span> Mistake</td><td>${mistakes}</td><td>—</td></tr>`;
+          techTable += `</table><p class="hintline">Tap a technique to see a visual example of how it works.</p>`;
+        }
+
+        // ----- takeaway (slowest technique this game) -----
+        // techRows is sorted slowest-median first, so its head is genuinely where this game's time went.
+        const focus = techRows[0];
+        let takeaway = "";
+        if (focus) {
+          const timeWord = focus.count > 1 ? `typically ${fmtDt(focus.med)}` : fmtDt(focus.med);
+          takeaway = `<div class="card takeaway">You spent longest on <b style="color:${TECH_COLORS[focus.t] || "#94a3b8"}">${esc(focus.t)}</b> placement${focus.count > 1 ? "s" : ""} this game (${timeWord}).${mistakes ? ` You made ${mistakes} mistake${mistakes > 1 ? "s" : ""} — slow down to verify before placing.` : ""}</div>`;
+        } else if (movesN) {
+          takeaway = `<div class="card takeaway">${mistakes ? `You made ${mistakes} mistake${mistakes > 1 ? "s" : ""} this game.` : "Clean game so far — no mistakes logged."}</div>`;
+        }
+
+        // ----- move-by-move timeline (pace / deep dive for this game) -----
+        const timeline = movesN ? `<h3>Move-by-move timeline</h3>${deepDiveHTML(g, false)}` : "";
+
+        return `${prLine}
+          <div class="card"><b>${esc(d || "—")}</b> · ${esc(g.source || "—")} · <span class="k">${status}</span></div>
+          ${overview}
+          ${compare}
+          ${takeaway}
+          ${techTable}
+          ${timeline}`;
       }
       function renderStats() {
         const games = lsGet(STATS_KEY);
@@ -2490,12 +2545,16 @@
         statsEl.querySelectorAll(".ctog").forEach((b) => (b.onclick = () => { timeChartMode = b.dataset.mode; paintTimeChart(); }));
         paintTimeChart();
       }
-      function renderDeepDive(g) {
-        const dd = document.getElementById("deepDive"); if (!g) { dd.innerHTML = ""; return; }
-        const maxDt = Math.max(1, ...g.moves.map((m) => m.dt));
-        const slow = Math.max(maxDt * 0.6, median(g.moves.map((m) => m.dt)) * 2.5);
-        let html = `<div class="card">${g.moves.length} moves · ${fmtTime(g.totalMs)} total · ${errorsIn(g)} error${errorsIn(g) === 1 ? "" : "s"} · ${g.solved ? "solved" : "revealed"}</div>`;
-        g.moves.forEach((m, i) => {
+      // Move-by-move timeline: one bar per move sized by the pause before it, slow moves flagged.
+      // Shared by the "All games" deep-dive selector and the "This game" pane.
+      function deepDiveHTML(g, includeSummary = true) {
+        const moves = g.moves || [];
+        if (!moves.length) return `<div class="card">No moves recorded for this game yet.</div>`;
+        const maxDt = Math.max(1, ...moves.map((m) => m.dt));
+        const slow = Math.max(maxDt * 0.6, median(moves.map((m) => m.dt)) * 2.5);
+        const statusWord = g.live ? "in progress" : (g.solved ? "solved" : "revealed");
+        let html = includeSummary ? `<div class="card">${moves.length} moves · ${fmtTime(g.totalMs)} total · ${errorsIn(g)} error${errorsIn(g) === 1 ? "" : "s"} · ${statusWord}</div>` : "";
+        moves.forEach((m, i) => {
           const color = TECH_COLORS[m.tech] || "#94a3b8";
           const w = Math.round((m.dt / maxDt) * 100);
           html += `<div class="move ${m.correct ? "" : "bad"} ${m.dt >= slow ? "slow" : ""}">
@@ -2505,7 +2564,11 @@
             <span class="meta">${fmtDt(m.dt)} · ${esc(m.tech)}${m.dt >= slow ? " ⏳" : ""}</span>
           </div>`;
         });
-        dd.innerHTML = html;
+        return html;
+      }
+      function renderDeepDive(g) {
+        const dd = document.getElementById("deepDive"); if (!g) { dd.innerHTML = ""; return; }
+        dd.innerHTML = deepDiveHTML(g);
       }
 
       // ---- image import ----
