@@ -52,6 +52,15 @@ answer.
     of trusting the clue count or the source's label. The rating (and the
     hardest step it found) shows in the **"Ready to start?" popup** with a
     one-tap **Use** button to apply it to the puzzle's difficulty.
+  - **Technique trainer.** A **Practice** tab in the Game library lets you
+    drill one technique at a time — hidden singles, pointing pairs, naked and
+    hidden pairs/triples, X-wings, XY/XYZ-wings, swordfish. Each drill loads a
+    puzzle whose *toughest step is that technique*, so you get repeated,
+    targeted reps instead of hoping it turns up. **Learn** opens the worked
+    example; **Drill** loads a puzzle. The technique refresher pop-up (and the
+    "Techniques to practice" weak-spots list in Stats) has a **Practice this**
+    button that drops you straight into a matching drill — so you can go from
+    spotting a weakness to training it in one tap.
   - A **History** tab on the main page lists every game you've finished (or
     revealed), grouped by date, with its difficulty, source, time, and error
     count — tap **Details** on any entry to jump straight to that game's

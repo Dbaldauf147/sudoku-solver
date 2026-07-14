@@ -442,7 +442,7 @@
           <div id="exBoard"></div>
           <p id="exCaption" class="body"></p>
           <div id="exGames"></div>
-          <div class="actions"><button id="exClose" class="primary">Got it</button></div>
+          <div class="actions"><button id="exDrill" hidden>Practice this</button><button id="exClose" class="primary">Got it</button></div>
         </div>
       </div>
 
@@ -1978,10 +1978,10 @@
       // Renders the panel shell (back button, tab bar) and delegates the body to the active tab.
       function renderGameLibrary() {
         if (libraryPanel.hidden) return;
-        const counts = { saved: lsGet(STORE_KEY).length, history: lsGet(STATS_KEY).length, catalog: CATALOG.length };
+        const counts = { saved: lsGet(STORE_KEY).length, history: lsGet(STATS_KEY).length, catalog: CATALOG.length, practice: TRAINER_TECHS.length };
         const tab = (id, label) => `<button class="lib-tab${libTab === id ? " on" : ""}" data-tab="${id}">${label} <span class="k">(${counts[id]})</span></button>`;
         libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Game library</h2>` +
-          `<div class="lib-tabs">${tab("saved", "Saved")}${tab("history", "History")}${tab("catalog", "Catalogue")}</div>` +
+          `<div class="lib-tabs">${tab("saved", "Saved")}${tab("history", "History")}${tab("catalog", "Catalogue")}${tab("practice", "Practice")}</div>` +
           `<div id="libContent"></div>`;
         document.getElementById("lb").onclick = closeLibrary;
         libraryPanel.querySelectorAll(".lib-tab").forEach((b) => (b.onclick = () => {
@@ -1989,6 +1989,7 @@
         }));
         if (libTab === "history") renderHistoryTab();
         else if (libTab === "catalog") renderCatalogTab();
+        else if (libTab === "practice") renderPracticeTab();
         else renderSavedTab();
       }
 
@@ -2150,6 +2151,23 @@
         showReady(`Catalog · ${p.difficulty} #${p.n}${p.date ? " · " + fmtCatalogDate(p.date) : ""} loaded. Start the timer and play it from scratch?`);
       }
 
+      // ---- Practice tab (drill one technique at a time) ----
+      function renderPracticeTab() {
+        const content = document.getElementById("libContent"); if (!content) return;
+        let rows = "";
+        for (const t of TRAINER_TECHS) {
+          const tier = tierForRank(TECH_RANK[t] || 3), color = TECH_COLORS[t] || "#94a3b8", n = TRAINER_BANK[t].length;
+          rows += `<div class="saved-row">
+            <div class="saved-meta"><b><span style="color:${color}">●</span> ${esc(t)}</b> <span class="pr-badge" style="font-size:0.7rem;padding:1px 7px">${esc(tier)}</span><br>
+              <span class="k">${esc(TRAINER_BLURB[t] || "")}</span></div>
+            <div class="saved-actions"><button class="drill-learn" data-t="${esc(t)}">Learn</button><button class="drill-play primary" data-t="${esc(t)}">Drill</button></div>
+          </div>`;
+        }
+        content.innerHTML = `<div class="card">Drill one technique at a time. Each puzzle is picked so that technique is its toughest step — solve it and train your eye for the pattern. <b>Learn</b> shows a worked example; <b>Drill</b> loads a puzzle.</div>${rows}`;
+        content.querySelectorAll(".drill-learn").forEach((b) => (b.onclick = () => openExample(b.dataset.t)));
+        content.querySelectorAll(".drill-play").forEach((b) => (b.onclick = () => loadDrill(b.dataset.t)));
+      }
+
       libraryBtn.addEventListener("click", () => { if (libraryPanel.hidden) openLibrary(); else closeLibrary(); });
 
       // Home: close any open panel (stats or the game library) and return to the game board.
@@ -2180,6 +2198,49 @@
       }
       // Built-in puzzles are surfaced in the Game library's Catalogue tab (see renderCatalogTab).
       const CATALOG = CATALOG_RAW.filter(([, s]) => s.length === 81).map(([difficulty, s, date], i) => ({ difficulty, grid: parsePuzzle(s), date, n: i + 1 }));
+
+      // ---- technique trainer ----
+      // Puzzles bucketed by the hardest technique their solution requires (each generated and graded
+      // with gradeDifficulty so the label is exactly what the app computes). Drilling one lets you
+      // practise spotting that technique on a puzzle where it's the crux. Ordered easiest → hardest.
+      const TRAINER_BANK = {
+        "Naked single": ["008950000000104050000670000000803005010007002800000003200090700089400000604000010", "600500070090000602000800100000730048050080007000090520000000000007000059030100400"],
+        "Hidden single": ["000040080000000609610500000000005008700000010080600204409000006000200050360090000", "000070100080020500930005000001500000000060704000002060890100040070900000006004000", "038000004006800079700000000901000008000908000023000400200600005000310700000700200", "000009000008000075127300000706030000040000020000600001230100090070002040900000002", "003500000041390000070004100069000702005000601000600038000072005400800007000000300", "048000200000000900790050040000142000100003007003008000007000150005206030000090000", "309042000010000000000000640400670000000089004000000083200094800000350200095001000", "802600400006000900007090000000900000000040006000080050500060008200035090081000620"],
+        "Pointing pair": ["030000580600000000000700001860200000000095008005007102090003005700001000006850007", "800090000003010800000400907029070000000003002700040010000060000000200480067004003", "000500000195004060000000803000060108031200000070000030600409000002605900000030000", "980000000002005009000000605007400236004000007000100050060090720030000000000002004", "000000048100000530006002007000390000060250070000000400400008020000079000590000060", "000000100600041090009007000080002015060750200000009000300000070004070500102003060", "008090700001706003000000461005300809000050014030000005000020000014000000083009000", "409000507005040010000600000070000030002309100300187005600000000000000704000403092"],
+        "Pointing triple": ["700020000900000080630005409000006200013000000500097000009300800050700060008600003", "000300051600007290000000000009005000000006080032094000070009520000100000300020900", "000109000000020903810000020050000080000000040307008000000903000045000000001002056", "060180090000020000800600010700400500000050004010030072030700006004500800070000000", "090000062008043000300200000021070000000020090000610800000801006000000017006430000", "000001070000000000514000200900800006040907002070012900200000060009060800000350000"],
+        "Naked pair": ["070000250020007900100004000600210000000000000004030072051000004000089000090000820", "600030008000005900540000000000406003070001000801900700100200670000800400790000000", "000000050300052000020049103000200010005090367078000002000100400940005000006000000", "703009100040000000005302000080200005100506040506900020000000804004070000900000003", "009070002000050680060000037000040200300000079000005000000000800000508096012006003", "002000300000001000000003451300000004800400200100008006200090000070010005006520000", "000030609680000307900010000000009706004007000500060100005000003300200000820000050", "900203100300070008701060400000800940004020010003007000060000009009000000520030000"],
+        "Hidden pair": ["109650008006000070000004000000070000000400037002906040001000002400201789000860010", "640708000001000600030000000000002493000090001000100207450006000000900010300200070", "830060000000409600050001003000900007070010000003800100900000030005000000461095020", "420000010000010000600030200009800030030000007200000860007006000100005004800001002", "000800034000140006100700890018005900090000000400070000807000049000500000003060010", "600700059050300060980600070792000000000090000501000000000081603030020700000000010", "400006001003400000600008004000000000340601000080000050005100270090070000000300900"],
+        "Naked triple": ["002607100000905600060280050010000900043006000000000000105090030000000020007800005", "065000009700000000001960057000000030000180400090506800200050003004010000000008002", "103004900900052000000000086004000000000100700800590004000087300200400000006000019"],
+        "Hidden triple": ["700000000500090023000600000000109045020000010001040206008950000005000860017060030"],
+        "X-wing": ["035400000600090000400200091000020000000500600093000010700004506300800900050000007", "700004200000000017010000600970030001000000800060215004005049702000800000049500000"],
+        "XY-wing": ["100900360300000080500002000004080030900000008003029010001005027009000100200060050", "100400000400502030000010807060009500002040900040057010070000003000090000000000186", "008006090050872040000000000001600480300090005900020000040500100605000003000000000", "001300050950200000000000703300400000002060001000007080004080000700030005600010004", "000009104040307096000800003002000000000000200579000000000004650080610009300070000", "040050280000004006300000100000100700030020000200530600180009450000600000920000000", "000010032002400000010000890098300075065070000000009026000000907500000000009527000", "010000000400608107000001090004017000001490000008000030000000700900060005803059004"],
+        "XYZ-wing": ["074600250000074000090000007002000401400006800005203000058009002000000060000530900", "001405000000600900060000020087001005000030008500980000050000600006000300000190204"],
+        "Swordfish": ["010000060003700000905000000080300500000010040000040083600051300800090010200800400"],
+      };
+      const TRAINER_BLURB = {
+        "Naked single": "A cell where eight digits are already blocked, leaving one. The bread-and-butter scan.",
+        "Hidden single": "A digit that fits only one cell of a row, column, or box — even if that cell has other candidates.",
+        "Pointing pair": "A digit confined to one row/column within a box, letting you clear it from the rest of that line.",
+        "Pointing triple": "Three cells of a box on one line pin a digit there, clearing it from the line outside the box.",
+        "Naked pair": "Two cells sharing the same two candidates — those digits leave every other cell in the unit.",
+        "Hidden pair": "Two digits that fit only the same two cells, clearing all their other candidates.",
+        "Naked triple": "Three cells holding only three digits between them — remove those digits from the rest of the unit.",
+        "Hidden triple": "Three digits locked to the same three cells, clearing every other candidate from them.",
+        "X-wing": "A digit pinned to the same two columns across two rows (or vice-versa) — eliminate it elsewhere.",
+        "XY-wing": "A pivot plus two pincers where one pincer must be Z, removing Z from any cell seeing both.",
+        "XYZ-wing": "Like an XY-wing but the pivot also shares Z, so cells seeing all three lose Z.",
+        "Swordfish": "An X-wing stretched to three rows and three columns.",
+      };
+      // Techniques we can drill, easiest → hardest (bank insertion order), skipping empty buckets.
+      const TRAINER_TECHS = Object.keys(TRAINER_BANK).filter((t) => (TRAINER_BANK[t] || []).length);
+      function loadDrill(tech) {
+        const bank = TRAINER_BANK[tech]; if (!bank || !bank.length) return;
+        closeLibrary(); document.getElementById("exModal").hidden = true;
+        const str = bank[Math.floor(Math.random() * bank.length)];
+        const grid = parsePuzzle(str), tier = tierForRank(TECH_RANK[tech] || 3);
+        resetToEdit(); writeGrid(grid); difficultyEl.value = tier; sourceEl.value = "Trainer · " + tech; renderPencils();
+        showReady(`Drill: ${tech}. This puzzle's toughest step is a ${tech.toLowerCase()} — solve it and watch for that pattern. Stuck? Hint walks you through it.`);
+      }
 
       // ---- stats / deep dive ----
       const TECH_COLORS = { "Naked single": "#4ade80", "Hidden single": "#6ea8fe", "Pointing pair": "#f59e0b",
@@ -2356,6 +2417,12 @@
             || "This move follows from the puzzle's unique solution (an advanced technique, or simply filling neighbors first) rather than one named rule.";
         }
         renderTechGames(tech);
+        const drillBtn = document.getElementById("exDrill");
+        if (drillBtn) {
+          const canDrill = !!(TRAINER_BANK[tech] && TRAINER_BANK[tech].length);
+          drillBtn.hidden = !canDrill;
+          drillBtn.onclick = canDrill ? () => loadDrill(tech) : null;
+        }
         document.getElementById("exModal").hidden = false;
       }
       // List every logged game that used this technique, newest first, with its date and difficulty.
