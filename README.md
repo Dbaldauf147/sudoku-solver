@@ -42,7 +42,16 @@ answer.
     mirrors the same breakdown for the current (or most recent) game alone:
     its time, accuracy, errors, and hints, how it stacks up against your best
     at that difficulty, where its time went per technique, and its own
-    move-by-move timeline.
+    move-by-move timeline. Both tabs also surface **Techniques to practice** —
+    your weak spots, ranked by how often you needed help: every hint you take
+    is logged against the technique it revealed, and every mistake against the
+    simpler step that was available. Tap one for a refresher.
+  - **Auto difficulty rating.** The app grades each puzzle by the hardest
+    technique its logical solution actually needs — singles only is Easy,
+    intersections and pairs are Medium, X-wings and beyond are Hard — instead
+    of trusting the clue count or the source's label. The rating (and the
+    hardest step it found) shows in the **"Ready to start?" popup** with a
+    one-tap **Use** button to apply it to the puzzle's difficulty.
   - A **History** tab on the main page lists every game you've finished (or
     revealed), grouped by date, with its difficulty, source, time, and error
     count — tap **Details** on any entry to jump straight to that game's

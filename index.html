@@ -198,6 +198,10 @@
       .modal-diff { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 0.9rem; margin: 0 0 12px; }
       .modal-diff:last-of-type { margin-bottom: 20px; }
       .modal-diff select, .modal-diff input { flex: 0 0 auto; max-width: 160px; }
+      .modal-rating { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px;
+        margin: -4px 0 16px; font-size: 0.9rem; color: var(--text); }
+      .modal-rating .k { color: var(--muted); }
+      .modal-rating .rating-apply { padding: 4px 10px; font-size: 0.82rem; }
 
       .trow { cursor: pointer; }
       .trow:hover { background: var(--panel); }
@@ -346,6 +350,7 @@
               <option value="Hard">Hard</option>
             </select>
           </label>
+          <div id="modalRating" class="modal-rating" hidden></div>
           <label class="modal-diff">Source
             <input id="modalSource" placeholder="Source" value="NYT" title="Where this puzzle came from" />
           </label>
@@ -949,6 +954,41 @@
         return null;
       }
 
+      // ---- technique-based difficulty grading ----
+      // A puzzle's grade is the hardest technique its logical solution needs — clue count doesn't factor in.
+      const TECH_RANK = { "Naked single": 1, "Hidden single": 2, "Pointing pair": 3, "Pointing triple": 3, "Locked candidate": 3,
+        "Naked pair": 4, "Hidden pair": 4, "Naked triple": 5, "Hidden triple": 5,
+        "X-wing": 6, "XY-wing": 6, "Swordfish": 7, "XYZ-wing": 7, "Advanced": 9 };
+      function tierForRank(rank) { return rank <= 2 ? "Easy" : rank <= 5 ? "Medium" : "Hard"; }
+      // Solve using only the techniques we can name, keeping a persistent candidate map so elimination
+      // techniques stack, and record the hardest technique the solution required.
+      function logicalSolve(grid) {
+        const g = clone(grid), M = candMap(g);
+        let hardestRank = 0, hardest = null;
+        const bump = (t) => { const rk = TECH_RANK[t] || 9; if (rk > hardestRank) { hardestRank = rk; hardest = t; } };
+        const place = (r, c, n) => {
+          g[r][c] = n; M[r][c] = new Set();
+          for (let i = 0; i < 9; i++) { M[r][i].delete(n); M[i][c].delete(n); }
+          for (const [br, bc] of boxCells(r, c)) M[br][bc].delete(n);
+        };
+        const isFull = () => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (g[r][c] === 0) return false; return true; };
+        for (let guard = 0; guard < 600; guard++) {
+          if (isFull()) return { solved: true, hardest, hardestRank };
+          const ns = findNakedSingle(M, g); if (ns) { bump("Naked single"); place(ns.r, ns.c, ns.n); continue; }
+          const hs = findHiddenSingle(M, g); if (hs) { bump("Hidden single"); place(hs.r, hs.c, hs.n); continue; }
+          let moved = false;
+          for (const tech of ELIM_TECHS) { const e = tech(M, g); if (e) { bump(e.tech); for (const [r, c, n] of e.elims) M[r][c].delete(n); moved = true; break; } }
+          if (!moved) return { solved: false, hardest, hardestRank };   // needs a technique beyond ours
+        }
+        return { solved: false, hardest, hardestRank };
+      }
+      // Grade a puzzle from its givens: tier + the hardest technique its solution needs.
+      function gradeDifficulty(grid) {
+        const res = logicalSolve(grid);
+        if (!res.solved) return { tier: "Hard", hardest: "Advanced", solved: false };
+        return { tier: tierForRank(res.hardestRank), hardest: res.hardest || "Naked single", solved: true };
+      }
+
       // ---- UI feedback ----
       function showExplain(title, body, kind = "info", action, tech) {
         explainEl.className = "explain " + kind; explainEl.innerHTML = "";
@@ -1037,6 +1077,8 @@
         } else {
           tech = "Mistake";
           if (session) { session.errors = (session.errors || 0) + 1; errorsEl.textContent = session.errors; }
+          // The player overlooked a provable step here — credit the simplest one that was available.
+          const avail = findHint(grid); if (avail) noteMiss(avail.tech);
           if (errorFlags) {
             inputs[r][c].classList.add("wrong");
             const conf = findConflicts(grid, r, c, n);
@@ -1171,6 +1213,13 @@
         const t = activeElapsed(), dt = t - session.lastT; session.lastT = t;
         session.moves.push({ t, dt, r, c, n, correct, tech });
       }
+      // Log a named technique the player couldn't spot on their own — a hint they took, or the simpler
+      // step that was available when they slipped. Feeds the "techniques to practice" stats.
+      function noteMiss(tech) {
+        if (!session || !tech || tech === "Advanced" || tech === "Mistake") return;
+        session.missed ||= {};
+        session.missed[tech] = (session.missed[tech] || 0) + 1;
+      }
       // Set by finalizeSession so the celebration knows whether a solve was a personal best.
       let lastWasPR = false, lastPRKind = "";
       function finalizeSession(solved) {
@@ -1216,7 +1265,7 @@
         document.body.classList.add("solving");
         clearHighlights(); renderPencils();
         undoStack = []; errorsEl.textContent = "0";
-        session = { difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, moves: [] };
+        session = { difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, moves: [], missed: {} };
         startTimer();
         const first = (() => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) return [r, c]; return [0, 0]; })();
         select(first[0], first[1]);
@@ -1229,7 +1278,23 @@
 
       // Ready modal — shown after import / loading a saved game; starts the timer on confirm.
       const modal = document.getElementById("modal");
-      function showReady(msg) { document.getElementById("modalMsg").textContent = msg; modal.hidden = false; }
+      function showReady(msg) { document.getElementById("modalMsg").textContent = msg; updateModalRating(); modal.hidden = false; }
+      // Compute a technique-based rating for the loaded puzzle and offer to apply it to the difficulty select.
+      function updateModalRating() {
+        const box = document.getElementById("modalRating"); if (!box) return;
+        const grid = readGrid();
+        if (grid.flat().filter(Boolean).length < 17 || hasConflict(grid)) { box.hidden = true; return; }
+        let grade; try { grade = gradeDifficulty(grid); } catch { box.hidden = true; return; }
+        const note = grade.solved ? `hardest step: ${grade.hardest}` : "needs advanced chains I don't name";
+        box.innerHTML = `<span>🎯 Auto-rated <b>${esc(grade.tier)}</b> · <span class="k">${esc(note)}</span></span>`;
+        if (difficultyEl.value !== grade.tier) {
+          const btn = document.createElement("button");
+          btn.type = "button"; btn.className = "rating-apply"; btn.textContent = `Use ${grade.tier}`;
+          btn.onclick = () => { difficultyEl.value = grade.tier; difficultyEl.dispatchEvent(new Event("change")); updateModalRating(); };
+          box.appendChild(btn);
+        }
+        box.hidden = false;
+      }
       function hideModal() { modal.hidden = true; }
       document.getElementById("modalStart").addEventListener("click", () => { hideModal(); startSolving(); });
       document.getElementById("modalCancel").addEventListener("click", () => { hideModal(); showExplain("Take your time", "Fix anything that looks off, then press Start solving when you're ready.", "info"); });
@@ -1519,7 +1584,7 @@
         closeStats(); closeLibrary(); closeHistory(); // Hint now lives in the menu — make sure the board is visible
         const hint = findHint(progressGrid());
         if (!hint) return showExplain("Nothing left to place", "The grid is complete.", "ok");
-        if (session) { session.hints = (session.hints || 0) + 1; saveActiveGame(); }
+        if (session) { session.hints = (session.hints || 0) + 1; noteMiss(hint.tech); saveActiveGame(); }
         renderHintHighlights(hint);
         if (hint.kind === "place") { lastHint = hint; select(hint.r, hint.c); }
         showHintExplain(hint, false);
@@ -1572,7 +1637,7 @@
         // Fresh session: timer restarts from zero, errors and move log wiped.
         clearInterval(timerId); timerId = null;
         undoStack = []; lastHint = null;
-        session = { difficulty: session.difficulty, source: session.source, startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, moves: [] };
+        session = { difficulty: session.difficulty, source: session.source, startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, moves: [], missed: {} };
         errorsEl.textContent = "0"; pauseModal.hidden = true;
         clearHighlights(); setMode("normal"); startTimer(); renderPencils();
         syncAutoPause();   // if a panel happens to be covering the board, keep the fresh timer paused
@@ -1689,7 +1754,7 @@
           solution,
           elapsed: activeElapsed(),
           manualPaused: !!(session.pauseStart && session.manualPaused),
-          session: { difficulty: session.difficulty, source: session.source, errors: session.errors || 0, hints: session.hints || 0, lastT: session.lastT || 0, moves: session.moves || [] },
+          session: { difficulty: session.difficulty, source: session.source, errors: session.errors || 0, hints: session.hints || 0, lastT: session.lastT || 0, moves: session.moves || [], missed: session.missed || {} },
           savedAt: Date.now(),
         };
       }
@@ -1710,7 +1775,7 @@
         }
         // Time away from the app doesn't count: rebase so active time resumes from where it stood.
         const elapsed = Math.max(0, st.elapsed || 0), now = Date.now();
-        session = { difficulty: st.session.difficulty, source: st.session.source, startedAt: now - elapsed, pausedMs: 0, pauseStart: null, manualPaused: false, errors: st.session.errors || 0, hints: st.session.hints || 0, lastT: st.session.lastT || 0, moves: st.session.moves || [] };
+        session = { difficulty: st.session.difficulty, source: st.session.source, startedAt: now - elapsed, pausedMs: 0, pauseStart: null, manualPaused: false, errors: st.session.errors || 0, hints: st.session.hints || 0, lastT: st.session.lastT || 0, moves: st.session.moves || [], missed: st.session.missed || {} };
         solving = true; setMode("normal"); document.body.classList.add("solving");
         difficultyEl.value = session.difficulty; sourceEl.value = session.source;
         errorsEl.textContent = session.errors;
@@ -2332,11 +2397,21 @@
         if (t) t.hidden = tab !== "this";
         if (a) a.hidden = tab !== "all";
       }
+      // Techniques the player needed help with (hints taken + easier steps missed on a slip), most first.
+      // Reused by both stats tabs; taps open the same technique refresher pop-up.
+      function missedSection(missed, title) {
+        const entries = Object.entries(missed || {}).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+        if (!entries.length) return "";
+        let rows = "";
+        for (const [t, c] of entries) rows += `<tr class="trow" data-tech="${esc(t)}"><td><span style="color:${TECH_COLORS[t] || "#94a3b8"}">●</span> ${esc(t)}</td><td>${c}</td></tr>`;
+        return `<h3>${esc(title)}</h3><table class="grid"><tr><th>Technique</th><th>Times you needed help</th></tr>${rows}</table>
+          <p class="hintline">Counts hints you took plus the easier step available when you slipped — your weak spots. Tap one for a refresher.</p>`;
+      }
       // "This game" pane: the live game if one's in progress, else the most recently recorded game.
       // Mirrors every section of the "All games" tab, scoped to this single game.
       function thisGamePane(games) {
         const g = session
-          ? { difficulty: session.difficulty, source: session.source, totalMs: activeElapsed(), errors: session.errors || 0, hints: session.hints || 0, moves: session.moves || [], live: true }
+          ? { difficulty: session.difficulty, source: session.source, totalMs: activeElapsed(), errors: session.errors || 0, hints: session.hints || 0, moves: session.moves || [], missed: session.missed || {}, live: true }
           : games[0];
         if (!g) return '<div class="card">No game yet. Start a puzzle and its live stats — time, errors, hints, and techniques — show here.</div>';
         const d = g.difficulty || "";
@@ -2399,6 +2474,9 @@
           takeaway = `<div class="card takeaway">${mistakes ? `You made ${mistakes} mistake${mistakes > 1 ? "s" : ""} this game.` : "Clean game so far — no mistakes logged."}</div>`;
         }
 
+        // ----- techniques to practice (hints taken + easier steps missed this game) -----
+        const practice = missedSection(g.missed, "Techniques to practice");
+
         // ----- move-by-move timeline (pace / deep dive for this game) -----
         const timeline = movesN ? `<h3>Move-by-move timeline</h3>${deepDiveHTML(g, false)}` : "";
 
@@ -2408,6 +2486,7 @@
           ${compare}
           ${takeaway}
           ${techTable}
+          ${practice}
           ${timeline}`;
       }
       function renderStats() {
@@ -2479,7 +2558,15 @@
         if (mistakes) techTable += `<tr class="trow" data-tech="Mistake"><td><span style="color:${TECH_COLORS.Mistake}">●</span> Mistake</td><td>${mistakes}</td><td>—</td></tr>`;
         techTable += `</table><p class="hintline">Tap a technique to see a visual example and the games where it was logged.</p>`;
         const focus = techRows.filter((r) => r.count >= 3 && r.t !== "Other" && r.t !== "Advanced")[0];
-        const takeaway = focus
+
+        // techniques to practice — hints taken + easier steps missed, summed across every game
+        const missedAll = {};
+        for (const g of games) for (const [t, c] of Object.entries(g.missed || {})) missedAll[t] = (missedAll[t] || 0) + c;
+        const practicePane = missedSection(missedAll, "Techniques to practice");
+        const topMissed = Object.entries(missedAll).sort((a, b) => b[1] - a[1])[0];
+        const takeaway = topMissed
+          ? `You most often need help spotting <b style="color:${TECH_COLORS[topMissed[0]] || "#94a3b8"}">${esc(topMissed[0])}</b> (${topMissed[1]}×). Drill that one and your times should drop.${mistakes ? ` You've made ${mistakes} mistake${mistakes > 1 ? "s" : ""} total — slow down to verify before placing.` : ""}`
+          : focus
           ? `You take longest on <b style="color:${TECH_COLORS[focus.t]}">${esc(focus.t)}</b> placements (typically ${fmtDt(focus.med)}). Practice scanning for these earlier.${mistakes ? ` You've also made ${mistakes} mistake${mistakes > 1 ? "s" : ""} — slow down to verify before placing.` : ""}`
           : `Keep playing — after a few games I'll point out which technique slows you down most.`;
 
@@ -2516,6 +2603,7 @@
           <div id="timeChartBox"></div>
           <h3>Where you spend time</h3>${techTable}
           <p class="sub" style="margin:8px 0 0">Typical = median time between your choices, so a long pause stands out without one outlier skewing it.</p>
+          ${practicePane}
           <h3>Technique time over time</h3>${techTrend}
           <h3>Deep dive — a single game</h3>
           <select id="gamePick" style="width:100%;margin-bottom:10px">${opts}</select>
