@@ -198,6 +198,10 @@
       .modal-diff { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 0.9rem; margin: 0 0 12px; }
       .modal-diff:last-of-type { margin-bottom: 20px; }
       .modal-diff select, .modal-diff input { flex: 0 0 auto; max-width: 160px; }
+      .modal-rating { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px;
+        margin: -4px 0 16px; font-size: 0.9rem; color: var(--text); }
+      .modal-rating .k { color: var(--muted); }
+      .modal-rating .rating-apply { padding: 4px 10px; font-size: 0.82rem; }
 
       .trow { cursor: pointer; }
       .trow:hover { background: var(--panel); }
@@ -292,9 +296,11 @@
             <button id="hint">Hint</button>
             <button id="statsBtn">Stats</button>
             <button id="check">Check entries</button>
+            <button id="pastePuzzle">Paste puzzle</button>
             <button id="saveGame">Save game</button>
             <button id="hlToggle">Highlight matches: On</button>
             <button id="errToggle">Error highlighting: On</button>
+            <button id="autoUpdToggle">Auto-update notes: Off</button>
             <button id="resetGame">Reset game</button>
             <button id="reveal">Reveal solution</button>
             <button id="edit">Edit puzzle</button>
@@ -309,6 +315,7 @@
 
       <div class="row solving">
         <button id="undo">Undo</button>
+        <button id="redo">Redo</button>
         <button id="autonotes">Auto notes</button>
         <button id="pause">Pause</button>
       </div>
@@ -346,12 +353,26 @@
               <option value="Hard">Hard</option>
             </select>
           </label>
+          <div id="modalRating" class="modal-rating" hidden></div>
           <label class="modal-diff">Source
             <input id="modalSource" placeholder="Source" value="NYT" title="Where this puzzle came from" />
           </label>
           <div class="actions">
             <button id="modalCancel">Not yet</button>
             <button id="modalStart" class="primary">Start &amp; time me</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="pasteModal" class="overlay" hidden>
+        <div class="modal">
+          <h2>Paste a puzzle</h2>
+          <p>Paste the 81 digits of a puzzle, left to right, top to bottom. Use 0 or a dot for empty cells — spaces, line breaks, and other characters are ignored.</p>
+          <textarea id="pasteInput" rows="4" placeholder="53..7....6..195....98....6.8...6...34..8.3..17...2...6.6....28....419..5....8..79" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:0.9rem"></textarea>
+          <p id="pasteMsg" class="body" style="min-height:1.2em;margin:8px 0 0"></p>
+          <div class="actions">
+            <button id="pasteCancel">Cancel</button>
+            <button id="pasteLoad" class="primary">Load puzzle</button>
           </div>
         </div>
       </div>
@@ -437,7 +458,7 @@
           <div id="exBoard"></div>
           <p id="exCaption" class="body"></p>
           <div id="exGames"></div>
-          <div class="actions"><button id="exClose" class="primary">Got it</button></div>
+          <div class="actions"><button id="exDrill" hidden>Practice this</button><button id="exClose" class="primary">Got it</button></div>
         </div>
       </div>
 
@@ -548,6 +569,8 @@
         if (win && !win.hidden) { if (e.key === "Enter" || e.key === "Escape") document.getElementById("winAgain").click(); return; }
         const ex = document.getElementById("exModal");
         if (ex && !ex.hidden) { if (e.key === "Enter" || e.key === "Escape") document.getElementById("exClose").click(); return; }
+        const paste = document.getElementById("pasteModal");
+        if (paste && !paste.hidden) { if (e.key === "Escape") document.getElementById("pasteCancel").click(); return; } // let the textarea receive digits
         const prof = document.getElementById("profileModal");
         if (prof && !prof.hidden) {
           if (e.key === "Escape") prof.hidden = true;
@@ -570,7 +593,8 @@
           return;
         }
         if (!statsEl.hidden) return;
-        if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { if (solving) undo(); e.preventDefault(); return; }
+        if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { if (solving) (e.shiftKey ? redo() : undo()); e.preventDefault(); return; }
+        if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { if (solving) redo(); e.preventDefault(); return; }
         if (e.key >= "1" && e.key <= "9") { applyDigit(Number(e.key)); e.preventDefault(); }
         else if (["0", "Backspace", "Delete", "x", "X"].includes(e.key)) { applyClear(); e.preventDefault(); }
         else if (e.key === "n" || e.key === "N") setMode("normal");
@@ -614,33 +638,59 @@
         if (entryMode === "candidate" && solving && !inputs[r][c].value) { marks[r][c].clear(); renderPencils(); }
         else clearCell(r, c);
       }
-      let undoStack = [];
-      function pushUndo(r, c) {
+      let undoStack = [], redoStack = [];
+      let autoUpdateNotes = false;
+      try { autoUpdateNotes = localStorage.getItem("sudoku-coach:autonotes") === "on"; } catch {}
+      function cellSnap(r, c) { return { r, c, value: inputs[r][c].value, marks: new Set(marks[r][c]) }; }
+      function snapCells(cells) { return cells.map(({ r, c }) => cellSnap(r, c)); }
+      // Record the pre-change state of one or more cells so it can be undone. A fresh action clears redo.
+      function pushUndo(cells) {
         if (!solving) return;
-        undoStack.push({ r, c, value: inputs[r][c].value, marks: new Set(marks[r][c]) });
+        undoStack.push(snapCells(Array.isArray(cells) ? cells : [cells]));
         if (undoStack.length > 300) undoStack.shift();
+        redoStack = [];
       }
+      function restoreCell(s) {
+        inputs[s.r][s.c].value = s.value; marks[s.r][s.c] = new Set(s.marks);
+        inputs[s.r][s.c].classList.remove("wrong", "solved");
+        if (errorFlags && s.value && Number(s.value) !== solution[s.r][s.c]) inputs[s.r][s.c].classList.add("wrong");
+      }
+      function applySnaps(entry) { entry.forEach(restoreCell); renderPencils(); const last = entry[entry.length - 1]; if (last) select(last.r, last.c); }
       function undo() {
-        const last = undoStack.pop();
-        if (!last) return showExplain("Nothing to undo", "You're back at the start of this puzzle.", "info");
-        const { r, c, value, marks: m } = last;
-        inputs[r][c].value = value; marks[r][c] = new Set(m);
-        inputs[r][c].classList.remove("wrong", "solved");
-        if (errorFlags && value && Number(value) !== solution[r][c]) inputs[r][c].classList.add("wrong");
-        renderPencils(); select(r, c);
-        showExplain("Undid last action", `Restored ${loc(r, c)}.`, "info");
+        const entry = undoStack.pop();
+        if (!entry) return showExplain("Nothing to undo", "You're back at the start of this puzzle.", "info");
+        redoStack.push(snapCells(entry));   // capture current state so this undo can be redone
+        applySnaps(entry);
+        showExplain("Undid last action", `Restored ${loc(entry[entry.length - 1].r, entry[entry.length - 1].c)}.`, "info");
       }
+      function redo() {
+        const entry = redoStack.pop();
+        if (!entry) return showExplain("Nothing to redo", "You're at your latest action.", "info");
+        undoStack.push(snapCells(entry));
+        applySnaps(entry);
+        showExplain("Redid action", `Reapplied ${loc(entry[entry.length - 1].r, entry[entry.length - 1].c)}.`, "info");
+      }
+      // Cells sharing a row, column, or box with (r,c), including the cell itself — for auto-note upkeep.
+      function peersOf(r, c) {
+        const seen = new Map(), add = (rr, cc) => seen.set(rr + "," + cc, { r: rr, c: cc });
+        add(r, c); for (let i = 0; i < 9; i++) { add(r, i); add(i, c); }
+        for (const [br, bc] of boxCells(r, c)) add(br, bc);
+        return [...seen.values()];
+      }
+      function prunePeerNotes(r, c, n) { for (const { r: pr, c: pc } of peersOf(r, c)) if (!(pr === r && pc === c)) marks[pr][pc].delete(n); }
       function setValue(r, c, n) {
         if (givens[r][c]) return;
-        pushUndo(r, c);
+        const auto = solving && autoUpdateNotes;
+        pushUndo(auto ? peersOf(r, c) : { r, c });   // capture peers too when auto-upkeep will prune their notes
         inputs[r][c].value = String(n);
         marks[r][c].clear();
+        if (auto) prunePeerNotes(r, c, n);
         renderPencils(); select(r, c);
         if (solving) handleMove(r, c);
       }
       function clearCell(r, c) {
         if (givens[r][c]) return;
-        pushUndo(r, c);
+        pushUndo({ r, c });
         inputs[r][c].value = ""; inputs[r][c].classList.remove("wrong", "solved");
         marks[r][c].clear();
         if (solving) showExplain("Cell cleared", "Keep going — pick a number or press Hint.", "info");
@@ -648,7 +698,7 @@
       }
       function toggleMark(r, c, n) {
         if (givens[r][c] || inputs[r][c].value) return;
-        pushUndo(r, c);
+        pushUndo({ r, c });
         marks[r][c].has(n) ? marks[r][c].delete(n) : marks[r][c].add(n);
         renderPencils();
       }
@@ -949,6 +999,41 @@
         return null;
       }
 
+      // ---- technique-based difficulty grading ----
+      // A puzzle's grade is the hardest technique its logical solution needs — clue count doesn't factor in.
+      const TECH_RANK = { "Naked single": 1, "Hidden single": 2, "Pointing pair": 3, "Pointing triple": 3, "Locked candidate": 3,
+        "Naked pair": 4, "Hidden pair": 4, "Naked triple": 5, "Hidden triple": 5,
+        "X-wing": 6, "XY-wing": 6, "Swordfish": 7, "XYZ-wing": 7, "Advanced": 9 };
+      function tierForRank(rank) { return rank <= 2 ? "Easy" : rank <= 5 ? "Medium" : "Hard"; }
+      // Solve using only the techniques we can name, keeping a persistent candidate map so elimination
+      // techniques stack, and record the hardest technique the solution required.
+      function logicalSolve(grid) {
+        const g = clone(grid), M = candMap(g);
+        let hardestRank = 0, hardest = null;
+        const bump = (t) => { const rk = TECH_RANK[t] || 9; if (rk > hardestRank) { hardestRank = rk; hardest = t; } };
+        const place = (r, c, n) => {
+          g[r][c] = n; M[r][c] = new Set();
+          for (let i = 0; i < 9; i++) { M[r][i].delete(n); M[i][c].delete(n); }
+          for (const [br, bc] of boxCells(r, c)) M[br][bc].delete(n);
+        };
+        const isFull = () => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (g[r][c] === 0) return false; return true; };
+        for (let guard = 0; guard < 600; guard++) {
+          if (isFull()) return { solved: true, hardest, hardestRank };
+          const ns = findNakedSingle(M, g); if (ns) { bump("Naked single"); place(ns.r, ns.c, ns.n); continue; }
+          const hs = findHiddenSingle(M, g); if (hs) { bump("Hidden single"); place(hs.r, hs.c, hs.n); continue; }
+          let moved = false;
+          for (const tech of ELIM_TECHS) { const e = tech(M, g); if (e) { bump(e.tech); for (const [r, c, n] of e.elims) M[r][c].delete(n); moved = true; break; } }
+          if (!moved) return { solved: false, hardest, hardestRank };   // needs a technique beyond ours
+        }
+        return { solved: false, hardest, hardestRank };
+      }
+      // Grade a puzzle from its givens: tier + the hardest technique its solution needs.
+      function gradeDifficulty(grid) {
+        const res = logicalSolve(grid);
+        if (!res.solved) return { tier: "Hard", hardest: "Advanced", solved: false };
+        return { tier: tierForRank(res.hardestRank), hardest: res.hardest || "Naked single", solved: true };
+      }
+
       // ---- UI feedback ----
       function showExplain(title, body, kind = "info", action, tech) {
         explainEl.className = "explain " + kind; explainEl.innerHTML = "";
@@ -1037,6 +1122,8 @@
         } else {
           tech = "Mistake";
           if (session) { session.errors = (session.errors || 0) + 1; errorsEl.textContent = session.errors; }
+          // The player overlooked a provable step here — credit the simplest one that was available.
+          const avail = findHint(grid); if (avail) noteMiss(avail.tech);
           if (errorFlags) {
             inputs[r][c].classList.add("wrong");
             const conf = findConflicts(grid, r, c, n);
@@ -1171,6 +1258,13 @@
         const t = activeElapsed(), dt = t - session.lastT; session.lastT = t;
         session.moves.push({ t, dt, r, c, n, correct, tech });
       }
+      // Log a named technique the player couldn't spot on their own — a hint they took, or the simpler
+      // step that was available when they slipped. Feeds the "techniques to practice" stats.
+      function noteMiss(tech) {
+        if (!session || !tech || tech === "Advanced" || tech === "Mistake") return;
+        session.missed ||= {};
+        session.missed[tech] = (session.missed[tech] || 0) + 1;
+      }
       // Set by finalizeSession so the celebration knows whether a solve was a personal best.
       let lastWasPR = false, lastPRKind = "";
       function finalizeSession(solved) {
@@ -1215,8 +1309,8 @@
         solving = true; setMode("normal");
         document.body.classList.add("solving");
         clearHighlights(); renderPencils();
-        undoStack = []; errorsEl.textContent = "0";
-        session = { difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, moves: [] };
+        undoStack = []; redoStack = []; errorsEl.textContent = "0";
+        session = { difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, moves: [], missed: {} };
         startTimer();
         const first = (() => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) return [r, c]; return [0, 0]; })();
         select(first[0], first[1]);
@@ -1229,7 +1323,23 @@
 
       // Ready modal — shown after import / loading a saved game; starts the timer on confirm.
       const modal = document.getElementById("modal");
-      function showReady(msg) { document.getElementById("modalMsg").textContent = msg; modal.hidden = false; }
+      function showReady(msg) { document.getElementById("modalMsg").textContent = msg; updateModalRating(); modal.hidden = false; }
+      // Compute a technique-based rating for the loaded puzzle and offer to apply it to the difficulty select.
+      function updateModalRating() {
+        const box = document.getElementById("modalRating"); if (!box) return;
+        const grid = readGrid();
+        if (grid.flat().filter(Boolean).length < 17 || hasConflict(grid)) { box.hidden = true; return; }
+        let grade; try { grade = gradeDifficulty(grid); } catch { box.hidden = true; return; }
+        const note = grade.solved ? `hardest step: ${grade.hardest}` : "needs advanced chains I don't name";
+        box.innerHTML = `<span>🎯 Auto-rated <b>${esc(grade.tier)}</b> · <span class="k">${esc(note)}</span></span>`;
+        if (difficultyEl.value !== grade.tier) {
+          const btn = document.createElement("button");
+          btn.type = "button"; btn.className = "rating-apply"; btn.textContent = `Use ${grade.tier}`;
+          btn.onclick = () => { difficultyEl.value = grade.tier; difficultyEl.dispatchEvent(new Event("change")); updateModalRating(); };
+          box.appendChild(btn);
+        }
+        box.hidden = false;
+      }
       function hideModal() { modal.hidden = true; }
       document.getElementById("modalStart").addEventListener("click", () => { hideModal(); startSolving(); });
       document.getElementById("modalCancel").addEventListener("click", () => { hideModal(); showExplain("Take your time", "Fix anything that looks off, then press Start solving when you're ready.", "info"); });
@@ -1443,7 +1553,21 @@
           errorFlags ? "Wrong entries will flag red again, with the clashing row, column, or box." : "Mistakes won't be marked on the board. Use Check entries or Hint to verify when you want.", "info");
       });
 
+      // Auto-update notes: when on, placing a digit clears it from the pencil marks of every cell that
+      // shares a row, column, or box — so candidate marks stay current without redoing them by hand.
+      const autoUpdToggle = document.getElementById("autoUpdToggle");
+      function renderAutoUpdToggle() { autoUpdToggle.textContent = `Auto-update notes: ${autoUpdateNotes ? "On" : "Off"}`; }
+      renderAutoUpdToggle();
+      autoUpdToggle.addEventListener("click", () => {
+        autoUpdateNotes = !autoUpdateNotes;
+        try { localStorage.setItem("sudoku-coach:autonotes", autoUpdateNotes ? "on" : "off"); } catch {}
+        renderAutoUpdToggle();
+        showExplain(autoUpdateNotes ? "Auto-update notes on" : "Auto-update notes off",
+          autoUpdateNotes ? "Placing a digit now clears it from the notes of its row, column, and box automatically. Press Auto notes to fill them in first." : "Pencil marks stay exactly as you leave them.", "info");
+      });
+
       document.getElementById("undo").addEventListener("click", undo);
+      document.getElementById("redo").addEventListener("click", redo);
 
       document.getElementById("autonotes").addEventListener("click", () => {
         const grid = progressGrid();
@@ -1519,7 +1643,7 @@
         closeStats(); closeLibrary(); closeHistory(); // Hint now lives in the menu — make sure the board is visible
         const hint = findHint(progressGrid());
         if (!hint) return showExplain("Nothing left to place", "The grid is complete.", "ok");
-        if (session) { session.hints = (session.hints || 0) + 1; saveActiveGame(); }
+        if (session) { session.hints = (session.hints || 0) + 1; noteMiss(hint.tech); saveActiveGame(); }
         renderHintHighlights(hint);
         if (hint.kind === "place") { lastHint = hint; select(hint.r, hint.c); }
         showHintExplain(hint, false);
@@ -1571,8 +1695,8 @@
         }
         // Fresh session: timer restarts from zero, errors and move log wiped.
         clearInterval(timerId); timerId = null;
-        undoStack = []; lastHint = null;
-        session = { difficulty: session.difficulty, source: session.source, startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, moves: [] };
+        undoStack = []; redoStack = []; lastHint = null;
+        session = { difficulty: session.difficulty, source: session.source, startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, moves: [], missed: {} };
         errorsEl.textContent = "0"; pauseModal.hidden = true;
         clearHighlights(); setMode("normal"); startTimer(); renderPencils();
         syncAutoPause();   // if a panel happens to be covering the board, keep the fresh timer paused
@@ -1581,7 +1705,7 @@
         showExplain("Game reset", "Back to the starting clues with a fresh timer. Solve it your way.", "info");
       }
       function resetToEdit() {
-        session = null; clearInterval(timerId); timerId = null; undoStack = []; activeSavedGame = null;
+        session = null; clearInterval(timerId); timerId = null; undoStack = []; redoStack = []; activeSavedGame = null;
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal");
         document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory();
         pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
@@ -1689,7 +1813,7 @@
           solution,
           elapsed: activeElapsed(),
           manualPaused: !!(session.pauseStart && session.manualPaused),
-          session: { difficulty: session.difficulty, source: session.source, errors: session.errors || 0, hints: session.hints || 0, lastT: session.lastT || 0, moves: session.moves || [] },
+          session: { difficulty: session.difficulty, source: session.source, errors: session.errors || 0, hints: session.hints || 0, lastT: session.lastT || 0, moves: session.moves || [], missed: session.missed || {} },
           savedAt: Date.now(),
         };
       }
@@ -1710,7 +1834,7 @@
         }
         // Time away from the app doesn't count: rebase so active time resumes from where it stood.
         const elapsed = Math.max(0, st.elapsed || 0), now = Date.now();
-        session = { difficulty: st.session.difficulty, source: st.session.source, startedAt: now - elapsed, pausedMs: 0, pauseStart: null, manualPaused: false, errors: st.session.errors || 0, hints: st.session.hints || 0, lastT: st.session.lastT || 0, moves: st.session.moves || [] };
+        session = { difficulty: st.session.difficulty, source: st.session.source, startedAt: now - elapsed, pausedMs: 0, pauseStart: null, manualPaused: false, errors: st.session.errors || 0, hints: st.session.hints || 0, lastT: st.session.lastT || 0, moves: st.session.moves || [], missed: st.session.missed || {} };
         solving = true; setMode("normal"); document.body.classList.add("solving");
         difficultyEl.value = session.difficulty; sourceEl.value = session.source;
         errorsEl.textContent = session.errors;
@@ -1913,10 +2037,10 @@
       // Renders the panel shell (back button, tab bar) and delegates the body to the active tab.
       function renderGameLibrary() {
         if (libraryPanel.hidden) return;
-        const counts = { saved: lsGet(STORE_KEY).length, history: lsGet(STATS_KEY).length, catalog: CATALOG.length };
+        const counts = { saved: lsGet(STORE_KEY).length, history: lsGet(STATS_KEY).length, catalog: CATALOG.length, practice: TRAINER_TECHS.length };
         const tab = (id, label) => `<button class="lib-tab${libTab === id ? " on" : ""}" data-tab="${id}">${label} <span class="k">(${counts[id]})</span></button>`;
         libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Game library</h2>` +
-          `<div class="lib-tabs">${tab("saved", "Saved")}${tab("history", "History")}${tab("catalog", "Catalogue")}</div>` +
+          `<div class="lib-tabs">${tab("saved", "Saved")}${tab("history", "History")}${tab("catalog", "Catalogue")}${tab("practice", "Practice")}</div>` +
           `<div id="libContent"></div>`;
         document.getElementById("lb").onclick = closeLibrary;
         libraryPanel.querySelectorAll(".lib-tab").forEach((b) => (b.onclick = () => {
@@ -1924,6 +2048,7 @@
         }));
         if (libTab === "history") renderHistoryTab();
         else if (libTab === "catalog") renderCatalogTab();
+        else if (libTab === "practice") renderPracticeTab();
         else renderSavedTab();
       }
 
@@ -2085,6 +2210,23 @@
         showReady(`Catalog · ${p.difficulty} #${p.n}${p.date ? " · " + fmtCatalogDate(p.date) : ""} loaded. Start the timer and play it from scratch?`);
       }
 
+      // ---- Practice tab (drill one technique at a time) ----
+      function renderPracticeTab() {
+        const content = document.getElementById("libContent"); if (!content) return;
+        let rows = "";
+        for (const t of TRAINER_TECHS) {
+          const tier = tierForRank(TECH_RANK[t] || 3), color = TECH_COLORS[t] || "#94a3b8", n = TRAINER_BANK[t].length;
+          rows += `<div class="saved-row">
+            <div class="saved-meta"><b><span style="color:${color}">●</span> ${esc(t)}</b> <span class="pr-badge" style="font-size:0.7rem;padding:1px 7px">${esc(tier)}</span><br>
+              <span class="k">${esc(TRAINER_BLURB[t] || "")}</span></div>
+            <div class="saved-actions"><button class="drill-learn" data-t="${esc(t)}">Learn</button><button class="drill-play primary" data-t="${esc(t)}">Drill</button></div>
+          </div>`;
+        }
+        content.innerHTML = `<div class="card">Drill one technique at a time. Each puzzle is picked so that technique is its toughest step — solve it and train your eye for the pattern. <b>Learn</b> shows a worked example; <b>Drill</b> loads a puzzle.</div>${rows}`;
+        content.querySelectorAll(".drill-learn").forEach((b) => (b.onclick = () => openExample(b.dataset.t)));
+        content.querySelectorAll(".drill-play").forEach((b) => (b.onclick = () => loadDrill(b.dataset.t)));
+      }
+
       libraryBtn.addEventListener("click", () => { if (libraryPanel.hidden) openLibrary(); else closeLibrary(); });
 
       // Home: close any open panel (stats or the game library) and return to the game board.
@@ -2095,11 +2237,45 @@
       // ---- built-in catalog (shipped with the app, available to every user) ----
       // Each entry: [difficulty, 81-char puzzle, date (YYYY-MM-DD)].
       const CATALOG_RAW = [
-        ["Easy", "530070000600195000098000060800060003400803001700020006060000280000419005000080079", "2025-01-06"],
-        ["Medium", "003020600900305001001806400008102900700000008006708200002609500800203009005010300", "2025-02-10"],
-        ["Medium", "200080300060070084030500209000105408000000000402706000301007040720040060004010003", "2025-03-17"],
-        ["Hard", "000000907000420180000705026100904000050000040000507009920108000034059000507000000", "2025-04-21"],
-        ["Hard", "030050040008010500460000012070502080000603000040109030250000098001020600080060020", "2025-05-26"],
+        ["Easy", "000106900008430000000007003450008000000060004000000250300049010206500300500000700", "2025-06-27"],
+        ["Easy", "003000100900400000500070009200000008037604000000057000000000270060005304070008000", "2025-06-23"],
+        ["Easy", "600000700902800000000560010000020000005074302007600000106000503000100070020003100", "2025-06-19"],
+        ["Easy", "085000200040000007007608403000030000060070000090000350006520000800040030010700060", "2025-06-15"],
+        ["Easy", "040860000000004800700000050600000000080000002000007010103020680060090704400000000", "2025-06-11"],
+        ["Easy", "000003000010000650200048009405070003000000000003000105500000000002460000008900340", "2025-06-07"],
+        ["Easy", "000906300000030000050000010007040000000002900300000400201600089060400500000809002", "2025-06-03"],
+        ["Easy", "600000100003400007070006025530600000800030000004520070040300050000070600000000080", "2025-05-30"],
+        ["Easy", "109000070004000001000046000500200090620070000000080500030090004090700000000060082", "2025-05-26"],
+        ["Easy", "900060000500800000000000402800017300200400010003000008030240007005009000090506804", "2025-05-22"],
+        ["Easy", "000000080029001000000930500602080400900604300004020700000000000000750000010000023", "2025-05-18"],
+        ["Easy", "030080009000600000509000000100000003080005010900870000004020100000040650000009080", "2025-05-14"],
+        ["Medium", "600190000005007030000053046010006304000000198090000000960500000050400810000000070", "2025-05-10"],
+        ["Medium", "060008040000070060310005007000910000000400032870500000720001600091000020000709000", "2025-05-06"],
+        ["Medium", "004231090600000800090000003010050070003007000080010400000403080400000020065000900", "2025-05-02"],
+        ["Medium", "200000980000008000800360105328040000007000010064900000000080043000700600000603200", "2025-04-28"],
+        ["Medium", "002064090000000720457000000009000002100043000070000010000008000500000960600090800", "2025-04-24"],
+        ["Medium", "000800000069007200000000540200600300605040000000000000301005007000070000502906001", "2025-04-20"],
+        ["Medium", "108030060004050800693002000200000400900600280300500000000210500010000004400000000", "2025-04-16"],
+        ["Medium", "906803010040006000083001007000000090300010050098004130000060040000508000001000570", "2025-04-12"],
+        ["Medium", "008090620000000300700058004000003760300000000072064009005000000000670000100080000", "2025-04-08"],
+        ["Medium", "000600090090000304000050000008009010260008000050007600070400005600000003900010062", "2025-04-04"],
+        ["Medium", "500004810040000000100000700000059007001030000067000030800740000000000350090020600", "2025-03-31"],
+        ["Medium", "000300800000100050070040009000002380003400000704000902000090060002015007040003200", "2025-03-27"],
+        ["Medium", "005900000006020058080006000000205006001000900002070510000000030003004067208000009", "2025-03-23"],
+        ["Medium", "000009850000080307500030004007006200081200000903004010002700000840900006000000000", "2025-03-19"],
+        ["Medium", "509000400008006001010200709000005000000090000700068003000003004000000100800107560", "2025-03-15"],
+        ["Hard", "001040706400500000070010000010070003604020000300950000280000030000000907000006000", "2025-03-11"],
+        ["Hard", "600000930900100700072000100306009000140050000000000060004067080210000040000800000", "2025-03-07"],
+        ["Hard", "040080020010000000007020005000000067000004800000260000603700900000300000891056700", "2025-03-03"],
+        ["Hard", "200873600005000000080060190000900000000004036000001050071000000500400020000080400", "2025-02-27"],
+        ["Hard", "080000502007080604060004000000800000200035009035000000000900003000406010956001008", "2025-02-23"],
+        ["Hard", "000006010600807004400000006010002800706308000003000402002900100000000900050070020", "2025-02-19"],
+        ["Hard", "400000320007900060001070000740000500208001000100380600004000000030002790000800050", "2025-02-15"],
+        ["Hard", "000604000000091200026000009000000000801000030000709086007000500180076000405008000", "2025-02-11"],
+        ["Hard", "003000089000000000005061000020103706300720000001800020059070003706900002000000000", "2025-02-07"],
+        ["Hard", "060000003018000060200000090901000026006900000700500040002306007000000200007002015", "2025-02-03"],
+        ["Hard", "001050006000002700600004001060700000002903800007005609430070000000009300000001020", "2025-01-30"],
+        ["Hard", "090080040000700000103009000209806300400000200000002004810500760600000050007000008", "2025-01-26"],
       ];
       function parsePuzzle(str) {
         const g = [];
@@ -2115,6 +2291,49 @@
       }
       // Built-in puzzles are surfaced in the Game library's Catalogue tab (see renderCatalogTab).
       const CATALOG = CATALOG_RAW.filter(([, s]) => s.length === 81).map(([difficulty, s, date], i) => ({ difficulty, grid: parsePuzzle(s), date, n: i + 1 }));
+
+      // ---- technique trainer ----
+      // Puzzles bucketed by the hardest technique their solution requires (each generated and graded
+      // with gradeDifficulty so the label is exactly what the app computes). Drilling one lets you
+      // practise spotting that technique on a puzzle where it's the crux. Ordered easiest → hardest.
+      const TRAINER_BANK = {
+        "Naked single": ["008950000000104050000670000000803005010007002800000003200090700089400000604000010", "600500070090000602000800100000730048050080007000090520000000000007000059030100400"],
+        "Hidden single": ["000040080000000609610500000000005008700000010080600204409000006000200050360090000", "000070100080020500930005000001500000000060704000002060890100040070900000006004000", "038000004006800079700000000901000008000908000023000400200600005000310700000700200", "000009000008000075127300000706030000040000020000600001230100090070002040900000002", "003500000041390000070004100069000702005000601000600038000072005400800007000000300", "048000200000000900790050040000142000100003007003008000007000150005206030000090000", "309042000010000000000000640400670000000089004000000083200094800000350200095001000", "802600400006000900007090000000900000000040006000080050500060008200035090081000620"],
+        "Pointing pair": ["030000580600000000000700001860200000000095008005007102090003005700001000006850007", "800090000003010800000400907029070000000003002700040010000060000000200480067004003", "000500000195004060000000803000060108031200000070000030600409000002605900000030000", "980000000002005009000000605007400236004000007000100050060090720030000000000002004", "000000048100000530006002007000390000060250070000000400400008020000079000590000060", "000000100600041090009007000080002015060750200000009000300000070004070500102003060", "008090700001706003000000461005300809000050014030000005000020000014000000083009000", "409000507005040010000600000070000030002309100300187005600000000000000704000403092"],
+        "Pointing triple": ["700020000900000080630005409000006200013000000500097000009300800050700060008600003", "000300051600007290000000000009005000000006080032094000070009520000100000300020900", "000109000000020903810000020050000080000000040307008000000903000045000000001002056", "060180090000020000800600010700400500000050004010030072030700006004500800070000000", "090000062008043000300200000021070000000020090000610800000801006000000017006430000", "000001070000000000514000200900800006040907002070012900200000060009060800000350000"],
+        "Naked pair": ["070000250020007900100004000600210000000000000004030072051000004000089000090000820", "600030008000005900540000000000406003070001000801900700100200670000800400790000000", "000000050300052000020049103000200010005090367078000002000100400940005000006000000", "703009100040000000005302000080200005100506040506900020000000804004070000900000003", "009070002000050680060000037000040200300000079000005000000000800000508096012006003", "002000300000001000000003451300000004800400200100008006200090000070010005006520000", "000030609680000307900010000000009706004007000500060100005000003300200000820000050", "900203100300070008701060400000800940004020010003007000060000009009000000520030000"],
+        "Hidden pair": ["109650008006000070000004000000070000000400037002906040001000002400201789000860010", "640708000001000600030000000000002493000090001000100207450006000000900010300200070", "830060000000409600050001003000900007070010000003800100900000030005000000461095020", "420000010000010000600030200009800030030000007200000860007006000100005004800001002", "000800034000140006100700890018005900090000000400070000807000049000500000003060010", "600700059050300060980600070792000000000090000501000000000081603030020700000000010", "400006001003400000600008004000000000340601000080000050005100270090070000000300900"],
+        "Naked triple": ["002607100000905600060280050010000900043006000000000000105090030000000020007800005", "065000009700000000001960057000000030000180400090506800200050003004010000000008002", "103004900900052000000000086004000000000100700800590004000087300200400000006000019"],
+        "Hidden triple": ["700000000500090023000600000000109045020000010001040206008950000005000860017060030"],
+        "X-wing": ["035400000600090000400200091000020000000500600093000010700004506300800900050000007", "700004200000000017010000600970030001000000800060215004005049702000800000049500000"],
+        "XY-wing": ["100900360300000080500002000004080030900000008003029010001005027009000100200060050", "100400000400502030000010807060009500002040900040057010070000003000090000000000186", "008006090050872040000000000001600480300090005900020000040500100605000003000000000", "001300050950200000000000703300400000002060001000007080004080000700030005600010004", "000009104040307096000800003002000000000000200579000000000004650080610009300070000", "040050280000004006300000100000100700030020000200530600180009450000600000920000000", "000010032002400000010000890098300075065070000000009026000000907500000000009527000", "010000000400608107000001090004017000001490000008000030000000700900060005803059004"],
+        "XYZ-wing": ["074600250000074000090000007002000401400006800005203000058009002000000060000530900", "001405000000600900060000020087001005000030008500980000050000600006000300000190204"],
+        "Swordfish": ["010000060003700000905000000080300500000010040000040083600051300800090010200800400"],
+      };
+      const TRAINER_BLURB = {
+        "Naked single": "A cell where eight digits are already blocked, leaving one. The bread-and-butter scan.",
+        "Hidden single": "A digit that fits only one cell of a row, column, or box — even if that cell has other candidates.",
+        "Pointing pair": "A digit confined to one row/column within a box, letting you clear it from the rest of that line.",
+        "Pointing triple": "Three cells of a box on one line pin a digit there, clearing it from the line outside the box.",
+        "Naked pair": "Two cells sharing the same two candidates — those digits leave every other cell in the unit.",
+        "Hidden pair": "Two digits that fit only the same two cells, clearing all their other candidates.",
+        "Naked triple": "Three cells holding only three digits between them — remove those digits from the rest of the unit.",
+        "Hidden triple": "Three digits locked to the same three cells, clearing every other candidate from them.",
+        "X-wing": "A digit pinned to the same two columns across two rows (or vice-versa) — eliminate it elsewhere.",
+        "XY-wing": "A pivot plus two pincers where one pincer must be Z, removing Z from any cell seeing both.",
+        "XYZ-wing": "Like an XY-wing but the pivot also shares Z, so cells seeing all three lose Z.",
+        "Swordfish": "An X-wing stretched to three rows and three columns.",
+      };
+      // Techniques we can drill, easiest → hardest (bank insertion order), skipping empty buckets.
+      const TRAINER_TECHS = Object.keys(TRAINER_BANK).filter((t) => (TRAINER_BANK[t] || []).length);
+      function loadDrill(tech) {
+        const bank = TRAINER_BANK[tech]; if (!bank || !bank.length) return;
+        closeLibrary(); document.getElementById("exModal").hidden = true;
+        const str = bank[Math.floor(Math.random() * bank.length)];
+        const grid = parsePuzzle(str), tier = tierForRank(TECH_RANK[tech] || 3);
+        resetToEdit(); writeGrid(grid); difficultyEl.value = tier; sourceEl.value = "Trainer · " + tech; renderPencils();
+        showReady(`Drill: ${tech}. This puzzle's toughest step is a ${tech.toLowerCase()} — solve it and watch for that pattern. Stuck? Hint walks you through it.`);
+      }
 
       // ---- stats / deep dive ----
       const TECH_COLORS = { "Naked single": "#4ade80", "Hidden single": "#6ea8fe", "Pointing pair": "#f59e0b",
@@ -2291,6 +2510,12 @@
             || "This move follows from the puzzle's unique solution (an advanced technique, or simply filling neighbors first) rather than one named rule.";
         }
         renderTechGames(tech);
+        const drillBtn = document.getElementById("exDrill");
+        if (drillBtn) {
+          const canDrill = !!(TRAINER_BANK[tech] && TRAINER_BANK[tech].length);
+          drillBtn.hidden = !canDrill;
+          drillBtn.onclick = canDrill ? () => loadDrill(tech) : null;
+        }
         document.getElementById("exModal").hidden = false;
       }
       // List every logged game that used this technique, newest first, with its date and difficulty.
@@ -2332,28 +2557,97 @@
         if (t) t.hidden = tab !== "this";
         if (a) a.hidden = tab !== "all";
       }
+      // Techniques the player needed help with (hints taken + easier steps missed on a slip), most first.
+      // Reused by both stats tabs; taps open the same technique refresher pop-up.
+      function missedSection(missed, title) {
+        const entries = Object.entries(missed || {}).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+        if (!entries.length) return "";
+        let rows = "";
+        for (const [t, c] of entries) rows += `<tr class="trow" data-tech="${esc(t)}"><td><span style="color:${TECH_COLORS[t] || "#94a3b8"}">●</span> ${esc(t)}</td><td>${c}</td></tr>`;
+        return `<h3>${esc(title)}</h3><table class="grid"><tr><th>Technique</th><th>Times you needed help</th></tr>${rows}</table>
+          <p class="hintline">Counts hints you took plus the easier step available when you slipped — your weak spots. Tap one for a refresher.</p>`;
+      }
       // "This game" pane: the live game if one's in progress, else the most recently recorded game.
+      // Mirrors every section of the "All games" tab, scoped to this single game.
       function thisGamePane(games) {
         const g = session
-          ? { difficulty: session.difficulty, source: session.source, totalMs: activeElapsed(), errors: session.errors || 0, hints: session.hints || 0, moves: session.moves || [], live: true }
+          ? { difficulty: session.difficulty, source: session.source, totalMs: activeElapsed(), errors: session.errors || 0, hints: session.hints || 0, moves: session.moves || [], missed: session.missed || {}, live: true }
           : games[0];
         if (!g) return '<div class="card">No game yet. Start a puzzle and its live stats — time, errors, hints, and techniques — show here.</div>';
+        const d = g.difficulty || "";
         const status = g.live ? "in progress" : (g.solved ? "solved" : "revealed");
-        const errs = errorsIn(g), hints = g.hints || 0, movesN = (g.moves || []).length;
-        const byTech = {};
-        for (const m of (g.moves || [])) byTech[m.tech] = (byTech[m.tech] || 0) + 1;
-        const rows = Object.entries(byTech).sort((a, b) => b[1] - a[1])
-          .map(([t, c]) => `<tr><td><span style="color:${TECH_COLORS[t] || "#94a3b8"}">●</span> ${esc(t)}</td><td>${c}</td></tr>`).join("");
-        const prLine = g.isPR ? `<div class="pr-badge" style="margin:0 0 12px">🏆 Personal record — fastest ${esc(g.difficulty || "")} yet</div>` : "";
-        return `${prLine}
-          <div class="card"><b>${esc(g.difficulty || "—")}</b> · ${esc(g.source || "—")} · <span class="k">${status}</span></div>
-          <div class="statgrid">
+        const moves = g.moves || [];
+        const errs = errorsIn(g), hints = g.hints || 0, movesN = moves.length;
+        const correct = moves.filter((m) => m.correct).length;
+        const acc = movesN ? Math.round((correct / movesN) * 100) : 0;
+
+        // ----- overview (this game's headline numbers) -----
+        const prLine = g.isPR ? `<div class="pr-badge" style="margin:0 0 12px">🏆 Personal record — fastest ${esc(d)} yet</div>` : "";
+        const overview = `<div class="statgrid" style="grid-template-columns:repeat(2,1fr)">
             <div class="stat"><b>${fmtTime(g.totalMs || 0)}</b><span class="k">time</span></div>
+            <div class="stat"><b>${movesN ? acc + "%" : "—"}</b><span class="k">accuracy</span></div>
             <div class="stat"><b>${errs}</b><span class="k">error${errs === 1 ? "" : "s"}</span></div>
             <div class="stat"><b>${hints}</b><span class="k">hint${hints === 1 ? "" : "s"}</span></div>
           </div>
-          <div class="card"><span class="k">moves placed</span> ${movesN}</div>
-          ${rows ? `<h3>Techniques this game</h3><table class="grid"><tr><th>Technique</th><th>Moves</th></tr>${rows}</table>` : ""}`;
+          <div class="card"><span class="k">moves placed</span> ${movesN} · <span class="k">${correct} correct</span></div>`;
+
+        // ----- compared to your best (personal-records analog for one game) -----
+        const priorBest = games
+          .filter((x) => x !== g && x.solved && x.difficulty === d)
+          .reduce((a, x) => (a === null || x.totalMs < a.totalMs ? x : a), null);
+        let compare = "";
+        if (d && (g.solved || g.live)) {
+          if (g.isPR) {
+            compare = `<h3>Compared to your best</h3><div class="card">This is your fastest <b>${esc(d)}</b> solve yet. 🏆</div>`;
+          } else if (priorBest) {
+            const diff = (g.totalMs || 0) - priorBest.totalMs;
+            const note = diff <= 0
+              ? `<span class="trend down">on pace with your best</span>`
+              : `<span class="trend up">+${fmtTime(diff)} slower</span>`;
+            compare = `<h3>Compared to your best</h3><div class="card">Your best <b>${esc(d)}</b> is <span class="best" style="color:var(--accent);font-weight:800">${fmtTime(priorBest.totalMs)}</span> · this game ${fmtTime(g.totalMs || 0)} ${note}</div>`;
+          }
+        }
+
+        // ----- by-technique breakdown with typical time (where you spent time this game) -----
+        const byTech = {};
+        for (const m of moves) (byTech[m.tech] ||= []).push(m.dt);
+        const techRows = Object.entries(byTech).filter(([t]) => t !== "Mistake")
+          .map(([t, dts]) => ({ t, count: dts.length, med: median(dts) }))
+          .sort((a, b) => b.med - a.med);
+        const mistakes = (byTech["Mistake"] || []).length;
+        let techTable = "";
+        if (techRows.length || mistakes) {
+          techTable = `<h3>Where you spent time</h3><table class="grid"><tr><th>Technique</th><th>Moves</th><th>Typical time</th></tr>`;
+          for (const row of techRows) techTable += `<tr class="trow" data-tech="${esc(row.t)}"><td><span style="color:${TECH_COLORS[row.t] || "#94a3b8"}">●</span> ${esc(row.t)}</td><td>${row.count}</td><td>${fmtDt(row.med)}</td></tr>`;
+          if (mistakes) techTable += `<tr class="trow" data-tech="Mistake"><td><span style="color:${TECH_COLORS.Mistake}">●</span> Mistake</td><td>${mistakes}</td><td>—</td></tr>`;
+          techTable += `</table><p class="hintline">Tap a technique to see a visual example of how it works.</p>`;
+        }
+
+        // ----- takeaway (slowest technique this game) -----
+        // techRows is sorted slowest-median first, so its head is genuinely where this game's time went.
+        const focus = techRows[0];
+        let takeaway = "";
+        if (focus) {
+          const timeWord = focus.count > 1 ? `typically ${fmtDt(focus.med)}` : fmtDt(focus.med);
+          takeaway = `<div class="card takeaway">You spent longest on <b style="color:${TECH_COLORS[focus.t] || "#94a3b8"}">${esc(focus.t)}</b> placement${focus.count > 1 ? "s" : ""} this game (${timeWord}).${mistakes ? ` You made ${mistakes} mistake${mistakes > 1 ? "s" : ""} — slow down to verify before placing.` : ""}</div>`;
+        } else if (movesN) {
+          takeaway = `<div class="card takeaway">${mistakes ? `You made ${mistakes} mistake${mistakes > 1 ? "s" : ""} this game.` : "Clean game so far — no mistakes logged."}</div>`;
+        }
+
+        // ----- techniques to practice (hints taken + easier steps missed this game) -----
+        const practice = missedSection(g.missed, "Techniques to practice");
+
+        // ----- move-by-move timeline (pace / deep dive for this game) -----
+        const timeline = movesN ? `<h3>Move-by-move timeline</h3>${deepDiveHTML(g, false)}` : "";
+
+        return `${prLine}
+          <div class="card"><b>${esc(d || "—")}</b> · ${esc(g.source || "—")} · <span class="k">${status}</span></div>
+          ${overview}
+          ${compare}
+          ${takeaway}
+          ${techTable}
+          ${practice}
+          ${timeline}`;
       }
       function renderStats() {
         const games = lsGet(STATS_KEY);
@@ -2424,7 +2718,15 @@
         if (mistakes) techTable += `<tr class="trow" data-tech="Mistake"><td><span style="color:${TECH_COLORS.Mistake}">●</span> Mistake</td><td>${mistakes}</td><td>—</td></tr>`;
         techTable += `</table><p class="hintline">Tap a technique to see a visual example and the games where it was logged.</p>`;
         const focus = techRows.filter((r) => r.count >= 3 && r.t !== "Other" && r.t !== "Advanced")[0];
-        const takeaway = focus
+
+        // techniques to practice — hints taken + easier steps missed, summed across every game
+        const missedAll = {};
+        for (const g of games) for (const [t, c] of Object.entries(g.missed || {})) missedAll[t] = (missedAll[t] || 0) + c;
+        const practicePane = missedSection(missedAll, "Techniques to practice");
+        const topMissed = Object.entries(missedAll).sort((a, b) => b[1] - a[1])[0];
+        const takeaway = topMissed
+          ? `You most often need help spotting <b style="color:${TECH_COLORS[topMissed[0]] || "#94a3b8"}">${esc(topMissed[0])}</b> (${topMissed[1]}×). Drill that one and your times should drop.${mistakes ? ` You've made ${mistakes} mistake${mistakes > 1 ? "s" : ""} total — slow down to verify before placing.` : ""}`
+          : focus
           ? `You take longest on <b style="color:${TECH_COLORS[focus.t]}">${esc(focus.t)}</b> placements (typically ${fmtDt(focus.med)}). Practice scanning for these earlier.${mistakes ? ` You've also made ${mistakes} mistake${mistakes > 1 ? "s" : ""} — slow down to verify before placing.` : ""}`
           : `Keep playing — after a few games I'll point out which technique slows you down most.`;
 
@@ -2461,6 +2763,7 @@
           <div id="timeChartBox"></div>
           <h3>Where you spend time</h3>${techTable}
           <p class="sub" style="margin:8px 0 0">Typical = median time between your choices, so a long pause stands out without one outlier skewing it.</p>
+          ${practicePane}
           <h3>Technique time over time</h3>${techTrend}
           <h3>Deep dive — a single game</h3>
           <select id="gamePick" style="width:100%;margin-bottom:10px">${opts}</select>
@@ -2490,12 +2793,16 @@
         statsEl.querySelectorAll(".ctog").forEach((b) => (b.onclick = () => { timeChartMode = b.dataset.mode; paintTimeChart(); }));
         paintTimeChart();
       }
-      function renderDeepDive(g) {
-        const dd = document.getElementById("deepDive"); if (!g) { dd.innerHTML = ""; return; }
-        const maxDt = Math.max(1, ...g.moves.map((m) => m.dt));
-        const slow = Math.max(maxDt * 0.6, median(g.moves.map((m) => m.dt)) * 2.5);
-        let html = `<div class="card">${g.moves.length} moves · ${fmtTime(g.totalMs)} total · ${errorsIn(g)} error${errorsIn(g) === 1 ? "" : "s"} · ${g.solved ? "solved" : "revealed"}</div>`;
-        g.moves.forEach((m, i) => {
+      // Move-by-move timeline: one bar per move sized by the pause before it, slow moves flagged.
+      // Shared by the "All games" deep-dive selector and the "This game" pane.
+      function deepDiveHTML(g, includeSummary = true) {
+        const moves = g.moves || [];
+        if (!moves.length) return `<div class="card">No moves recorded for this game yet.</div>`;
+        const maxDt = Math.max(1, ...moves.map((m) => m.dt));
+        const slow = Math.max(maxDt * 0.6, median(moves.map((m) => m.dt)) * 2.5);
+        const statusWord = g.live ? "in progress" : (g.solved ? "solved" : "revealed");
+        let html = includeSummary ? `<div class="card">${moves.length} moves · ${fmtTime(g.totalMs)} total · ${errorsIn(g)} error${errorsIn(g) === 1 ? "" : "s"} · ${statusWord}</div>` : "";
+        moves.forEach((m, i) => {
           const color = TECH_COLORS[m.tech] || "#94a3b8";
           const w = Math.round((m.dt / maxDt) * 100);
           html += `<div class="move ${m.correct ? "" : "bad"} ${m.dt >= slow ? "slow" : ""}">
@@ -2505,7 +2812,11 @@
             <span class="meta">${fmtDt(m.dt)} · ${esc(m.tech)}${m.dt >= slow ? " ⏳" : ""}</span>
           </div>`;
         });
-        dd.innerHTML = html;
+        return html;
+      }
+      function renderDeepDive(g) {
+        const dd = document.getElementById("deepDive"); if (!g) { dd.innerHTML = ""; return; }
+        dd.innerHTML = deepDiveHTML(g);
       }
 
       // ---- image import ----
@@ -2524,6 +2835,30 @@
           showReady(`Grid imported and ${added ? "saved to your library" : "matched to a puzzle already in your library"}${syncNote()}. Fix any misread digits and set the difficulty and source below — edits update the saved copy. Then start the timer.`);
         } catch (err) { showExplain("Couldn't read the image", (err.message || "Unknown error") + " — you can still type the puzzle in by hand.", "bad"); }
         finally { e.target.value = ""; }
+      });
+
+      // ---- paste-a-string import ----
+      const pasteModal = document.getElementById("pasteModal"), pasteInput = document.getElementById("pasteInput"), pasteMsg = document.getElementById("pasteMsg");
+      function openPaste() {
+        if (solving) return showExplain("Already solving", "Press Edit puzzle first, then paste a new puzzle.", "info");
+        closeLibrary(); closeHistory(); closeStats();
+        pasteInput.value = ""; pasteMsg.textContent = ""; pasteModal.hidden = false; pasteInput.focus();
+      }
+      function closePaste() { pasteModal.hidden = true; }
+      document.getElementById("pastePuzzle").addEventListener("click", openPaste);
+      document.getElementById("pasteCancel").addEventListener("click", closePaste);
+      pasteModal.addEventListener("click", (e) => { if (e.target.id === "pasteModal") closePaste(); });
+      document.getElementById("pasteLoad").addEventListener("click", () => {
+        // Keep only digits and dots; treat dots as blanks so common export formats paste cleanly.
+        const cleaned = (pasteInput.value || "").replace(/[^0-9.]/g, "").replace(/\./g, "0");
+        if (cleaned.length !== 81) { pasteMsg.textContent = `Need exactly 81 cells — got ${cleaned.length}. Use 0 or . for blanks.`; return; }
+        const grid = parsePuzzle(cleaned);
+        if (hasConflict(grid)) { pasteMsg.textContent = "That grid has a repeated digit in a row, column, or box. Check it and try again."; return; }
+        if (!solve(clone(grid))) { pasteMsg.textContent = "This grid has no valid solution as entered. Check the digits."; return; }
+        closePaste();
+        writeGrid(grid); renderPencils();
+        const added = autoSaveImport(readGrid());
+        showReady(`Puzzle pasted and ${added ? "saved to your library" : "matched to one already saved"}${syncNote()}. Set the difficulty and source below, then start the timer.`);
       });
 
       // ---- init ----
