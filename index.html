@@ -296,9 +296,11 @@
             <button id="hint">Hint</button>
             <button id="statsBtn">Stats</button>
             <button id="check">Check entries</button>
+            <button id="pastePuzzle">Paste puzzle</button>
             <button id="saveGame">Save game</button>
             <button id="hlToggle">Highlight matches: On</button>
             <button id="errToggle">Error highlighting: On</button>
+            <button id="autoUpdToggle">Auto-update notes: Off</button>
             <button id="resetGame">Reset game</button>
             <button id="reveal">Reveal solution</button>
             <button id="edit">Edit puzzle</button>
@@ -313,6 +315,7 @@
 
       <div class="row solving">
         <button id="undo">Undo</button>
+        <button id="redo">Redo</button>
         <button id="autonotes">Auto notes</button>
         <button id="pause">Pause</button>
       </div>
@@ -357,6 +360,19 @@
           <div class="actions">
             <button id="modalCancel">Not yet</button>
             <button id="modalStart" class="primary">Start &amp; time me</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="pasteModal" class="overlay" hidden>
+        <div class="modal">
+          <h2>Paste a puzzle</h2>
+          <p>Paste the 81 digits of a puzzle, left to right, top to bottom. Use 0 or a dot for empty cells — spaces, line breaks, and other characters are ignored.</p>
+          <textarea id="pasteInput" rows="4" placeholder="53..7....6..195....98....6.8...6...34..8.3..17...2...6.6....28....419..5....8..79" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:0.9rem"></textarea>
+          <p id="pasteMsg" class="body" style="min-height:1.2em;margin:8px 0 0"></p>
+          <div class="actions">
+            <button id="pasteCancel">Cancel</button>
+            <button id="pasteLoad" class="primary">Load puzzle</button>
           </div>
         </div>
       </div>
@@ -553,6 +569,8 @@
         if (win && !win.hidden) { if (e.key === "Enter" || e.key === "Escape") document.getElementById("winAgain").click(); return; }
         const ex = document.getElementById("exModal");
         if (ex && !ex.hidden) { if (e.key === "Enter" || e.key === "Escape") document.getElementById("exClose").click(); return; }
+        const paste = document.getElementById("pasteModal");
+        if (paste && !paste.hidden) { if (e.key === "Escape") document.getElementById("pasteCancel").click(); return; } // let the textarea receive digits
         const prof = document.getElementById("profileModal");
         if (prof && !prof.hidden) {
           if (e.key === "Escape") prof.hidden = true;
@@ -575,7 +593,8 @@
           return;
         }
         if (!statsEl.hidden) return;
-        if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { if (solving) undo(); e.preventDefault(); return; }
+        if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { if (solving) (e.shiftKey ? redo() : undo()); e.preventDefault(); return; }
+        if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { if (solving) redo(); e.preventDefault(); return; }
         if (e.key >= "1" && e.key <= "9") { applyDigit(Number(e.key)); e.preventDefault(); }
         else if (["0", "Backspace", "Delete", "x", "X"].includes(e.key)) { applyClear(); e.preventDefault(); }
         else if (e.key === "n" || e.key === "N") setMode("normal");
@@ -619,33 +638,59 @@
         if (entryMode === "candidate" && solving && !inputs[r][c].value) { marks[r][c].clear(); renderPencils(); }
         else clearCell(r, c);
       }
-      let undoStack = [];
-      function pushUndo(r, c) {
+      let undoStack = [], redoStack = [];
+      let autoUpdateNotes = false;
+      try { autoUpdateNotes = localStorage.getItem("sudoku-coach:autonotes") === "on"; } catch {}
+      function cellSnap(r, c) { return { r, c, value: inputs[r][c].value, marks: new Set(marks[r][c]) }; }
+      function snapCells(cells) { return cells.map(({ r, c }) => cellSnap(r, c)); }
+      // Record the pre-change state of one or more cells so it can be undone. A fresh action clears redo.
+      function pushUndo(cells) {
         if (!solving) return;
-        undoStack.push({ r, c, value: inputs[r][c].value, marks: new Set(marks[r][c]) });
+        undoStack.push(snapCells(Array.isArray(cells) ? cells : [cells]));
         if (undoStack.length > 300) undoStack.shift();
+        redoStack = [];
       }
+      function restoreCell(s) {
+        inputs[s.r][s.c].value = s.value; marks[s.r][s.c] = new Set(s.marks);
+        inputs[s.r][s.c].classList.remove("wrong", "solved");
+        if (errorFlags && s.value && Number(s.value) !== solution[s.r][s.c]) inputs[s.r][s.c].classList.add("wrong");
+      }
+      function applySnaps(entry) { entry.forEach(restoreCell); renderPencils(); const last = entry[entry.length - 1]; if (last) select(last.r, last.c); }
       function undo() {
-        const last = undoStack.pop();
-        if (!last) return showExplain("Nothing to undo", "You're back at the start of this puzzle.", "info");
-        const { r, c, value, marks: m } = last;
-        inputs[r][c].value = value; marks[r][c] = new Set(m);
-        inputs[r][c].classList.remove("wrong", "solved");
-        if (errorFlags && value && Number(value) !== solution[r][c]) inputs[r][c].classList.add("wrong");
-        renderPencils(); select(r, c);
-        showExplain("Undid last action", `Restored ${loc(r, c)}.`, "info");
+        const entry = undoStack.pop();
+        if (!entry) return showExplain("Nothing to undo", "You're back at the start of this puzzle.", "info");
+        redoStack.push(snapCells(entry));   // capture current state so this undo can be redone
+        applySnaps(entry);
+        showExplain("Undid last action", `Restored ${loc(entry[entry.length - 1].r, entry[entry.length - 1].c)}.`, "info");
       }
+      function redo() {
+        const entry = redoStack.pop();
+        if (!entry) return showExplain("Nothing to redo", "You're at your latest action.", "info");
+        undoStack.push(snapCells(entry));
+        applySnaps(entry);
+        showExplain("Redid action", `Reapplied ${loc(entry[entry.length - 1].r, entry[entry.length - 1].c)}.`, "info");
+      }
+      // Cells sharing a row, column, or box with (r,c), including the cell itself — for auto-note upkeep.
+      function peersOf(r, c) {
+        const seen = new Map(), add = (rr, cc) => seen.set(rr + "," + cc, { r: rr, c: cc });
+        add(r, c); for (let i = 0; i < 9; i++) { add(r, i); add(i, c); }
+        for (const [br, bc] of boxCells(r, c)) add(br, bc);
+        return [...seen.values()];
+      }
+      function prunePeerNotes(r, c, n) { for (const { r: pr, c: pc } of peersOf(r, c)) if (!(pr === r && pc === c)) marks[pr][pc].delete(n); }
       function setValue(r, c, n) {
         if (givens[r][c]) return;
-        pushUndo(r, c);
+        const auto = solving && autoUpdateNotes;
+        pushUndo(auto ? peersOf(r, c) : { r, c });   // capture peers too when auto-upkeep will prune their notes
         inputs[r][c].value = String(n);
         marks[r][c].clear();
+        if (auto) prunePeerNotes(r, c, n);
         renderPencils(); select(r, c);
         if (solving) handleMove(r, c);
       }
       function clearCell(r, c) {
         if (givens[r][c]) return;
-        pushUndo(r, c);
+        pushUndo({ r, c });
         inputs[r][c].value = ""; inputs[r][c].classList.remove("wrong", "solved");
         marks[r][c].clear();
         if (solving) showExplain("Cell cleared", "Keep going — pick a number or press Hint.", "info");
@@ -653,7 +698,7 @@
       }
       function toggleMark(r, c, n) {
         if (givens[r][c] || inputs[r][c].value) return;
-        pushUndo(r, c);
+        pushUndo({ r, c });
         marks[r][c].has(n) ? marks[r][c].delete(n) : marks[r][c].add(n);
         renderPencils();
       }
@@ -1264,7 +1309,7 @@
         solving = true; setMode("normal");
         document.body.classList.add("solving");
         clearHighlights(); renderPencils();
-        undoStack = []; errorsEl.textContent = "0";
+        undoStack = []; redoStack = []; errorsEl.textContent = "0";
         session = { difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, moves: [], missed: {} };
         startTimer();
         const first = (() => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) return [r, c]; return [0, 0]; })();
@@ -1508,7 +1553,21 @@
           errorFlags ? "Wrong entries will flag red again, with the clashing row, column, or box." : "Mistakes won't be marked on the board. Use Check entries or Hint to verify when you want.", "info");
       });
 
+      // Auto-update notes: when on, placing a digit clears it from the pencil marks of every cell that
+      // shares a row, column, or box — so candidate marks stay current without redoing them by hand.
+      const autoUpdToggle = document.getElementById("autoUpdToggle");
+      function renderAutoUpdToggle() { autoUpdToggle.textContent = `Auto-update notes: ${autoUpdateNotes ? "On" : "Off"}`; }
+      renderAutoUpdToggle();
+      autoUpdToggle.addEventListener("click", () => {
+        autoUpdateNotes = !autoUpdateNotes;
+        try { localStorage.setItem("sudoku-coach:autonotes", autoUpdateNotes ? "on" : "off"); } catch {}
+        renderAutoUpdToggle();
+        showExplain(autoUpdateNotes ? "Auto-update notes on" : "Auto-update notes off",
+          autoUpdateNotes ? "Placing a digit now clears it from the notes of its row, column, and box automatically. Press Auto notes to fill them in first." : "Pencil marks stay exactly as you leave them.", "info");
+      });
+
       document.getElementById("undo").addEventListener("click", undo);
+      document.getElementById("redo").addEventListener("click", redo);
 
       document.getElementById("autonotes").addEventListener("click", () => {
         const grid = progressGrid();
@@ -1636,7 +1695,7 @@
         }
         // Fresh session: timer restarts from zero, errors and move log wiped.
         clearInterval(timerId); timerId = null;
-        undoStack = []; lastHint = null;
+        undoStack = []; redoStack = []; lastHint = null;
         session = { difficulty: session.difficulty, source: session.source, startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, moves: [], missed: {} };
         errorsEl.textContent = "0"; pauseModal.hidden = true;
         clearHighlights(); setMode("normal"); startTimer(); renderPencils();
@@ -1646,7 +1705,7 @@
         showExplain("Game reset", "Back to the starting clues with a fresh timer. Solve it your way.", "info");
       }
       function resetToEdit() {
-        session = null; clearInterval(timerId); timerId = null; undoStack = []; activeSavedGame = null;
+        session = null; clearInterval(timerId); timerId = null; undoStack = []; redoStack = []; activeSavedGame = null;
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal");
         document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory();
         pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
@@ -2742,6 +2801,30 @@
           showReady(`Grid imported and ${added ? "saved to your library" : "matched to a puzzle already in your library"}${syncNote()}. Fix any misread digits and set the difficulty and source below — edits update the saved copy. Then start the timer.`);
         } catch (err) { showExplain("Couldn't read the image", (err.message || "Unknown error") + " — you can still type the puzzle in by hand.", "bad"); }
         finally { e.target.value = ""; }
+      });
+
+      // ---- paste-a-string import ----
+      const pasteModal = document.getElementById("pasteModal"), pasteInput = document.getElementById("pasteInput"), pasteMsg = document.getElementById("pasteMsg");
+      function openPaste() {
+        if (solving) return showExplain("Already solving", "Press Edit puzzle first, then paste a new puzzle.", "info");
+        closeLibrary(); closeHistory(); closeStats();
+        pasteInput.value = ""; pasteMsg.textContent = ""; pasteModal.hidden = false; pasteInput.focus();
+      }
+      function closePaste() { pasteModal.hidden = true; }
+      document.getElementById("pastePuzzle").addEventListener("click", openPaste);
+      document.getElementById("pasteCancel").addEventListener("click", closePaste);
+      pasteModal.addEventListener("click", (e) => { if (e.target.id === "pasteModal") closePaste(); });
+      document.getElementById("pasteLoad").addEventListener("click", () => {
+        // Keep only digits and dots; treat dots as blanks so common export formats paste cleanly.
+        const cleaned = (pasteInput.value || "").replace(/[^0-9.]/g, "").replace(/\./g, "0");
+        if (cleaned.length !== 81) { pasteMsg.textContent = `Need exactly 81 cells — got ${cleaned.length}. Use 0 or . for blanks.`; return; }
+        const grid = parsePuzzle(cleaned);
+        if (hasConflict(grid)) { pasteMsg.textContent = "That grid has a repeated digit in a row, column, or box. Check it and try again."; return; }
+        if (!solve(clone(grid))) { pasteMsg.textContent = "This grid has no valid solution as entered. Check the digits."; return; }
+        closePaste();
+        writeGrid(grid); renderPencils();
+        const added = autoSaveImport(readGrid());
+        showReady(`Puzzle pasted and ${added ? "saved to your library" : "matched to one already saved"}${syncNote()}. Set the difficulty and source below, then start the timer.`);
       });
 
       // ---- init ----

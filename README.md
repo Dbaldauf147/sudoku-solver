@@ -27,8 +27,18 @@ answer.
     entries, and every move is logged with the time since your last choice and
     the technique that justifies it. The clock **auto-pauses when you switch
     away** from the tab (and there's a manual **Pause**), so idle time doesn't
-    skew your stats. **Undo** (or Ctrl/⌘-Z) steps back through your entries.
-    Once a digit is placed nine times its number-pad key is crossed out.
+    skew your stats. **Undo** (Ctrl/⌘-Z) and **Redo** (Ctrl/⌘-Y or
+    Ctrl/⌘-Shift-Z) step back and forth through your entries. Once a digit is
+    placed nine times its number-pad key is crossed out.
+  - **Pencil marks** can be filled for every empty cell at once with **Auto
+    notes**, and an **Auto-update notes** toggle keeps them tidy — placing a
+    digit clears it from the notes of every cell in that row, column, and box
+    automatically (and undo puts them back), so you can work advanced
+    techniques without re-pencilling by hand.
+  - **Paste puzzle** loads a game from its 81 digits (0 or `.` for blanks;
+    spaces and line breaks are ignored) — handy for puzzles you find as a
+    string rather than a screenshot. It's checked for conflicts and
+    solvability, then saved to your library like any import.
   - **Stats** opens a deep-dive: solve times and accuracy **per difficulty**,
     plus **over-time trends** that chart how your numbers move from game to
     game — a **solve time over time** sparkline per difficulty and a
