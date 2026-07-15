@@ -287,6 +287,7 @@
           <button id="homeBtn" class="home" title="Back to your game">🏠 Home</button>
           <label class="file">Import screenshot<input id="file" type="file" accept="image/*" /></label>
           <button id="libraryBtn">Game library</button>
+          <button id="practiceBtn" title="Drill one technique at a time">Practice</button>
           <button id="whoami" class="whoami" title="Profile — tap to switch or sign in">Playing as: Guest</button>
         </div>
         <div class="menu">
@@ -2228,6 +2229,10 @@
       }
 
       libraryBtn.addEventListener("click", () => { if (libraryPanel.hidden) openLibrary(); else closeLibrary(); });
+      document.getElementById("practiceBtn").addEventListener("click", () => {
+        if (!libraryPanel.hidden && libTab === "practice") closeLibrary();
+        else openLibrary("practice");
+      });
 
       // Home: close any open panel (stats or the game library) and return to the game board.
       document.getElementById("homeBtn").addEventListener("click", () => {
