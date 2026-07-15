@@ -82,8 +82,12 @@ answer.
     offending cell, the duplicate cell(s), and the shared **row, column, or
     box are highlighted in red** so you can see exactly why it's illegal.
     **Check entries** and **Reveal solution** are there when you want them.
-  - A built-in **catalog** of puzzles ships with the app, so every user can
-    pick one and play it from scratch — no setup or account needed.
+  - A built-in **catalog** of 39 puzzles ships with the app — 12 Easy, 15
+    Medium, 12 Hard — so every user can pick one and play it from scratch, no
+    setup or account needed. Each is labelled by the same technique-based
+    grader used everywhere else (Easy = singles only, Medium = intersections
+    and pairs/triples, Hard = X-wings and wings), and every one is verified to
+    have a single solution.
   - Every time you **import a screenshot** the puzzle is **saved to your
     library automatically** (if that exact grid isn't already saved) — no
     button to press. The **difficulty** (Easy/Medium/Hard) and **source**
