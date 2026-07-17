@@ -29,8 +29,18 @@ answer.
     move is logged with the time since your last choice and
     the technique that justifies it. The clock **auto-pauses when you switch
     away** from the tab (and there's a manual **Pause**), so idle time doesn't
-    skew your stats. **Undo** (or Ctrl/⌘-Z) steps back through your entries.
-    Once a digit is placed nine times its number-pad key is crossed out.
+    skew your stats. **Undo** (Ctrl/⌘-Z) and **Redo** (Ctrl/⌘-Y or
+    Ctrl/⌘-Shift-Z) step back and forth through your entries. Once a digit is
+    placed nine times its number-pad key is crossed out.
+  - **Pencil marks** can be filled for every empty cell at once with **Auto
+    notes**, and an **Auto-update notes** toggle keeps them tidy — placing a
+    digit clears it from the notes of every cell in that row, column, and box
+    automatically (and undo puts them back), so you can work advanced
+    techniques without re-pencilling by hand.
+  - **Paste puzzle** loads a game from its 81 digits (0 or `.` for blanks;
+    spaces and line breaks are ignored) — handy for puzzles you find as a
+    string rather than a screenshot. It's checked for conflicts and
+    solvability, then saved to your library like any import.
   - **Stats** opens a deep-dive: solve times and accuracy **per difficulty**,
     plus **over-time trends** that chart how your numbers move from game to
     game — a **solve time over time** sparkline per difficulty and a
@@ -39,7 +49,30 @@ answer.
     "where you spend time" breakdown of typical (median) time **per technique**
     so you can see what trips you up, and a per-game timeline that bars out the
     gap before each move and flags the slow ones. **Tap any technique** for a
-    pop-up with a visual example of how it works.
+    pop-up with a visual example of how it works. Stats has two tabs: **All
+    games** for these lifetime totals and trends, and **This game** — which
+    mirrors the same breakdown for the current (or most recent) game alone:
+    its time, accuracy, errors, and hints, how it stacks up against your best
+    at that difficulty, where its time went per technique, and its own
+    move-by-move timeline. Both tabs also surface **Techniques to practice** —
+    your weak spots, ranked by how often you needed help: every hint you take
+    is logged against the technique it revealed, and every mistake against the
+    simpler step that was available. Tap one for a refresher.
+  - **Auto difficulty rating.** The app grades each puzzle by the hardest
+    technique its logical solution actually needs — singles only is Easy,
+    intersections and pairs are Medium, X-wings and beyond are Hard — instead
+    of trusting the clue count or the source's label. The rating (and the
+    hardest step it found) shows in the **"Ready to start?" popup** with a
+    one-tap **Use** button to apply it to the puzzle's difficulty.
+  - **Technique trainer.** A **Practice** tab in the Game library lets you
+    drill one technique at a time — hidden singles, pointing pairs, naked and
+    hidden pairs/triples, X-wings, XY/XYZ-wings, swordfish. Each drill loads a
+    puzzle whose *toughest step is that technique*, so you get repeated,
+    targeted reps instead of hoping it turns up. **Learn** opens the worked
+    example; **Drill** loads a puzzle. The technique refresher pop-up (and the
+    "Techniques to practice" weak-spots list in Stats) has a **Practice this**
+    button that drops you straight into a matching drill — so you can go from
+    spotting a weakness to training it in one tap.
   - A **History** tab on the main page lists every game you've finished (or
     revealed), grouped by date, with its difficulty, source, time, and error
     count — tap **Details** on any entry to jump straight to that game's
@@ -51,15 +84,19 @@ answer.
     offending cell, the duplicate cell(s), and the shared **row, column, or
     box are highlighted in red** so you can see exactly why it's illegal.
     **Check entries** and **Reveal solution** are there when you want them.
-  - A built-in **catalog** of puzzles ships with the app, so every user can
-    pick one and play it from scratch — no setup or account needed.
+  - A built-in **catalog** of 39 puzzles ships with the app — 12 Easy, 15
+    Medium, 12 Hard — so every user can pick one and play it from scratch, no
+    setup or account needed. Each is labelled by the same technique-based
+    grader used everywhere else (Easy = singles only, Medium = intersections
+    and pairs/triples, Hard = X-wings and wings), and every one is verified to
+    have a single solution.
   - Every time you **import a screenshot** the puzzle is **saved to your
     library automatically** (if that exact grid isn't already saved) — no
     button to press. **Bulk import**: select **several screenshots at once**
-    and the app reads them all (a few at a time), saving each new grid straight
-    to your library with the current default difficulty/source and then opening
-    **Saved games** so you can play or re-label them — misreads or unreadable
-    shots are reported so you can re-import those individually. The
+    and the app reads them all (a few at a time), **auto-grading each puzzle by
+    difficulty** and saving it straight to your **Game library** (Saved tab) so
+    you can play or re-label them — misreads or unreadable shots are reported so
+    you can re-import those individually. The
     **difficulty** (Easy/Medium/Hard) and **source**
     (defaults to NYT) are set right in the **"Ready to start?" popup** that
     appears on import; editing them there updates the saved copy. The

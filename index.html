@@ -31,10 +31,13 @@
     </script>
     <style>
       :root {
-        --bg: #ffffff; --panel: #f3f4f6; --line: #d7dbe2; --thick: #9aa3b2;
+        --bg: #e8eaed; --panel: #f3f4f6; --line: #d7dbe2; --thick: #9aa3b2;
         --text: #1d2330; --muted: #5b6472; --accent: #2563eb; --given: #0b1020;
         --user: #2563eb; --ok: #16a34a; --bad: #dc2626; --pencil: #1f2937;
         --sel: #dbe7ff;
+        /* One shared colour for every Sudoku digit — board, keypad, and hint mini-boards.
+           Givens stay distinguishable by bold weight rather than a different colour. */
+        --num: #1d2330;
       }
       * { box-sizing: border-box; }
       body {
@@ -59,11 +62,15 @@
       button:disabled { opacity: 0.45; cursor: not-allowed; }
       label.file input { display: none; }
       .library select { flex: 1; min-width: 160px; }
+      .lib-tabs { display: flex; gap: 6px; margin: 12px 0 16px; flex-wrap: wrap; }
+      .lib-tabs .lib-tab { flex: 1; min-width: 96px; }
+      .lib-tabs .lib-tab.on { background: var(--sel); border-color: var(--accent); color: var(--text); font-weight: 600; }
 
       .topbar { position: relative; display: flex; flex-wrap: wrap; align-items: center;
         gap: 10px; margin-bottom: 14px; padding-right: 54px; }
       .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
       .tabs button, .tabs label.file { padding: 8px 13px; font-size: 0.9rem; }
+      .home { font-weight: 600; }
       .whoami { color: var(--muted); font-weight: 600; }
       .whoami.signed { color: var(--accent); border-color: var(--accent); }
       .menu { position: absolute; top: 0; right: 0; }
@@ -75,6 +82,10 @@
       .dropdown[hidden] { display: none; }
       .dropdown button { border: none; border-radius: 0; text-align: left; background: transparent; padding: 12px 14px; font-weight: 500; }
       .dropdown button:hover { background: var(--panel); }
+      .syncline { padding: 10px 14px; font-size: 0.78rem; color: var(--muted); border-top: 1px solid var(--line); line-height: 1.3; }
+      .syncline.on { color: var(--ok); }
+      .inprog { color: var(--accent); font-weight: 600; font-size: 0.8rem; }
+      .syncline.off { color: var(--muted); }
       .timer { display: inline-flex; align-items: center; gap: 8px; font-variant-numeric: tabular-nums;
         font-size: 1.1rem; background: var(--panel); border: 1px solid var(--line);
         border-radius: 8px; padding: 6px 12px; }
@@ -88,26 +99,27 @@
         border-radius: 6px; overflow: hidden;
       }
       .cell { position: relative; background: var(--panel); }
+      .cell.hint-unit { background: #eef4ff; }
       .cell.selected { background: var(--sel); }
       .cell.same { background: #eef2ff; }
       .cell.hint { background: #cfe0ff; box-shadow: inset 0 0 0 2px var(--accent); }
-      .cell.peer { background: #e8eefc; }
+      .cell.peer { background: #d3e2ff; box-shadow: inset 0 0 0 1px var(--accent); }
       .cell.conflict-unit { background: #fde4e4; }
       .cell.conflict { background: #f8a9a9; box-shadow: inset 0 0 0 2px var(--bad); }
       .cell.conflict-src { box-shadow: inset 0 0 0 2px var(--bad); z-index: 1; }
       .cell-input {
         position: absolute; inset: 0; width: 100%; height: 100%; background: transparent;
-        border: none; color: var(--user); font-size: clamp(1rem, 5vw, 1.6rem);
+        border: none; color: var(--num); font-size: clamp(1rem, 5vw, 1.6rem);
         text-align: center; outline: none; cursor: pointer; caret-color: transparent;
         z-index: 2;
       }
-      .cell-input.given { color: var(--given); font-weight: 700; cursor: default; pointer-events: none; }
+      .cell-input.given { color: var(--num); font-weight: 700; cursor: default; pointer-events: none; }
       .cell-input.wrong { color: var(--bad); }
-      .cell-input.solved { color: var(--user); }
+      .cell-input.solved { color: var(--num); }
       .pencil {
         position: absolute; inset: 0; display: grid;
         grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
-        font-size: clamp(0.4rem, 1.5vw, 0.56rem); line-height: 1; color: var(--pencil); font-weight: 700;
+        font-size: clamp(0.4rem, 1.5vw, 0.56rem); line-height: 1; color: var(--num); font-weight: 700;
         pointer-events: none; z-index: 1;
       }
       .pencil span { display: flex; align-items: center; justify-content: center; }
@@ -126,7 +138,7 @@
       .modes .meters .timer { flex: 1 1 0; min-width: 4em; justify-content: center; font-size: 1rem; }
       #errors { color: var(--bad); }
       .keys { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
-      .keys button { padding: 14px 0; font-size: 1.15rem; }
+      .keys button { padding: 14px 0; font-size: 1.15rem; color: var(--num); }
       .keys button.clear { color: var(--bad); }
       .keys button.done { text-decoration: line-through; opacity: 0.4; }
 
@@ -139,7 +151,7 @@
       .explain.hint { border-left-color: var(--accent); }
       .explain.info { border-left-color: var(--muted); }
       .explain .title { font-weight: 600; margin: 0 0 6px; }
-      .explain .body { color: var(--muted); line-height: 1.5; margin: 0; }
+      .explain .body { color: var(--muted); line-height: 1.5; margin: 0; white-space: pre-line; }
       .explain .tech { color: var(--accent); font-weight: 600; }
       .explain button { margin-top: 12px; padding: 7px 14px; font-size: 0.9rem; }
 
@@ -149,6 +161,19 @@
       .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
       .card .k { color: var(--muted); }
       .takeaway { border-left: 4px solid var(--accent); }
+      .stats-tabs { display: flex; gap: 8px; margin: 4px 0 14px; }
+      .stab { flex: 1 1 0; text-align: center; }
+      .stab.on { background: var(--sel); border-color: var(--accent); color: var(--text); font-weight: 600; }
+      .tabpane[hidden] { display: none; }
+      .statgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+      .statgrid .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 8px; text-align: center; }
+      .statgrid .stat b { display: block; font-size: 1.3rem; line-height: 1.2; }
+      .statgrid .stat .k { font-size: 0.72rem; color: var(--muted); }
+      .pr-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+      .pr-row:last-child { border-bottom: none; }
+      .pr-row .t { font-size: 1.05rem; font-weight: 700; }
+      .pr-row .best { font-weight: 800; color: var(--accent); }
+      .pr-row.empty .best { color: var(--muted); font-weight: 600; }
       table.grid { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
       table.grid th, table.grid td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
       table.grid th { color: var(--muted); font-weight: 600; }
@@ -175,6 +200,10 @@
       .modal-diff { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 0.9rem; margin: 0 0 12px; }
       .modal-diff:last-of-type { margin-bottom: 20px; }
       .modal-diff select, .modal-diff input { flex: 0 0 auto; max-width: 160px; }
+      .modal-rating { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px;
+        margin: -4px 0 16px; font-size: 0.9rem; color: var(--text); }
+      .modal-rating .k { color: var(--muted); }
+      .modal-rating .rating-apply { padding: 4px 10px; font-size: 0.82rem; }
 
       .trow { cursor: pointer; }
       .trow:hover { background: var(--panel); }
@@ -196,6 +225,13 @@
       .spark { position: relative; height: 48px; margin: 8px 0 6px; }
       .spark svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
       .spark .sdot { position: absolute; width: 6px; height: 6px; margin: 0 0 -3px -3px; border-radius: 50%; }
+      .chart-toggle { display: flex; gap: 8px; margin: 4px 0 12px; }
+      .chart-toggle .ctog { flex: 1 1 0; text-align: center; font-size: 0.85rem; }
+      .chart-toggle .ctog.on { background: var(--sel); border-color: var(--accent); color: var(--text); font-weight: 600; }
+      .pace-chart { width: 100%; height: auto; display: block; }
+      .chart-legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 6px; font-size: 0.85rem; }
+      .chart-legend .lg { display: inline-flex; align-items: center; gap: 6px; }
+      .chart-legend .lgdot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
       .trend.up { color: var(--bad); font-weight: 600; }
       .trend.down { color: var(--ok); font-weight: 600; }
       .trend.flat { color: var(--muted); }
@@ -203,15 +239,15 @@
       .miniboard { display: grid; grid-template-columns: repeat(9, 1fr); width: 100%; max-width: 290px;
         margin: 0 auto 14px; aspect-ratio: 1; background: var(--thick); border: 2px solid var(--thick);
         gap: 1px; border-radius: 4px; overflow: hidden; }
-      .mcell { background: #fff; position: relative; display: flex; align-items: center; justify-content: center;
-        font-size: clamp(0.7rem, 3.2vw, 1.05rem); color: var(--given); font-weight: 700; }
+      .mcell { background: var(--panel); position: relative; display: flex; align-items: center; justify-content: center;
+        font-size: clamp(0.7rem, 3.2vw, 1.05rem); color: var(--num); font-weight: 700; }
       .mcell.m-target { background: #bbf7d0; }
       .mcell.m-focus { background: #cfe0ff; }
       .mcell.m-elim { background: #fee2e2; }
       .mcell[data-col="2"], .mcell[data-col="5"] { box-shadow: inset -2px 0 0 var(--thick); }
       .mcell[data-row="2"], .mcell[data-row="5"] { box-shadow: inset 0 -2px 0 var(--thick); }
       .mpencil { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(3, 1fr);
-        grid-template-rows: repeat(3, 1fr); font-size: clamp(0.34rem, 1.4vw, 0.5rem); color: var(--pencil); font-weight: 700; }
+        grid-template-rows: repeat(3, 1fr); font-size: clamp(0.34rem, 1.4vw, 0.5rem); color: var(--num); font-weight: 700; }
       .mpencil span { display: flex; align-items: center; justify-content: center; }
       .mpencil span.struck { color: var(--bad); text-decoration: line-through; }
 
@@ -237,6 +273,12 @@
       .confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
       .confetti i { position: absolute; top: -14px; width: 9px; height: 9px; border-radius: 2px; animation: cfall linear forwards; }
       @keyframes cfall { to { transform: translateY(110vh) rotate(720deg); opacity: 0.9; } }
+      .pr-badge { display: inline-block; margin: 0 auto 14px; padding: 8px 15px; border-radius: 999px;
+        font-weight: 800; font-size: 0.9rem; color: #7a4d00; letter-spacing: 0.01em;
+        background: linear-gradient(90deg, #fde68a, #fbbf24, #f59e0b); box-shadow: 0 4px 16px rgba(245, 158, 11, 0.45);
+        animation: prpop 0.55s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+      .pr-badge[hidden] { display: none; }
+      @keyframes prpop { 0% { transform: scale(0.5); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
       footer { margin-top: 18px; color: var(--muted); font-size: 0.8rem; line-height: 1.5; }
     </style>
   </head>
@@ -244,38 +286,39 @@
     <main>
       <div class="topbar">
         <div class="tabs">
+          <button id="homeBtn" class="home" title="Back to your game">🏠 Home</button>
           <label class="file" title="Pick one screenshot to play now, or select several to bulk-import them all to your library">Import screenshot<input id="file" type="file" accept="image/*" multiple /></label>
-          <button id="historyBtn">History</button>
+          <button id="libraryBtn">Game library</button>
+          <button id="practiceBtn" title="Drill one technique at a time">Practice</button>
           <button id="whoami" class="whoami" title="Profile — tap to switch or sign in">Playing as: Guest</button>
         </div>
         <div class="menu">
           <button id="gear" aria-label="Menu" title="Menu">⚙</button>
           <div id="gearMenu" class="dropdown" hidden>
             <button id="start">Start solving</button>
+            <button id="hint">Hint</button>
             <button id="statsBtn">Stats</button>
             <button id="check">Check entries</button>
+            <button id="pastePuzzle">Paste puzzle</button>
+            <button id="saveGame">Save game</button>
             <button id="hlToggle">Highlight matches: On</button>
+            <button id="errToggle">Error highlighting: On</button>
+            <button id="autoUpdToggle">Auto-update notes: Off</button>
+            <button id="resetGame">Reset game</button>
             <button id="reveal">Reveal solution</button>
             <button id="edit">Edit puzzle</button>
             <button id="clear">Clear board</button>
             <button id="profileBtn">Profile</button>
             <button id="shareBtn">Share catalogue</button>
             <button id="backupBtn">Backup &amp; restore</button>
+            <div id="syncStatus" class="syncline" title="Where your saved games and history are stored">Checking sync…</div>
           </div>
         </div>
       </div>
 
-      <div class="row setup-extra library">
-        <button id="load">Saved games</button>
-      </div>
-      <div class="row setup-extra catalog-row">
-        <select id="catalog" title="Built-in puzzles"></select>
-        <button id="play">Play from catalog</button>
-      </div>
-
       <div class="row solving">
-        <button id="hint" class="primary">Hint</button>
         <button id="undo">Undo</button>
+        <button id="redo">Redo</button>
         <button id="autonotes">Auto notes</button>
         <button id="pause">Pause</button>
       </div>
@@ -300,8 +343,7 @@
       </div>
 
       <div id="stats" class="stats" hidden></div>
-      <div id="savedGames" class="stats" hidden></div>
-      <div id="history" class="stats" hidden></div>
+      <div id="gameLibrary" class="stats" hidden></div>
 
       <div id="modal" class="overlay" hidden>
         <div class="modal">
@@ -314,12 +356,26 @@
               <option value="Hard">Hard</option>
             </select>
           </label>
+          <div id="modalRating" class="modal-rating" hidden></div>
           <label class="modal-diff">Source
             <input id="modalSource" placeholder="Source" value="NYT" title="Where this puzzle came from" />
           </label>
           <div class="actions">
             <button id="modalCancel">Not yet</button>
             <button id="modalStart" class="primary">Start &amp; time me</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="pasteModal" class="overlay" hidden>
+        <div class="modal">
+          <h2>Paste a puzzle</h2>
+          <p>Paste the 81 digits of a puzzle, left to right, top to bottom. Use 0 or a dot for empty cells — spaces, line breaks, and other characters are ignored.</p>
+          <textarea id="pasteInput" rows="4" placeholder="53..7....6..195....98....6.8...6...34..8.3..17...2...6.6....28....419..5....8..79" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:0.9rem"></textarea>
+          <p id="pasteMsg" class="body" style="min-height:1.2em;margin:8px 0 0"></p>
+          <div class="actions">
+            <button id="pasteCancel">Cancel</button>
+            <button id="pasteLoad" class="primary">Load puzzle</button>
           </div>
         </div>
       </div>
@@ -341,6 +397,17 @@
           <div class="actions">
             <button id="errorCancel">Cancel</button>
             <button id="errorUndo" class="primary">Fat finger — don't count it</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="resetModal" class="overlay" hidden>
+        <div class="modal">
+          <h2>Reset this game?</h2>
+          <p>This clears every digit and note you've entered and restarts the timer, leaving just the original clues. The puzzle stays in your library, and this can't be undone.</p>
+          <div class="actions">
+            <button id="resetCancel">Keep playing</button>
+            <button id="resetConfirm" class="primary">Reset game</button>
           </div>
         </div>
       </div>
@@ -405,14 +472,15 @@
           <div id="exBoard"></div>
           <p id="exCaption" class="body"></p>
           <div id="exGames"></div>
-          <div class="actions"><button id="exClose" class="primary">Got it</button></div>
+          <div class="actions"><button id="exDrill" hidden>Practice this</button><button id="exClose" class="primary">Got it</button></div>
         </div>
       </div>
 
       <div id="winModal" class="overlay" hidden>
         <div class="confetti" id="confetti"></div>
         <div class="modal">
-          <h2>🎉 Solved!</h2>
+          <h2 id="winTitle">🎉 Solved!</h2>
+          <div id="winPR" class="pr-badge" hidden></div>
           <p id="winMsg" class="body"></p>
           <div class="actions">
             <button id="winStats">View stats</button>
@@ -423,7 +491,7 @@
 
       <footer>
         Tap a cell, then a number (or type). <strong>Candidate</strong> mode
-        toggles pencil marks; <strong>✕</strong> clears. Givens lock in white;
+        toggles pencil marks; <strong>✕</strong> clears. Givens show in bold;
         your entries turn red if they can't work. <strong>Stats</strong> shows
         your timing per difficulty and per technique.
       </footer>
@@ -442,6 +510,9 @@
       // and an unguarded read here would halt the whole script (dead buttons). Default to on.
       let hlMatches = true;
       try { hlMatches = localStorage.getItem("sudoku-coach:hlmatches") !== "off"; } catch {}
+      // Error highlighting: when on, wrong entries flag red and clashing units highlight. Default on.
+      let errorFlags = true;
+      try { errorFlags = localStorage.getItem("sudoku-coach:errorflags") !== "off"; } catch {}
       // Profile/storage keys are declared up here, before any load-time code (e.g. the "Playing as"
       // chip) reads `profile` — a `let` read before its declaration throws and would halt the script.
       const PROFILE_KEY = "sudoku-coach:profile";
@@ -502,9 +573,22 @@
       document.getElementById("modeNormal").onclick = () => setMode("normal");
       document.getElementById("modeCandidate").onclick = () => setMode("candidate");
       function setMode(m) {
+        // Candidate notes only make sense once you're solving — before that, digits are the puzzle's givens.
+        // Guarding here stops a stale/edit-time "candidate" from silently placing full-size numbers.
+        if (m === "candidate" && !solving) {
+          showExplain("Start solving first", "Candidate notes are for while you play. Press Start solving, then switch to Candidate to pencil in small options.", "info");
+          m = "normal";
+        }
         entryMode = m;
         document.getElementById("modeNormal").classList.toggle("on", m === "normal");
         document.getElementById("modeCandidate").classList.toggle("on", m === "candidate");
+      }
+      // Candidate is only usable during a solve; disable the toggle otherwise so it's clear why.
+      function syncModeButtons() {
+        const cand = document.getElementById("modeCandidate");
+        cand.disabled = !solving;
+        cand.title = solving ? "Pencil in small candidate notes" : "Start solving to add candidate notes";
+        if (!solving) setMode("normal");
       }
 
       document.addEventListener("keydown", (e) => {
@@ -512,6 +596,8 @@
         if (win && !win.hidden) { if (e.key === "Enter" || e.key === "Escape") document.getElementById("winAgain").click(); return; }
         const ex = document.getElementById("exModal");
         if (ex && !ex.hidden) { if (e.key === "Enter" || e.key === "Escape") document.getElementById("exClose").click(); return; }
+        const paste = document.getElementById("pasteModal");
+        if (paste && !paste.hidden) { if (e.key === "Escape") document.getElementById("pasteCancel").click(); return; } // let the textarea receive digits
         const prof = document.getElementById("profileModal");
         if (prof && !prof.hidden) {
           if (e.key === "Escape") prof.hidden = true;
@@ -534,7 +620,8 @@
           return;
         }
         if (!statsEl.hidden) return;
-        if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { if (solving) undo(); e.preventDefault(); return; }
+        if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) { if (solving) (e.shiftKey ? redo() : undo()); e.preventDefault(); return; }
+        if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { if (solving) redo(); e.preventDefault(); return; }
         if (e.key >= "1" && e.key <= "9") { applyDigit(Number(e.key)); e.preventDefault(); }
         else if (["0", "Backspace", "Delete", "x", "X"].includes(e.key)) { applyClear(); e.preventDefault(); }
         else if (e.key === "n" || e.key === "N") setMode("normal");
@@ -578,33 +665,59 @@
         if (entryMode === "candidate" && solving && !inputs[r][c].value) { marks[r][c].clear(); renderPencils(); }
         else clearCell(r, c);
       }
-      let undoStack = [];
-      function pushUndo(r, c) {
+      let undoStack = [], redoStack = [];
+      let autoUpdateNotes = false;
+      try { autoUpdateNotes = localStorage.getItem("sudoku-coach:autonotes") === "on"; } catch {}
+      function cellSnap(r, c) { return { r, c, value: inputs[r][c].value, marks: new Set(marks[r][c]) }; }
+      function snapCells(cells) { return cells.map(({ r, c }) => cellSnap(r, c)); }
+      // Record the pre-change state of one or more cells so it can be undone. A fresh action clears redo.
+      function pushUndo(cells) {
         if (!solving) return;
-        undoStack.push({ r, c, value: inputs[r][c].value, marks: new Set(marks[r][c]) });
+        undoStack.push(snapCells(Array.isArray(cells) ? cells : [cells]));
         if (undoStack.length > 300) undoStack.shift();
+        redoStack = [];
       }
+      function restoreCell(s) {
+        inputs[s.r][s.c].value = s.value; marks[s.r][s.c] = new Set(s.marks);
+        inputs[s.r][s.c].classList.remove("wrong", "solved");
+        if (errorFlags && s.value && Number(s.value) !== solution[s.r][s.c]) inputs[s.r][s.c].classList.add("wrong");
+      }
+      function applySnaps(entry) { entry.forEach(restoreCell); renderPencils(); const last = entry[entry.length - 1]; if (last) select(last.r, last.c); }
       function undo() {
-        const last = undoStack.pop();
-        if (!last) return showExplain("Nothing to undo", "You're back at the start of this puzzle.", "info");
-        const { r, c, value, marks: m } = last;
-        inputs[r][c].value = value; marks[r][c] = new Set(m);
-        inputs[r][c].classList.remove("wrong", "solved");
-        if (value && Number(value) !== solution[r][c]) inputs[r][c].classList.add("wrong");
-        renderPencils(); select(r, c);
-        showExplain("Undid last action", `Restored ${loc(r, c)}.`, "info");
+        const entry = undoStack.pop();
+        if (!entry) return showExplain("Nothing to undo", "You're back at the start of this puzzle.", "info");
+        redoStack.push(snapCells(entry));   // capture current state so this undo can be redone
+        applySnaps(entry);
+        showExplain("Undid last action", `Restored ${loc(entry[entry.length - 1].r, entry[entry.length - 1].c)}.`, "info");
       }
+      function redo() {
+        const entry = redoStack.pop();
+        if (!entry) return showExplain("Nothing to redo", "You're at your latest action.", "info");
+        undoStack.push(snapCells(entry));
+        applySnaps(entry);
+        showExplain("Redid action", `Reapplied ${loc(entry[entry.length - 1].r, entry[entry.length - 1].c)}.`, "info");
+      }
+      // Cells sharing a row, column, or box with (r,c), including the cell itself — for auto-note upkeep.
+      function peersOf(r, c) {
+        const seen = new Map(), add = (rr, cc) => seen.set(rr + "," + cc, { r: rr, c: cc });
+        add(r, c); for (let i = 0; i < 9; i++) { add(r, i); add(i, c); }
+        for (const [br, bc] of boxCells(r, c)) add(br, bc);
+        return [...seen.values()];
+      }
+      function prunePeerNotes(r, c, n) { for (const { r: pr, c: pc } of peersOf(r, c)) if (!(pr === r && pc === c)) marks[pr][pc].delete(n); }
       function setValue(r, c, n) {
         if (givens[r][c]) return;
-        pushUndo(r, c);
+        const auto = solving && autoUpdateNotes;
+        pushUndo(auto ? peersOf(r, c) : { r, c });   // capture peers too when auto-upkeep will prune their notes
         inputs[r][c].value = String(n);
         marks[r][c].clear();
+        if (auto) prunePeerNotes(r, c, n);
         renderPencils(); select(r, c);
         if (solving) handleMove(r, c);
       }
       function clearCell(r, c) {
         if (givens[r][c]) return;
-        pushUndo(r, c);
+        pushUndo({ r, c });
         inputs[r][c].value = ""; inputs[r][c].classList.remove("wrong", "solved");
         marks[r][c].clear();
         if (solving) showExplain("Cell cleared", "Keep going — pick a number or press Hint.", "info");
@@ -612,7 +725,7 @@
       }
       function toggleMark(r, c, n) {
         if (givens[r][c] || inputs[r][c].value) return;
-        pushUndo(r, c);
+        pushUndo({ r, c });
         marks[r][c].has(n) ? marks[r][c].delete(n) : marks[r][c].add(n);
         renderPencils();
       }
@@ -870,13 +983,39 @@
         }
         return null;
       }
+      function xyzWing(M, grid) {
+        const empties = [];
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0) empties.push([r, c, [...M[r][c]]]);
+        const pivots = empties.filter(([, , v]) => v.length === 3), bivalue = empties.filter(([, , v]) => v.length === 2);
+        for (const [pr, pc, pv] of pivots) {
+          // Pincers are bivalue cells that see the pivot and whose candidates are a subset of the pivot's.
+          const pincers = bivalue.filter(([r, c, v]) => sees(pr, pc, r, c) && v.every((n) => pv.includes(n)));
+          for (let i = 0; i < pincers.length; i++) for (let j = i + 1; j < pincers.length; j++) {
+            const [ar, ac, av] = pincers[i], [br, bc, bv] = pincers[j];
+            if (new Set([...av, ...bv]).size !== 3) continue;   // together the pincers must cover all three pivot digits
+            const common = av.filter((n) => bv.includes(n));
+            if (common.length !== 1) continue;                  // they share exactly the Z digit
+            const Z = common[0], elims = [];
+            for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+              if (grid[r][c] !== 0 || !M[r][c].has(Z)) continue;
+              if ((r === pr && c === pc) || (r === ar && c === ac) || (r === br && c === bc)) continue;
+              if (sees(pr, pc, r, c) && sees(ar, ac, r, c) && sees(br, bc, r, c)) elims.push([r, c, Z]);
+            }
+            if (elims.length) return { elims, highlight: [[pr, pc], [ar, ac], [br, bc]], tech: "XYZ-wing", reason: `XYZ-wing: pivot ${loc(pr, pc)} {${pv.join(", ")}} with pincers ${loc(ar, ac)} and ${loc(br, bc)} that all share ${Z}, so ${Z} is removed from any cell that sees all three.` };
+          }
+        }
+        return null;
+      }
       function applyElims(M, elims) { const N = cloneMap(M); for (const [r, c, n] of elims) N[r][c].delete(n); return N; }
+      // The elimination techniques, simplest first. Shared by the hint engine and per-move attribution so
+      // both credit the same technique. A move only falls back to "Advanced" when none of these make progress.
+      const ELIM_TECHS = [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, xWing, xyWing, xyzWing, swordfish];
 
       function findHint(grid) {
         const M = candMap(grid);
         let s = findNakedSingle(M, grid) || findHiddenSingle(M, grid);
         if (s) return { kind: "place", ...s, highlight: [[s.r, s.c]], reason: `${s.tech}: ${s.reason}` };
-        for (const tech of [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, xWing, xyWing, swordfish]) {
+        for (const tech of ELIM_TECHS) {
           const e = tech(M, grid); if (!e) continue;
           const after = findNakedSingle(applyElims(M, e.elims), grid) || findHiddenSingle(applyElims(M, e.elims), grid);
           if (after) return { kind: "place", r: after.r, c: after.c, n: after.n, tech: e.tech, highlight: e.highlight.concat([[after.r, after.c]]), reason: `${e.tech}: ${e.reason} That leaves ${loc(after.r, after.c)} = ${after.n} (${after.tech.toLowerCase()}).` };
@@ -889,6 +1028,41 @@
         return null;
       }
 
+      // ---- technique-based difficulty grading ----
+      // A puzzle's grade is the hardest technique its logical solution needs — clue count doesn't factor in.
+      const TECH_RANK = { "Naked single": 1, "Hidden single": 2, "Pointing pair": 3, "Pointing triple": 3, "Locked candidate": 3,
+        "Naked pair": 4, "Hidden pair": 4, "Naked triple": 5, "Hidden triple": 5,
+        "X-wing": 6, "XY-wing": 6, "Swordfish": 7, "XYZ-wing": 7, "Advanced": 9 };
+      function tierForRank(rank) { return rank <= 2 ? "Easy" : rank <= 5 ? "Medium" : "Hard"; }
+      // Solve using only the techniques we can name, keeping a persistent candidate map so elimination
+      // techniques stack, and record the hardest technique the solution required.
+      function logicalSolve(grid) {
+        const g = clone(grid), M = candMap(g);
+        let hardestRank = 0, hardest = null;
+        const bump = (t) => { const rk = TECH_RANK[t] || 9; if (rk > hardestRank) { hardestRank = rk; hardest = t; } };
+        const place = (r, c, n) => {
+          g[r][c] = n; M[r][c] = new Set();
+          for (let i = 0; i < 9; i++) { M[r][i].delete(n); M[i][c].delete(n); }
+          for (const [br, bc] of boxCells(r, c)) M[br][bc].delete(n);
+        };
+        const isFull = () => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (g[r][c] === 0) return false; return true; };
+        for (let guard = 0; guard < 600; guard++) {
+          if (isFull()) return { solved: true, hardest, hardestRank };
+          const ns = findNakedSingle(M, g); if (ns) { bump("Naked single"); place(ns.r, ns.c, ns.n); continue; }
+          const hs = findHiddenSingle(M, g); if (hs) { bump("Hidden single"); place(hs.r, hs.c, hs.n); continue; }
+          let moved = false;
+          for (const tech of ELIM_TECHS) { const e = tech(M, g); if (e) { bump(e.tech); for (const [r, c, n] of e.elims) M[r][c].delete(n); moved = true; break; } }
+          if (!moved) return { solved: false, hardest, hardestRank };   // needs a technique beyond ours
+        }
+        return { solved: false, hardest, hardestRank };
+      }
+      // Grade a puzzle from its givens: tier + the hardest technique its solution needs.
+      function gradeDifficulty(grid) {
+        const res = logicalSolve(grid);
+        if (!res.solved) return { tier: "Hard", hardest: "Advanced", solved: false };
+        return { tier: tierForRank(res.hardestRank), hardest: res.hardest || "Naked single", solved: true };
+      }
+
       // ---- UI feedback ----
       function showExplain(title, body, kind = "info", action, tech) {
         explainEl.className = "explain " + kind; explainEl.innerHTML = "";
@@ -897,9 +1071,10 @@
         if (tech) { const span = document.createElement("span"); span.className = "tech"; span.textContent = tech + " — "; b.append(span, document.createTextNode(body)); }
         else b.textContent = body;
         explainEl.append(t, b);
-        if (action) { const btn = document.createElement("button"); btn.textContent = action.label; btn.onclick = action.onClick; explainEl.append(btn); }
+        const actions = !action ? [] : Array.isArray(action) ? action : [action];
+        for (const a of actions) { if (!a) continue; const btn = document.createElement("button"); btn.textContent = a.label; btn.onclick = a.onClick; explainEl.append(btn); }
       }
-      function clearHighlights() { for (const row of cellEls) for (const el of row) el.classList.remove("hint", "peer", "conflict", "conflict-unit", "conflict-src"); }
+      function clearHighlights() { for (const row of cellEls) for (const el of row) el.classList.remove("hint", "peer", "hint-unit", "conflict", "conflict-unit", "conflict-src"); }
       function clearConflicts() { for (const row of cellEls) for (const el of row) el.classList.remove("conflict", "conflict-unit", "conflict-src"); }
       // Find the already-placed cells that clash with putting n at (r,c), and which units (row/column/box) they violate.
       function findConflicts(grid, r, c, n) {
@@ -934,12 +1109,9 @@
         saveActiveGame();
       }
 
-      // Hardest-first ordering of every named technique, used to credit a move to the
-      // most advanced technique its deduction actually relies on.
-      const TECH_RANK = ["Naked single", "Hidden single", "Pointing pair", "Pointing triple",
-        "Locked candidate", "Box/line reduction", "Naked pair", "Hidden pair", "Naked triple",
-        "Hidden triple", "X-wing", "XY-wing", "Swordfish"];
-      const techRank = (t) => { const i = TECH_RANK.indexOf(t); return i === -1 ? TECH_RANK.length : i; };
+      // Rank a technique by difficulty (reusing the grading map) so a move is credited to the
+      // hardest technique its deduction actually relies on.
+      const techRank = (t) => TECH_RANK[t] || 0;
       // The first naked/hidden single in (W, g) that isn't the cell we're explaining.
       function placeableSingle(W, g, er, ec) {
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++)
@@ -965,7 +1137,6 @@
       function describeCorrect(M, grid, r, c, n) {
         const W = cloneMap(M), g = grid.map((row) => row.slice());
         let hardest = null, hardestReason = null;
-        const advanced = [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, xWing, xyWing, swordfish];
         const credit = (basicBody, chainTail) => hardest
           ? { tech: hardest, body: `${hardestReason} ${chainTail}` }
           : { tech: basicBody.tech, body: basicBody.body };
@@ -985,7 +1156,7 @@
           const s = placeableSingle(W, g, r, c);
           if (s) { fillSingle(W, g, s.r, s.c, s.n); continue; }
           let e = null;
-          for (const tech of advanced) { const out = tech(W, g); if (out && out.elims.length) { e = out; break; } }
+          for (const tech of ELIM_TECHS) { const out = tech(W, g); if (out && out.elims.length) { e = out; break; } }
           if (!e) break; // stuck for the implemented techniques (rare for the shipped puzzles)
           for (const [er, ec, en] of e.elims) W[er][ec].delete(en);
           if (techRank(e.tech) >= (hardest ? techRank(hardest) : -1)) { hardest = e.tech; hardestReason = e.reason; }
@@ -1009,22 +1180,30 @@
           tech = pendingTech || d.tech;
           showExplain(`✓ ${loc(r, c)} = ${n} is correct`, d.body, "ok", null, tech);
         } else {
-          inputs[r][c].classList.add("wrong");
           tech = "Mistake";
           if (session) { session.errors = (session.errors || 0) + 1; errorsEl.textContent = session.errors; }
-          const conf = findConflicts(grid, r, c, n);
-          let body;
-          if (conf.cells.length) {
-            showConflicts(r, c, conf);
-            const where = listUnits(conf.cells.map((cc) => loc(cc.r, cc.c)));
-            const u = listUnits(conf.units);
-            body = `${n} is already in this ${u} — at ${where}. I've highlighted the clashing ${conf.cells.length > 1 ? "cells" : "cell"} and the ${u} in red: a ${u} can't hold two ${n}s.`;
+          // The player overlooked a provable step here — credit the simplest one that was available.
+          const avail = findHint(grid); if (avail) noteMiss(avail.tech);
+          if (errorFlags) {
+            inputs[r][c].classList.add("wrong");
+            const conf = findConflicts(grid, r, c, n);
+            let body;
+            if (conf.cells.length) {
+              showConflicts(r, c, conf);
+              const where = listUnits(conf.cells.map((cc) => loc(cc.r, cc.c)));
+              const u = listUnits(conf.units);
+              body = `${n} is already in this ${u} — at ${where}. I've highlighted the clashing ${conf.cells.length > 1 ? "cells" : "cell"} and the ${u} in red: a ${u} can't hold two ${n}s.`;
+            } else {
+              body = `${n} doesn't break a rule yet, but it isn't what this cell resolves to — it would make the puzzle impossible later. Press Hint for a cell you can prove.`;
+            }
+            showExplain(`✗ ${loc(r, c)} = ${n} won't work`, body, "bad");
           } else {
-            body = `${n} doesn't break a rule yet, but it isn't what this cell resolves to — it would make the puzzle impossible later. Press Hint for a cell you can prove.`;
+            // Error highlighting off: accept the entry without red flags (it's still logged for stats).
+            showExplain(`${loc(r, c)} = ${n} placed`, "Error highlighting is off, so I won't mark mistakes on the board. Use Check entries or Hint to verify when you're ready.", "info");
           }
-          showExplain(`✗ ${loc(r, c)} = ${n} won't work`, body, "bad");
         }
         recordMove(r, c, n, correct, tech);
+        saveActiveGame();   // persist the updated error count and move log now (renderPencils saved before this ran)
         pendingTech = null;
         if (correct) checkComplete();
       }
@@ -1037,9 +1216,18 @@
         celebrate(ms, errs, diff);
       }
       function celebrate(ms, errs, diff) {
+        const pr = lastWasPR;
+        document.getElementById("winTitle").textContent = pr ? "🏆 New personal record!" : "🎉 Solved!";
+        const badge = document.getElementById("winPR");
+        if (pr) {
+          badge.hidden = false;
+          badge.textContent = lastPRKind === "first"
+            ? `Your first ${diff || ""} solve — a record to beat!`.replace(/\s+/g, " ")
+            : `Fastest ${diff || ""} solve yet — ${fmtTime(ms)}!`.replace(/\s+/g, " ");
+        } else badge.hidden = true;
         document.getElementById("winMsg").textContent = `${diff ? diff + " " : ""}solved in ${fmtTime(ms)} with ${errs} error${errs === 1 ? "" : "s"}. Nice work!`;
         playWinSound();
-        launchConfetti();
+        launchConfetti(pr);
         document.getElementById("winModal").hidden = false;
       }
       // Victory chime, played when a puzzle is completed. Loaded lazily and replayable.
@@ -1052,21 +1240,25 @@
           if (p && p.catch) p.catch(() => {}); // ignore autoplay/codec rejections
         } catch {}
       }
-      function launchConfetti() {
+      function launchConfetti(strong) {
         const cc = document.getElementById("confetti"); cc.innerHTML = "";
-        const colors = ["#2563eb", "#16a34a", "#f59e0b", "#ec4899", "#a78bfa", "#dc2626"];
-        for (let i = 0; i < 60; i++) {
+        // A personal record gets a bigger, gold-tinted burst.
+        const colors = strong
+          ? ["#f59e0b", "#fbbf24", "#fde68a", "#facc15", "#eab308", "#16a34a", "#2563eb", "#fff7cc"]
+          : ["#2563eb", "#16a34a", "#f59e0b", "#ec4899", "#a78bfa", "#dc2626"];
+        const count = strong ? 120 : 60;
+        for (let i = 0; i < count; i++) {
           const s = document.createElement("i");
           s.style.left = Math.random() * 100 + "%";
           s.style.background = colors[i % colors.length];
           s.style.animationDuration = (1.5 + Math.random() * 1.8) + "s";
-          s.style.animationDelay = (Math.random() * 0.6) + "s";
+          s.style.animationDelay = (Math.random() * (strong ? 0.9 : 0.6)) + "s";
           cc.appendChild(s);
         }
-        setTimeout(() => { cc.innerHTML = ""; }, 4200);
+        setTimeout(() => { cc.innerHTML = ""; }, strong ? 5200 : 4200);
       }
       document.getElementById("winAgain").addEventListener("click", () => { document.getElementById("winModal").hidden = true; resetToEdit(); maybeRemindBackup(); });
-      document.getElementById("winStats").addEventListener("click", () => { document.getElementById("winModal").hidden = true; if (statsEl.hidden) document.getElementById("statsBtn").click(); });
+      document.getElementById("winStats").addEventListener("click", () => { document.getElementById("winModal").hidden = true; statsTab = "this"; if (statsEl.hidden) document.getElementById("statsBtn").click(); else setStatsTab("this"); });
 
       // ---- timer + session tracking (active time only; pauses don't count) ----
       let lastTotalMs = 0;
@@ -1078,8 +1270,8 @@
         return now - session.startedAt - session.pausedMs - (session.pauseStart ? now - session.pauseStart : 0);
       }
       function startTimer() {
-        timerEl.textContent = "0:00";
         clearInterval(timerId);
+        timerEl.textContent = fmtTime(activeElapsed());   // paint current time at once (no 0:00 flash on resume)
         timerId = setInterval(() => { timerEl.textContent = fmtTime(activeElapsed()); }, 500);
       }
       function pauseTimer(manual) {
@@ -1098,10 +1290,24 @@
         saveActiveGame();
       }
       const pauseModal = document.getElementById("pauseModal");
-      document.addEventListener("visibilitychange", () => {
-        if (!solving || !session) return;
-        document.hidden ? pauseTimer(false) : resumeTimer(false);
-      });
+      // The board is "covered" whenever an in-app panel (Stats / Saved games / History) is showing
+      // over it — the game isn't visible, so it counts as swiping away from the Sudoku page.
+      function boardCovered() { return !statsEl.hidden || !libraryPanel.hidden; }
+      // Auto-pause reconciler: the clock should run only while you're actually looking at the board.
+      // It stops whenever the tab is hidden (backgrounded) or a panel covers the board, and resumes
+      // when you come back — but never overrides a manual pause. Driven from visibilitychange and
+      // from every panel open/close, so overlapping causes (e.g. hide the tab while Stats is open)
+      // resolve correctly instead of a blind resume.
+      function syncAutoPause() {
+        if (!solving || !session || session.manualPaused) return;
+        const shouldPause = document.hidden || boardCovered();
+        if (shouldPause && !session.pauseStart) pauseTimer(false);
+        else if (!shouldPause && session.pauseStart) resumeTimer(false);
+      }
+      document.addEventListener("visibilitychange", syncAutoPause);
+      // Final save when the page is being backgrounded/unloaded (covers mobile app-switch and bfcache),
+      // in case visibilitychange's pause save didn't land.
+      window.addEventListener("pagehide", () => { if (solving && session) saveActiveGame(); });
       document.getElementById("pause").addEventListener("click", () => {
         if (!session) return showExplain("Not solving", "Start a puzzle before pausing.", "info");
         pauseTimer(true); pauseModal.hidden = false;
@@ -1139,6 +1345,15 @@
         const t = activeElapsed(), dt = t - session.lastT; session.lastT = t;
         session.moves.push({ t, dt, r, c, n, correct, tech });
       }
+      // Log a named technique the player couldn't spot on their own — a hint they took, or the simpler
+      // step that was available when they slipped. Feeds the "techniques to practice" stats.
+      function noteMiss(tech) {
+        if (!session || !tech || tech === "Advanced" || tech === "Mistake") return;
+        session.missed ||= {};
+        session.missed[tech] = (session.missed[tech] || 0) + 1;
+      }
+      // Set by finalizeSession so the celebration knows whether a solve was a personal best.
+      let lastWasPR = false, lastPRKind = "";
       function finalizeSession(solved) {
         if (!session) return;
         if (session.pauseStart) { session.pausedMs += Date.now() - session.pauseStart; session.pauseStart = null; }
@@ -1146,6 +1361,15 @@
         clearInterval(timerId); timerId = null;
         session.solved = solved; session.finishedAt = Date.now();
         lastTotalMs = session.totalMs;
+        // Personal-record check: is this the fastest solve yet for this difficulty? (compare against
+        // prior solves before this game is added). The first solve of a difficulty sets the record too.
+        lastWasPR = false; lastPRKind = "";
+        if (solved) {
+          const prior = lsGet(STATS_KEY).filter((g) => g.solved && g.difficulty === session.difficulty).map((g) => g.totalMs);
+          if (!prior.length) { lastWasPR = true; lastPRKind = "first"; }
+          else if (session.totalMs < Math.min(...prior)) { lastWasPR = true; lastPRKind = "best"; }
+          session.isPR = lastWasPR;
+        }
         const stats = lsGet(STATS_KEY); stats.unshift(session); lsSet(STATS_KEY, stats); cloudSave("stats", stats);
         bumpBackupCounter();
         session = null; clearActiveGame();
@@ -1169,11 +1393,11 @@
           inputs[r][c].classList.remove("wrong", "solved");
           marks[r][c].clear();
         }
-        solving = true; setMode("normal");
+        solving = true; setMode("normal"); syncModeButtons();
         document.body.classList.add("solving");
         clearHighlights(); renderPencils();
-        undoStack = []; errorsEl.textContent = "0";
-        session = { difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, moves: [] };
+        undoStack = []; redoStack = []; errorsEl.textContent = "0";
+        session = { difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, moves: [], missed: {} };
         startTimer();
         const first = (() => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) return [r, c]; return [0, 0]; })();
         select(first[0], first[1]);
@@ -1186,7 +1410,23 @@
 
       // Ready modal — shown after import / loading a saved game; starts the timer on confirm.
       const modal = document.getElementById("modal");
-      function showReady(msg) { document.getElementById("modalMsg").textContent = msg; modal.hidden = false; }
+      function showReady(msg) { document.getElementById("modalMsg").textContent = msg; updateModalRating(); modal.hidden = false; }
+      // Compute a technique-based rating for the loaded puzzle and offer to apply it to the difficulty select.
+      function updateModalRating() {
+        const box = document.getElementById("modalRating"); if (!box) return;
+        const grid = readGrid();
+        if (grid.flat().filter(Boolean).length < 17 || hasConflict(grid)) { box.hidden = true; return; }
+        let grade; try { grade = gradeDifficulty(grid); } catch { box.hidden = true; return; }
+        const note = grade.solved ? `hardest step: ${grade.hardest}` : "needs advanced chains I don't name";
+        box.innerHTML = `<span>🎯 Auto-rated <b>${esc(grade.tier)}</b> · <span class="k">${esc(note)}</span></span>`;
+        if (difficultyEl.value !== grade.tier) {
+          const btn = document.createElement("button");
+          btn.type = "button"; btn.className = "rating-apply"; btn.textContent = `Use ${grade.tier}`;
+          btn.onclick = () => { difficultyEl.value = grade.tier; difficultyEl.dispatchEvent(new Event("change")); updateModalRating(); };
+          box.appendChild(btn);
+        }
+        box.hidden = false;
+      }
       function hideModal() { modal.hidden = true; }
       document.getElementById("modalStart").addEventListener("click", () => { hideModal(); startSolving(); });
       document.getElementById("modalCancel").addEventListener("click", () => { hideModal(); showExplain("Take your time", "Fix anything that looks off, then press Start solving when you're ready.", "info"); });
@@ -1322,7 +1562,9 @@
         if (!cloudOn) { document.getElementById("shareMsg").textContent = "Sharing by code needs cloud sync. Use Backup & restore to share a file instead."; return; }
         const code = genShareCode();
         try {
-          const r = await fetch(`/api/games?collection=share&profile=${code}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ games }) });
+          // Share only the puzzle, not your in-progress state.
+          const shareGames = games.map(({ progress, ...rest }) => rest);
+          const r = await fetch(`/api/games?collection=share&profile=${code}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ games: shareGames }) });
           if (!r.ok) throw new Error();
           document.getElementById("shareCode").value = code;
           document.getElementById("shareLink").value = `${location.origin}${location.pathname}?share=${code}`;
@@ -1374,7 +1616,45 @@
         else for (const row of cellEls) for (const el of row) el.classList.remove("same");
       });
 
+      // Error-highlighting setting: when off, wrong entries aren't flagged red on the board.
+      const errToggle = document.getElementById("errToggle");
+      function renderErrToggle() { errToggle.textContent = `Error highlighting: ${errorFlags ? "On" : "Off"}`; }
+      renderErrToggle();
+      // Repaint the board's red flags to match the current setting (clears them when off,
+      // restores them for any wrong entries when on).
+      function refreshErrorFlags() {
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+          if (givens[r][c]) continue;
+          const v = Number(inputs[r][c].value) || 0;
+          const wrong = solving && solution && v && v !== solution[r][c];
+          inputs[r][c].classList.toggle("wrong", !!(errorFlags && wrong));
+        }
+        if (!errorFlags) clearConflicts();
+      }
+      errToggle.addEventListener("click", () => {
+        errorFlags = !errorFlags;
+        try { localStorage.setItem("sudoku-coach:errorflags", errorFlags ? "on" : "off"); } catch {}
+        renderErrToggle();
+        refreshErrorFlags();
+        showExplain(errorFlags ? "Error highlighting on" : "Error highlighting off",
+          errorFlags ? "Wrong entries will flag red again, with the clashing row, column, or box." : "Mistakes won't be marked on the board. Use Check entries or Hint to verify when you want.", "info");
+      });
+
+      // Auto-update notes: when on, placing a digit clears it from the pencil marks of every cell that
+      // shares a row, column, or box — so candidate marks stay current without redoing them by hand.
+      const autoUpdToggle = document.getElementById("autoUpdToggle");
+      function renderAutoUpdToggle() { autoUpdToggle.textContent = `Auto-update notes: ${autoUpdateNotes ? "On" : "Off"}`; }
+      renderAutoUpdToggle();
+      autoUpdToggle.addEventListener("click", () => {
+        autoUpdateNotes = !autoUpdateNotes;
+        try { localStorage.setItem("sudoku-coach:autonotes", autoUpdateNotes ? "on" : "off"); } catch {}
+        renderAutoUpdToggle();
+        showExplain(autoUpdateNotes ? "Auto-update notes on" : "Auto-update notes off",
+          autoUpdateNotes ? "Placing a digit now clears it from the notes of its row, column, and box automatically. Press Auto notes to fill them in first." : "Pencil marks stay exactly as you leave them.", "info");
+      });
+
       document.getElementById("undo").addEventListener("click", undo);
+      document.getElementById("redo").addEventListener("click", redo);
 
       document.getElementById("autonotes").addEventListener("click", () => {
         const grid = progressGrid();
@@ -1387,19 +1667,73 @@
         showExplain(any ? "Notes cleared" : "Notes filled", any ? "Pencil marks removed." : "Filled every empty cell with its possible digits. Switch to Candidate mode to refine them.", "info");
       });
 
+      // Tint the whole row/column/box a technique operates on, so the reasoning is visible on the board.
+      // Units shared by 2+ of the technique's cells are shown; a lone target cell shows its three units.
+      function highlightHintUnits(hint) {
+        const cells = hint.highlight || [], rc = {}, cc = {}, bc = {};
+        for (const [r, c] of cells) { rc[r] = (rc[r] || 0) + 1; cc[c] = (cc[c] || 0) + 1; const b = boxIndex(r, c) - 1; bc[b] = (bc[b] || 0) + 1; }
+        const rows = new Set(), cols = new Set(), boxes = new Set();
+        for (const k in rc) if (rc[k] >= 2) rows.add(+k);
+        for (const k in cc) if (cc[k] >= 2) cols.add(+k);
+        for (const k in bc) if (bc[k] >= 2) boxes.add(+k);
+        if (hint.kind === "place" && !rows.size && !cols.size && !boxes.size) { rows.add(hint.r); cols.add(hint.c); boxes.add(boxIndex(hint.r, hint.c) - 1); }
+        rows.forEach((r) => { for (let c = 0; c < 9; c++) cellEls[r][c].classList.add("hint-unit"); });
+        cols.forEach((c) => { for (let r = 0; r < 9; r++) cellEls[r][c].classList.add("hint-unit"); });
+        boxes.forEach((b) => { const br = Math.floor(b / 3) * 3, bc2 = (b % 3) * 3; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) cellEls[br + i][bc2 + j].classList.add("hint-unit"); });
+      }
+      function renderHintHighlights(hint) {
+        clearHighlights();
+        highlightHintUnits(hint);
+        for (const [r, c] of hint.highlight) { cellEls[r][c].classList.remove("hint-unit"); cellEls[r][c].classList.add("peer"); }
+        if (hint.kind === "place") { cellEls[hint.r][hint.c].classList.remove("peer"); cellEls[hint.r][hint.c].classList.add("hint"); }
+      }
+      // A fuller, step-by-step version of a hint: for a naked single it rules out every other digit with
+      // where each is already used; for a hidden single it walks each other cell in the unit; for a
+      // technique it spells out the elimination that frees the cell.
+      function detailedHintText(hint) {
+        const grid = progressGrid();
+        if (hint.kind !== "place") return `${hint.reason}\n\nApply those removals to your candidate marks (or press Auto notes), then scan again — a naked or hidden single usually appears.`;
+        const { r, c, n } = hint, cand = candidates(grid, r, c);
+        const blockerFor = (rr, cc, d) => {
+          for (let i = 0; i < 9; i++) if (i !== cc && grid[rr][i] === d) return `row ${rr + 1} (${loc(rr, i)})`;
+          for (let i = 0; i < 9; i++) if (i !== rr && grid[i][cc] === d) return `column ${cc + 1} (${loc(i, cc)})`;
+          const br = Math.floor(rr / 3) * 3, bc = Math.floor(cc / 3) * 3;
+          for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if ((br + i !== rr || bc + j !== cc) && grid[br + i][bc + j] === d) return `box ${boxIndex(rr, cc)} (${loc(br + i, bc + j)})`;
+          return null;
+        };
+        if (cand.length === 1) {
+          const lines = [];
+          for (let d = 1; d <= 9; d++) { if (d === n) continue; const w = blockerFor(r, c, d); lines.push(`  ${d} — ${w ? "already in " + w : "—"}`); }
+          return `Ruling out each digit for ${loc(r, c)}:\n${lines.join("\n")}\nEvery digit but ${n} is taken, so ${loc(r, c)} = ${n} (a naked single).`;
+        }
+        for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
+          const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && candidates(grid, rr, cc).includes(n));
+          if (spots.length === 1 && spots[0][0] === r && spots[0][1] === c) {
+            const others = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && !(rr === r && cc === c));
+            const lines = others.map(([rr, cc]) => { const w = blockerFor(rr, cc, n); return `  ${loc(rr, cc)} — ${w ? "no (" + n + " in " + w + ")" : "open"}`; });
+            return `Where can ${n} go in ${u.name}?\n${lines.join("\n")}\nOnly ${loc(r, c)} is left, so ${n} goes there (a hidden single).`;
+          }
+        }
+        return `${hint.reason}\n\nThat elimination is what frees ${loc(r, c)} — apply it to your notes and ${loc(r, c)} = ${n} becomes forced.`;
+      }
+      function showHintExplain(hint, detailed) {
+        const body = detailed ? detailedHintText(hint) : hint.reason;
+        const stepAction = detailed ? null : { label: "Explain step by step", onClick: () => showHintExplain(hint, true) };
+        if (hint.kind === "place") {
+          const placeAction = { label: `Place ${hint.n} in ${loc(hint.r, hint.c)}`, onClick: () => { pendingTech = hint.tech; setValue(hint.r, hint.c, hint.n); } };
+          showExplain(detailed ? `Why ${loc(hint.r, hint.c)} = ${hint.n}?` : `Hint: ${loc(hint.r, hint.c)} = ${hint.n}`, body, "hint", [placeAction, stepAction], hint.tech);
+        } else {
+          showExplain(detailed ? "Step by step" : "Hint: eliminate candidates", body, "hint", [stepAction], hint.tech);
+        }
+      }
       document.getElementById("hint").addEventListener("click", () => {
+        closeStats(); closeLibrary(); closeHistory(); // Hint now lives in the menu — make sure the board is visible
         const hint = findHint(progressGrid());
         if (!hint) return showExplain("Nothing left to place", "The grid is complete.", "ok");
-        clearHighlights();
-        for (const [r, c] of hint.highlight) cellEls[r][c].classList.add("peer");
-        if (hint.kind === "place") {
-          cellEls[hint.r][hint.c].classList.remove("peer"); cellEls[hint.r][hint.c].classList.add("hint");
-          lastHint = hint; select(hint.r, hint.c);
-          showExplain(`Hint: ${loc(hint.r, hint.c)} = ${hint.n}`, hint.reason, "hint", {
-            label: `Place ${hint.n} in ${loc(hint.r, hint.c)}`,
-            onClick: () => { pendingTech = hint.tech; setValue(hint.r, hint.c, hint.n); },
-          }, hint.tech);
-        } else showExplain("Hint: eliminate candidates", hint.reason, "hint", null, hint.tech);
+        if (session) { session.hints = (session.hints || 0) + 1; noteMiss(hint.tech); saveActiveGame(); }
+        renderHintHighlights(hint);
+        if (hint.kind === "place") { lastHint = hint; select(hint.r, hint.c); }
+        showHintExplain(hint, false);
       });
 
       document.getElementById("check").addEventListener("click", () => {
@@ -1427,9 +1761,39 @@
 
       document.getElementById("edit").addEventListener("click", resetToEdit);
       document.getElementById("clear").addEventListener("click", () => { for (const row of inputs) for (const i of row) i.value = ""; resetToEdit(); });
+
+      // Reset the *current* game back to its starting clues (keeps the puzzle; wipes your progress).
+      // Gated behind a confirmation so it can't be triggered by accident.
+      const resetModal = document.getElementById("resetModal");
+      document.getElementById("resetGame").addEventListener("click", () => {
+        if (!solving || !session) return showExplain("No game to reset", "Start a puzzle first — reset brings an in-progress game back to its clues.", "info");
+        resetModal.hidden = false;
+      });
+      document.getElementById("resetCancel").addEventListener("click", () => { resetModal.hidden = true; });
+      resetModal.addEventListener("click", (e) => { if (e.target === resetModal) resetModal.hidden = true; });
+      document.getElementById("resetConfirm").addEventListener("click", () => { resetModal.hidden = true; resetGame(); });
+      function resetGame() {
+        if (!solving || !session) return;
+        // Clear everything the player added; keep the clues, solution, difficulty, and source.
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+          if (!givens[r][c]) inputs[r][c].value = "";
+          inputs[r][c].classList.remove("wrong", "solved");
+          marks[r][c].clear();
+        }
+        // Fresh session: timer restarts from zero, errors and move log wiped.
+        clearInterval(timerId); timerId = null;
+        undoStack = []; redoStack = []; lastHint = null;
+        session = { difficulty: session.difficulty, source: session.source, startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, moves: [], missed: {} };
+        errorsEl.textContent = "0"; pauseModal.hidden = true;
+        clearHighlights(); setMode("normal"); startTimer(); renderPencils();
+        syncAutoPause();   // if a panel happens to be covering the board, keep the fresh timer paused
+        const first = (() => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) return [r, c]; return [0, 0]; })();
+        select(first[0], first[1]);
+        showExplain("Game reset", "Back to the starting clues with a fresh timer. Solve it your way.", "info");
+      }
       function resetToEdit() {
-        session = null; clearInterval(timerId); timerId = null; undoStack = []; activeSavedGame = null;
-        solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal");
+        session = null; clearInterval(timerId); timerId = null; undoStack = []; redoStack = []; activeSavedGame = null;
+        solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal"); syncModeButtons();
         document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory();
         pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].classList.remove("given", "wrong", "solved"); marks[r][c].clear(); }
@@ -1454,7 +1818,7 @@
       // updates the library entry that was auto-saved when the screenshot was loaded.
       difficultyEl.addEventListener("change", syncActiveSavedGame);
       sourceEl.addEventListener("input", syncActiveSavedGame);
-      const loadBtn = document.getElementById("load"), libraryPanel = document.getElementById("savedGames");
+      const libraryPanel = document.getElementById("gameLibrary");
       function lsGet(key) {
         try { const v = JSON.parse(localStorage.getItem(key)); return Array.isArray(v) ? v : []; } catch { return []; }
       }
@@ -1527,42 +1891,50 @@
 
       // ---- in-progress game persistence (survives closing the tab / reloading later) ----
       function clearActiveGame() { try { localStorage.removeItem(ACTIVE_KEY); } catch {} }
-      function saveActiveGame() {
-        if (!solving || !session) { clearActiveGame(); return; }
-        const state = {
+      // Snapshot of the game in progress — shared by the auto-save (ACTIVE_KEY) and the manual "Save game".
+      function currentGameState() {
+        return {
           values: inputs.map((row) => row.map((i) => i.value)),
           givens: givens.map((row) => row.slice()),
           marks: marks.map((row) => row.map((s) => [...s])),
           solution,
           elapsed: activeElapsed(),
           manualPaused: !!(session.pauseStart && session.manualPaused),
-          session: { difficulty: session.difficulty, source: session.source, errors: session.errors || 0, lastT: session.lastT || 0, moves: session.moves || [] },
+          session: { difficulty: session.difficulty, source: session.source, errors: session.errors || 0, hints: session.hints || 0, lastT: session.lastT || 0, moves: session.moves || [], missed: session.missed || {} },
           savedAt: Date.now(),
         };
-        try { localStorage.setItem(ACTIVE_KEY, JSON.stringify(state)); } catch {}
       }
-      function restoreActiveGame() {
-        let st; try { st = JSON.parse(localStorage.getItem(ACTIVE_KEY)); } catch { st = null; }
-        if (!st || !st.values || !st.solution || !st.givens || !st.session) return false;
+      function saveActiveGame() {
+        if (!solving || !session) { clearActiveGame(); return; }
+        try { localStorage.setItem(ACTIVE_KEY, JSON.stringify(currentGameState())); } catch {}
+      }
+      // Load a saved in-progress snapshot (from ACTIVE_KEY auto-save or a library "Save game") onto the board.
+      function applyGameState(st) {
         resetToEdit();
         solution = st.solution; givens = st.givens;
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
           inputs[r][c].value = st.values[r][c] || "";
           inputs[r][c].classList.toggle("given", !!givens[r][c]);
           inputs[r][c].classList.remove("wrong", "solved");
-          if (!givens[r][c] && inputs[r][c].value && Number(inputs[r][c].value) !== solution[r][c]) inputs[r][c].classList.add("wrong");
+          if (errorFlags && !givens[r][c] && inputs[r][c].value && Number(inputs[r][c].value) !== solution[r][c]) inputs[r][c].classList.add("wrong");
           marks[r][c] = new Set((st.marks && st.marks[r] && st.marks[r][c]) || []);
         }
         // Time away from the app doesn't count: rebase so active time resumes from where it stood.
         const elapsed = Math.max(0, st.elapsed || 0), now = Date.now();
-        session = { difficulty: st.session.difficulty, source: st.session.source, startedAt: now - elapsed, pausedMs: 0, pauseStart: null, manualPaused: false, errors: st.session.errors || 0, lastT: st.session.lastT || 0, moves: st.session.moves || [] };
-        solving = true; setMode("normal"); document.body.classList.add("solving");
+        session = { difficulty: st.session.difficulty, source: st.session.source, startedAt: now - elapsed, pausedMs: 0, pauseStart: null, manualPaused: false, errors: st.session.errors || 0, hints: st.session.hints || 0, lastT: st.session.lastT || 0, moves: st.session.moves || [], missed: st.session.missed || {} };
+        solving = true; setMode("normal"); syncModeButtons(); document.body.classList.add("solving");
         difficultyEl.value = session.difficulty; sourceEl.value = session.source;
         errorsEl.textContent = session.errors;
         clearHighlights(); renderPencils();
         if (st.manualPaused) { pauseTimer(true); pauseModal.hidden = false; }
         else startTimer();
         timerEl.textContent = fmtTime(elapsed);
+        return elapsed;
+      }
+      function restoreActiveGame() {
+        let st; try { st = JSON.parse(localStorage.getItem(ACTIVE_KEY)); } catch { st = null; }
+        if (!st || !st.values || !st.solution || !st.givens || !st.session) return false;
+        applyGameState(st);
         showExplain("Welcome back", "Your in-progress puzzle was restored — pick up right where you left off.", "info");
         return true;
       }
@@ -1605,10 +1977,25 @@
       // Re-push anything still pending the moment the network comes back.
       window.addEventListener("online", () => Object.keys(cloudQueue).forEach((c) => { cloudRetry[c] = 0; scheduleCloudFlush(c, 0); }));
       const syncNote = () => (cloudOn ? " and synced across your devices" : " on this device");
+      // Surface whether cloud sync is live so the user can tell if data will follow them across devices.
+      let syncChecked = false;
+      function updateSyncStatus() {
+        const el = document.getElementById("syncStatus"); if (!el) return;
+        if (!syncChecked) { el.textContent = "Checking sync…"; el.classList.remove("on", "off"); return; }
+        if (cloudOn) {
+          const who = profile && profile.name ? `as ${profile.name}` : "as Guest";
+          el.textContent = `☁ Synced across your devices (${who})`;
+          el.classList.add("on"); el.classList.remove("off");
+        } else {
+          el.textContent = "▢ This device only — cloud sync off";
+          el.classList.add("off"); el.classList.remove("on");
+        }
+      }
       function renderLibrary() {
-        const games = lsGet(STORE_KEY);
-        loadBtn.textContent = games.length ? `Saved games (${games.length})` : "Saved games";
-        if (!libraryPanel.hidden) renderLibraryPanel();
+        if (libraryPanel.hidden) return;
+        if (libTab === "saved") renderSavedTab();
+        else if (libTab === "history") renderHistoryTab();
+        else renderGameLibrary();
       }
       async function initStores() {
         try {
@@ -1628,6 +2015,7 @@
         // Backup layer 3: if cloud + local both came back empty, fall back to the newest local snapshot.
         if (recoverFromBackupIfEmpty()) showExplain("Recovered your data", "Your saved games and history were restored from an automatic local backup.", "ok");
         else snapshotData(); // keep a fresh baseline snapshot of the merged state
+        syncChecked = true; updateSyncStatus();
         renderLibrary();
       }
       // Union local + cloud so neither an empty cloud nor a stale device can wipe the other's data.
@@ -1675,7 +2063,36 @@
         g.source = (sourceEl.value || "Unknown").trim() || "Unknown";
         lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
       }
-      // ---- saved-games history panel (opened from the Load button) ----
+      // Manual "Save game": store the current progress in the library so it can be resumed later
+      // (and syncs across devices when cloud sync is on). Updates the puzzle's existing entry if present.
+      function saveInProgressGame() {
+        closeMenu();
+        if (!solving || !session) {
+          showExplain("No game to save", "Start a puzzle first — then Save game keeps your progress so you can resume it later.", "info");
+          return;
+        }
+        const progress = currentGameState();
+        // Reconstruct the puzzle's clue grid (numbers) from the locked given cells.
+        const clueGrid = givens.map((row, r) => row.map((isGiven, c) => (isGiven ? Number(inputs[r][c].value) || 0 : 0)));
+        const games = lsGet(STORE_KEY);
+        const key = gridKey(clueGrid);
+        let g = games.find((x) => gridKey(x.grid) === key);
+        if (g) {
+          g.progress = progress; g.savedAt = Date.now();
+          g.difficulty = session.difficulty; g.source = session.source;
+        } else {
+          g = { id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()), grid: clueGrid, difficulty: session.difficulty, source: session.source, savedAt: Date.now(), progress };
+          games.unshift(g);
+        }
+        activeSavedGame = g;
+        lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
+        saveActiveGame();
+        showExplain("Game saved", `Saved at ${fmtTime(progress.elapsed)} — resume it anytime from Game library → Saved${syncNote()}.`, "ok");
+      }
+      document.getElementById("saveGame").addEventListener("click", saveInProgressGame);
+      // ---- unified Game library panel: Saved games · Play history · Catalogue ----
+      const libraryBtn = document.getElementById("libraryBtn");
+      let libTab = "saved";
       function savedDateHeader(ts) {
         const d = new Date(ts), now = new Date(), sameDay = (a, b) => a.toDateString() === b.toDateString();
         const yest = new Date(now); yest.setDate(now.getDate() - 1);
@@ -1683,16 +2100,52 @@
         if (sameDay(d, yest)) return "Yesterday";
         return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
       }
-      function openLibrary() { closeStats(); closeHistory(); editingId = null; renderLibraryPanel(); libraryPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
-      function closeLibrary() { if (!libraryPanel.hidden) { editingId = null; libraryPanel.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
-      let editingId = null;
+      function openLibrary(tab) {
+        closeStats();
+        if (tab) libTab = tab;
+        editingId = null; histEditing = null;
+        libraryPanel.hidden = false; renderGameLibrary();
+        boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause();
+      }
+      function closeLibrary() {
+        if (!libraryPanel.hidden) {
+          editingId = null; histEditing = null; libraryPanel.hidden = true;
+          boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause();
+        }
+      }
+      // History now lives inside the library as a tab; keep these names for existing call sites.
+      function openHistory() { openLibrary("history"); }
+      function closeHistory() { closeLibrary(); }
+
+      let editingId = null, histEditing = null;
       const DIFFICULTIES = ["Easy", "Medium", "Hard"];
       function diffOptions(sel) { return DIFFICULTIES.map((d) => `<option value="${d}"${d === sel ? " selected" : ""}>${d}</option>`).join(""); }
-      function renderLibraryPanel() {
+
+      // Renders the panel shell (back button, tab bar) and delegates the body to the active tab.
+      function renderGameLibrary() {
+        if (libraryPanel.hidden) return;
+        const counts = { saved: lsGet(STORE_KEY).length, history: lsGet(STATS_KEY).length, catalog: CATALOG.length, practice: TRAINER_TECHS.length };
+        const tab = (id, label) => `<button class="lib-tab${libTab === id ? " on" : ""}" data-tab="${id}">${label} <span class="k">(${counts[id]})</span></button>`;
+        libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Game library</h2>` +
+          `<div class="lib-tabs">${tab("saved", "Saved")}${tab("history", "History")}${tab("catalog", "Catalogue")}${tab("practice", "Practice")}</div>` +
+          `<div id="libContent"></div>`;
+        document.getElementById("lb").onclick = closeLibrary;
+        libraryPanel.querySelectorAll(".lib-tab").forEach((b) => (b.onclick = () => {
+          libTab = b.dataset.tab; editingId = null; histEditing = null; renderGameLibrary();
+        }));
+        if (libTab === "history") renderHistoryTab();
+        else if (libTab === "catalog") renderCatalogTab();
+        else if (libTab === "practice") renderPracticeTab();
+        else renderSavedTab();
+      }
+
+      // ---- Saved games tab ----
+      function renderSavedTab() {
+        const content = document.getElementById("libContent"); if (!content) return;
         const games = [...lsGet(STORE_KEY)].sort((a, b) => b.savedAt - a.savedAt);
         if (!games.length) {
-          libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Saved games</h2><div class="card">No saved games yet. Import a screenshot and it's saved here automatically — newest first, grouped by date.</div>`;
-          document.getElementById("lb").onclick = closeLibrary; return;
+          content.innerHTML = `<div class="card">No saved games yet. Import a screenshot and it's saved here automatically — newest first, grouped by date.</div>`;
+          return;
         }
         let rows = "", lastHeader = null;
         for (const g of games) {
@@ -1710,32 +2163,32 @@
               <div class="saved-actions"><button class="save-one" data-id="${esc(g.id)}">Save</button><button class="cancel-one" data-id="${esc(g.id)}">Cancel</button></div>
             </div>`;
           } else {
+            const inProg = g.progress ? `<br><span class="inprog">▶ in progress · ${fmtTime(g.progress.elapsed || 0)}</span>` : "";
             rows += `<div class="saved-row">
               <label class="saved-left">
                 <input type="checkbox" class="share-check" data-id="${esc(g.id)}" title="Select to share" />
-                <span class="saved-meta"><b>${esc(g.difficulty)}</b> · ${esc(g.source)}<br><span class="k">${esc(date)} · ${esc(time)}</span></span>
+                <span class="saved-meta"><b>${esc(g.difficulty)}</b> · ${esc(g.source)}<br><span class="k">${esc(date)} · ${esc(time)}</span>${inProg}</span>
               </label>
-              <div class="saved-actions"><button class="load-one" data-id="${esc(g.id)}">Load</button><button class="edit-one" data-id="${esc(g.id)}">Edit</button><button class="del-one" data-id="${esc(g.id)}">Delete</button></div>
+              <div class="saved-actions"><button class="load-one" data-id="${esc(g.id)}">${g.progress ? "Resume" : "Load"}</button><button class="edit-one" data-id="${esc(g.id)}">Edit</button><button class="del-one" data-id="${esc(g.id)}">Delete</button></div>
             </div>`;
           }
         }
         const tools = `<div class="lib-tools"><label><input type="checkbox" id="selAll" /> Select all</label><span class="spacer"></span><button id="shareSel" class="primary">Share selected</button></div>`;
-        libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Saved games <span class="k">(${games.length})</span></h2>${tools}${rows}`;
-        document.getElementById("lb").onclick = closeLibrary;
-        document.getElementById("selAll").onchange = (e) => libraryPanel.querySelectorAll(".share-check").forEach((c) => (c.checked = e.target.checked));
+        content.innerHTML = `${tools}${rows}`;
+        document.getElementById("selAll").onchange = (e) => content.querySelectorAll(".share-check").forEach((c) => (c.checked = e.target.checked));
         document.getElementById("shareSel").onclick = () => {
-          const ids = [...libraryPanel.querySelectorAll(".share-check:checked")].map((c) => c.dataset.id);
+          const ids = [...content.querySelectorAll(".share-check:checked")].map((c) => c.dataset.id);
           const all = lsGet(STORE_KEY);
           openShare(null, ids.length ? all.filter((g) => ids.includes(g.id)) : all);
         };
-        libraryPanel.querySelectorAll(".load-one").forEach((b) => (b.onclick = () => loadSavedGame(b.dataset.id)));
-        libraryPanel.querySelectorAll(".edit-one").forEach((b) => (b.onclick = () => { editingId = b.dataset.id; renderLibraryPanel(); }));
-        libraryPanel.querySelectorAll(".cancel-one").forEach((b) => (b.onclick = () => { editingId = null; renderLibraryPanel(); }));
-        libraryPanel.querySelectorAll(".save-one").forEach((b) => (b.onclick = () => {
+        content.querySelectorAll(".load-one").forEach((b) => (b.onclick = () => loadSavedGame(b.dataset.id)));
+        content.querySelectorAll(".edit-one").forEach((b) => (b.onclick = () => { editingId = b.dataset.id; renderSavedTab(); }));
+        content.querySelectorAll(".cancel-one").forEach((b) => (b.onclick = () => { editingId = null; renderSavedTab(); }));
+        content.querySelectorAll(".save-one").forEach((b) => (b.onclick = () => {
           const row = b.closest(".saved-row");
           saveSavedGameEdit(b.dataset.id, row.querySelector(".edit-diff").value, row.querySelector(".edit-source").value);
         }));
-        libraryPanel.querySelectorAll(".del-one").forEach((b) => (b.onclick = () => deleteSavedGame(b.dataset.id)));
+        content.querySelectorAll(".del-one").forEach((b) => (b.onclick = () => deleteSavedGame(b.dataset.id)));
       }
       function saveSavedGameEdit(id, difficulty, source) {
         const games = lsGet(STORE_KEY);
@@ -1743,31 +2196,34 @@
         g.difficulty = difficulty;
         g.source = (source || "Unknown").trim() || "Unknown";
         lsSet(STORE_KEY, games); cloudSave("library", games);
-        editingId = null; renderLibrary();
+        editingId = null; renderSavedTab();
       }
       function loadSavedGame(id) {
         const game = lsGet(STORE_KEY).find((g) => g.id === id); if (!game) return;
         closeLibrary();
+        if (game.progress && game.progress.values && game.progress.solution) {
+          // Resume a saved-in-progress game right where it left off.
+          applyGameState(game.progress);
+          activeSavedGame = game; saveActiveGame();
+          showExplain("Resumed", `Back to ${game.source} · ${game.difficulty} at ${fmtTime(game.progress.elapsed || 0)} — pick up where you left off.`, "info");
+          return;
+        }
         resetToEdit(); writeGrid(game.grid); difficultyEl.value = game.difficulty; sourceEl.value = game.source; renderPencils();
         activeSavedGame = game;
         showReady(`${game.source} · ${game.difficulty} is loaded. Adjust difficulty or source if needed, then start the timer and play?`);
       }
       function deleteSavedGame(id) {
         const games = lsGet(STORE_KEY).filter((g) => g.id !== id); lsSet(STORE_KEY, games); cloudSave("library", games);
-        renderLibrary();
+        renderSavedTab();
       }
-      loadBtn.addEventListener("click", () => { if (libraryPanel.hidden) openLibrary(); else closeLibrary(); });
 
-      // ---- play-history panel (every game you've finished or revealed, by date) ----
-      const historyPanel = document.getElementById("history"), historyBtn = document.getElementById("historyBtn");
-      let histEditing = null;
-      function closeHistory() { if (!historyPanel.hidden) { histEditing = null; historyPanel.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
-      function openHistory() { closeStats(); closeLibrary(); closeHistory(); histEditing = null; renderHistory(); historyPanel.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
-      function renderHistory() {
+      // ---- Play history tab (every game you've finished or revealed, by date) ----
+      function renderHistoryTab() {
+        const content = document.getElementById("libContent"); if (!content) return;
         const games = lsGet(STATS_KEY);
         if (!games.length) {
-          historyPanel.innerHTML = `<button id="hb">← Back</button><h2>Play history</h2><div class="card">No games played yet. Finish a puzzle (or use Reveal solution) and it'll be logged here by date — with its difficulty, time, and error count.</div>`;
-          document.getElementById("hb").onclick = closeHistory; return;
+          content.innerHTML = `<div class="card">No games played yet. Finish a puzzle (or use Reveal solution) and it'll be logged here by date — with its difficulty, time, and error count.</div>`;
+          return;
         }
         let rows = "", lastHeader = null;
         games.forEach((g, i) => {
@@ -1785,19 +2241,26 @@
           } else {
             rows += `<div class="saved-row">
               <div class="saved-meta"><b>${esc(g.difficulty || "—")}</b> · ${esc(g.source || "—")}<br><span class="k">${fmtTime(g.totalMs)} · ${errs} error${errs === 1 ? "" : "s"} · </span>${status}</div>
-              <div class="saved-actions"><button class="hist-view" data-i="${i}">Details</button><button class="hist-edit" data-i="${i}">Edit</button></div>
+              <div class="saved-actions"><button class="hist-view" data-i="${i}">Details</button><button class="hist-edit" data-i="${i}">Edit</button><button class="hist-del" data-i="${i}">Delete</button></div>
             </div>`;
           }
         });
-        historyPanel.innerHTML = `<button id="hb">← Back</button><h2>Play history <span class="k">(${games.length})</span></h2>${rows}`;
-        document.getElementById("hb").onclick = closeHistory;
-        historyPanel.querySelectorAll(".hist-view").forEach((b) => (b.onclick = () => openGameDeepDive(Number(b.dataset.i))));
-        historyPanel.querySelectorAll(".hist-edit").forEach((b) => (b.onclick = () => { histEditing = Number(b.dataset.i); renderHistory(); }));
-        historyPanel.querySelectorAll(".hist-cancel").forEach((b) => (b.onclick = () => { histEditing = null; renderHistory(); }));
-        historyPanel.querySelectorAll(".hist-save").forEach((b) => (b.onclick = () => {
+        content.innerHTML = rows;
+        content.querySelectorAll(".hist-view").forEach((b) => (b.onclick = () => openGameDeepDive(Number(b.dataset.i))));
+        content.querySelectorAll(".hist-edit").forEach((b) => (b.onclick = () => { histEditing = Number(b.dataset.i); renderHistoryTab(); }));
+        content.querySelectorAll(".hist-cancel").forEach((b) => (b.onclick = () => { histEditing = null; renderHistoryTab(); }));
+        content.querySelectorAll(".hist-save").forEach((b) => (b.onclick = () => {
           const row = b.closest(".saved-row");
           saveHistoryEdit(Number(b.dataset.i), row.querySelector(".edit-diff").value, row.querySelector(".edit-source").value);
         }));
+        content.querySelectorAll(".hist-del").forEach((b) => (b.onclick = () => deleteHistoryGame(Number(b.dataset.i))));
+      }
+      function deleteHistoryGame(i) {
+        const games = lsGet(STATS_KEY);
+        if (!games[i]) return;
+        games.splice(i, 1);
+        lsSet(STATS_KEY, games); cloudSave("stats", games);
+        histEditing = null; renderGameLibrary(); // rebuild so the History tab count stays accurate
       }
       function saveHistoryEdit(i, difficulty, source) {
         const games = lsGet(STATS_KEY);
@@ -1805,24 +2268,105 @@
         games[i].difficulty = difficulty;
         games[i].source = (source || "Unknown").trim() || "Unknown";
         lsSet(STATS_KEY, games); cloudSave("stats", games);
-        histEditing = null; renderHistory();
+        histEditing = null; renderHistoryTab();
       }
       function openGameDeepDive(i) {
-        closeHistory(); closeLibrary();
+        closeLibrary();
         renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none";
         const pick = document.getElementById("gamePick");
         if (pick) { pick.value = String(i); renderDeepDive(lsGet(STATS_KEY)[i]); }
       }
-      historyBtn.addEventListener("click", () => { if (historyPanel.hidden) openHistory(); else closeHistory(); });
+
+      // ---- Catalogue tab (built-in puzzles shipped with the app) ----
+      function renderCatalogTab() {
+        const content = document.getElementById("libContent"); if (!content) return;
+        let rows = "";
+        CATALOG.forEach((p, i) => {
+          rows += `<div class="saved-row">
+            <div class="saved-meta"><b>${esc(p.difficulty)}</b> · #${p.n}<br><span class="k">${p.date ? esc(fmtCatalogDate(p.date)) : "Built-in"}</span></div>
+            <div class="saved-actions"><button class="cat-play" data-i="${i}">Play</button></div>
+          </div>`;
+        });
+        content.innerHTML = `<div class="card">Built-in puzzles — pick one to play from scratch.</div>${rows}`;
+        content.querySelectorAll(".cat-play").forEach((b) => (b.onclick = () => playCatalog(Number(b.dataset.i))));
+      }
+      function playCatalog(i) {
+        const p = CATALOG[i]; if (!p) return;
+        closeLibrary();
+        resetToEdit(); writeGrid(p.grid); difficultyEl.value = p.difficulty; sourceEl.value = "Catalog"; renderPencils();
+        showReady(`Catalog · ${p.difficulty} #${p.n}${p.date ? " · " + fmtCatalogDate(p.date) : ""} loaded. Start the timer and play it from scratch?`);
+      }
+
+      // ---- Practice tab (drill one technique at a time) ----
+      function renderPracticeTab() {
+        const content = document.getElementById("libContent"); if (!content) return;
+        let rows = "";
+        for (const t of TRAINER_TECHS) {
+          const tier = tierForRank(TECH_RANK[t] || 3), color = TECH_COLORS[t] || "#94a3b8", n = TRAINER_BANK[t].length;
+          rows += `<div class="saved-row">
+            <div class="saved-meta"><b><span style="color:${color}">●</span> ${esc(t)}</b> <span class="pr-badge" style="font-size:0.7rem;padding:1px 7px">${esc(tier)}</span><br>
+              <span class="k">${esc(TRAINER_BLURB[t] || "")}</span></div>
+            <div class="saved-actions"><button class="drill-learn" data-t="${esc(t)}">Learn</button><button class="drill-play primary" data-t="${esc(t)}">Drill</button></div>
+          </div>`;
+        }
+        content.innerHTML = `<div class="card">Drill one technique at a time. Each puzzle is picked so that technique is its toughest step — solve it and train your eye for the pattern. <b>Learn</b> shows a worked example; <b>Drill</b> loads a puzzle.</div>${rows}`;
+        content.querySelectorAll(".drill-learn").forEach((b) => (b.onclick = () => openExample(b.dataset.t)));
+        content.querySelectorAll(".drill-play").forEach((b) => (b.onclick = () => loadDrill(b.dataset.t)));
+      }
+
+      libraryBtn.addEventListener("click", () => { if (libraryPanel.hidden) openLibrary(); else closeLibrary(); });
+      document.getElementById("practiceBtn").addEventListener("click", () => {
+        if (!libraryPanel.hidden && libTab === "practice") closeLibrary();
+        else openLibrary("practice");
+      });
+
+      // Home: close any open panel (stats or the game library) and return to the game board.
+      document.getElementById("homeBtn").addEventListener("click", () => {
+        closeMenu(); closeStats(); closeLibrary();
+      });
 
       // ---- built-in catalog (shipped with the app, available to every user) ----
       // Each entry: [difficulty, 81-char puzzle, date (YYYY-MM-DD)].
       const CATALOG_RAW = [
-        ["Easy", "530070000600195000098000060800060003400803001700020006060000280000419005000080079", "2025-01-06"],
-        ["Medium", "003020600900305001001806400008102900700000008006708200002609500800203009005010300", "2025-02-10"],
-        ["Medium", "200080300060070084030500209000105408000000000402706000301007040720040060004010003", "2025-03-17"],
-        ["Hard", "000000907000420180000705026100904000050000040000507009920108000034059000507000000", "2025-04-21"],
-        ["Hard", "030050040008010500460000012070502080000603000040109030250000098001020600080060020", "2025-05-26"],
+        ["Easy", "000106900008430000000007003450008000000060004000000250300049010206500300500000700", "2025-06-27"],
+        ["Easy", "003000100900400000500070009200000008037604000000057000000000270060005304070008000", "2025-06-23"],
+        ["Easy", "600000700902800000000560010000020000005074302007600000106000503000100070020003100", "2025-06-19"],
+        ["Easy", "085000200040000007007608403000030000060070000090000350006520000800040030010700060", "2025-06-15"],
+        ["Easy", "040860000000004800700000050600000000080000002000007010103020680060090704400000000", "2025-06-11"],
+        ["Easy", "000003000010000650200048009405070003000000000003000105500000000002460000008900340", "2025-06-07"],
+        ["Easy", "000906300000030000050000010007040000000002900300000400201600089060400500000809002", "2025-06-03"],
+        ["Easy", "600000100003400007070006025530600000800030000004520070040300050000070600000000080", "2025-05-30"],
+        ["Easy", "109000070004000001000046000500200090620070000000080500030090004090700000000060082", "2025-05-26"],
+        ["Easy", "900060000500800000000000402800017300200400010003000008030240007005009000090506804", "2025-05-22"],
+        ["Easy", "000000080029001000000930500602080400900604300004020700000000000000750000010000023", "2025-05-18"],
+        ["Easy", "030080009000600000509000000100000003080005010900870000004020100000040650000009080", "2025-05-14"],
+        ["Medium", "600190000005007030000053046010006304000000198090000000960500000050400810000000070", "2025-05-10"],
+        ["Medium", "060008040000070060310005007000910000000400032870500000720001600091000020000709000", "2025-05-06"],
+        ["Medium", "004231090600000800090000003010050070003007000080010400000403080400000020065000900", "2025-05-02"],
+        ["Medium", "200000980000008000800360105328040000007000010064900000000080043000700600000603200", "2025-04-28"],
+        ["Medium", "002064090000000720457000000009000002100043000070000010000008000500000960600090800", "2025-04-24"],
+        ["Medium", "000800000069007200000000540200600300605040000000000000301005007000070000502906001", "2025-04-20"],
+        ["Medium", "108030060004050800693002000200000400900600280300500000000210500010000004400000000", "2025-04-16"],
+        ["Medium", "906803010040006000083001007000000090300010050098004130000060040000508000001000570", "2025-04-12"],
+        ["Medium", "008090620000000300700058004000003760300000000072064009005000000000670000100080000", "2025-04-08"],
+        ["Medium", "000600090090000304000050000008009010260008000050007600070400005600000003900010062", "2025-04-04"],
+        ["Medium", "500004810040000000100000700000059007001030000067000030800740000000000350090020600", "2025-03-31"],
+        ["Medium", "000300800000100050070040009000002380003400000704000902000090060002015007040003200", "2025-03-27"],
+        ["Medium", "005900000006020058080006000000205006001000900002070510000000030003004067208000009", "2025-03-23"],
+        ["Medium", "000009850000080307500030004007006200081200000903004010002700000840900006000000000", "2025-03-19"],
+        ["Medium", "509000400008006001010200709000005000000090000700068003000003004000000100800107560", "2025-03-15"],
+        ["Hard", "001040706400500000070010000010070003604020000300950000280000030000000907000006000", "2025-03-11"],
+        ["Hard", "600000930900100700072000100306009000140050000000000060004067080210000040000800000", "2025-03-07"],
+        ["Hard", "040080020010000000007020005000000067000004800000260000603700900000300000891056700", "2025-03-03"],
+        ["Hard", "200873600005000000080060190000900000000004036000001050071000000500400020000080400", "2025-02-27"],
+        ["Hard", "080000502007080604060004000000800000200035009035000000000900003000406010956001008", "2025-02-23"],
+        ["Hard", "000006010600807004400000006010002800706308000003000402002900100000000900050070020", "2025-02-19"],
+        ["Hard", "400000320007900060001070000740000500208001000100380600004000000030002790000800050", "2025-02-15"],
+        ["Hard", "000604000000091200026000009000000000801000030000709086007000500180076000405008000", "2025-02-11"],
+        ["Hard", "003000089000000000005061000020103706300720000001800020059070003706900002000000000", "2025-02-07"],
+        ["Hard", "060000003018000060200000090901000026006900000700500040002306007000000200007002015", "2025-02-03"],
+        ["Hard", "001050006000002700600004001060700000002903800007005609430070000000009300000001020", "2025-01-30"],
+        ["Hard", "090080040000700000103009000209806300400000200000002004810500760600000050007000008", "2025-01-26"],
       ];
       function parsePuzzle(str) {
         const g = [];
@@ -1836,20 +2380,57 @@
         const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
         return `${months[m - 1]} ${d}, ${y}`;
       }
+      // Built-in puzzles are surfaced in the Game library's Catalogue tab (see renderCatalogTab).
       const CATALOG = CATALOG_RAW.filter(([, s]) => s.length === 81).map(([difficulty, s, date], i) => ({ difficulty, grid: parsePuzzle(s), date, n: i + 1 }));
-      const catalogEl = document.getElementById("catalog");
-      CATALOG.forEach((p, i) => { const o = document.createElement("option"); o.value = i; o.textContent = `Catalog · ${p.difficulty} #${p.n}${p.date ? " · " + fmtCatalogDate(p.date) : ""}`; catalogEl.appendChild(o); });
-      document.getElementById("play").addEventListener("click", () => {
-        const p = CATALOG[Number(catalogEl.value)]; if (!p) return;
-        resetToEdit(); writeGrid(p.grid); difficultyEl.value = p.difficulty; sourceEl.value = "Catalog"; renderPencils();
-        showReady(`Catalog · ${p.difficulty} #${p.n}${p.date ? " · " + fmtCatalogDate(p.date) : ""} loaded. Start the timer and play it from scratch?`);
-      });
+
+      // ---- technique trainer ----
+      // Puzzles bucketed by the hardest technique their solution requires (each generated and graded
+      // with gradeDifficulty so the label is exactly what the app computes). Drilling one lets you
+      // practise spotting that technique on a puzzle where it's the crux. Ordered easiest → hardest.
+      const TRAINER_BANK = {
+        "Naked single": ["008950000000104050000670000000803005010007002800000003200090700089400000604000010", "600500070090000602000800100000730048050080007000090520000000000007000059030100400"],
+        "Hidden single": ["000040080000000609610500000000005008700000010080600204409000006000200050360090000", "000070100080020500930005000001500000000060704000002060890100040070900000006004000", "038000004006800079700000000901000008000908000023000400200600005000310700000700200", "000009000008000075127300000706030000040000020000600001230100090070002040900000002", "003500000041390000070004100069000702005000601000600038000072005400800007000000300", "048000200000000900790050040000142000100003007003008000007000150005206030000090000", "309042000010000000000000640400670000000089004000000083200094800000350200095001000", "802600400006000900007090000000900000000040006000080050500060008200035090081000620"],
+        "Pointing pair": ["030000580600000000000700001860200000000095008005007102090003005700001000006850007", "800090000003010800000400907029070000000003002700040010000060000000200480067004003", "000500000195004060000000803000060108031200000070000030600409000002605900000030000", "980000000002005009000000605007400236004000007000100050060090720030000000000002004", "000000048100000530006002007000390000060250070000000400400008020000079000590000060", "000000100600041090009007000080002015060750200000009000300000070004070500102003060", "008090700001706003000000461005300809000050014030000005000020000014000000083009000", "409000507005040010000600000070000030002309100300187005600000000000000704000403092"],
+        "Pointing triple": ["700020000900000080630005409000006200013000000500097000009300800050700060008600003", "000300051600007290000000000009005000000006080032094000070009520000100000300020900", "000109000000020903810000020050000080000000040307008000000903000045000000001002056", "060180090000020000800600010700400500000050004010030072030700006004500800070000000", "090000062008043000300200000021070000000020090000610800000801006000000017006430000", "000001070000000000514000200900800006040907002070012900200000060009060800000350000"],
+        "Naked pair": ["070000250020007900100004000600210000000000000004030072051000004000089000090000820", "600030008000005900540000000000406003070001000801900700100200670000800400790000000", "000000050300052000020049103000200010005090367078000002000100400940005000006000000", "703009100040000000005302000080200005100506040506900020000000804004070000900000003", "009070002000050680060000037000040200300000079000005000000000800000508096012006003", "002000300000001000000003451300000004800400200100008006200090000070010005006520000", "000030609680000307900010000000009706004007000500060100005000003300200000820000050", "900203100300070008701060400000800940004020010003007000060000009009000000520030000"],
+        "Hidden pair": ["109650008006000070000004000000070000000400037002906040001000002400201789000860010", "640708000001000600030000000000002493000090001000100207450006000000900010300200070", "830060000000409600050001003000900007070010000003800100900000030005000000461095020", "420000010000010000600030200009800030030000007200000860007006000100005004800001002", "000800034000140006100700890018005900090000000400070000807000049000500000003060010", "600700059050300060980600070792000000000090000501000000000081603030020700000000010", "400006001003400000600008004000000000340601000080000050005100270090070000000300900"],
+        "Naked triple": ["002607100000905600060280050010000900043006000000000000105090030000000020007800005", "065000009700000000001960057000000030000180400090506800200050003004010000000008002", "103004900900052000000000086004000000000100700800590004000087300200400000006000019"],
+        "Hidden triple": ["700000000500090023000600000000109045020000010001040206008950000005000860017060030"],
+        "X-wing": ["035400000600090000400200091000020000000500600093000010700004506300800900050000007", "700004200000000017010000600970030001000000800060215004005049702000800000049500000"],
+        "XY-wing": ["100900360300000080500002000004080030900000008003029010001005027009000100200060050", "100400000400502030000010807060009500002040900040057010070000003000090000000000186", "008006090050872040000000000001600480300090005900020000040500100605000003000000000", "001300050950200000000000703300400000002060001000007080004080000700030005600010004", "000009104040307096000800003002000000000000200579000000000004650080610009300070000", "040050280000004006300000100000100700030020000200530600180009450000600000920000000", "000010032002400000010000890098300075065070000000009026000000907500000000009527000", "010000000400608107000001090004017000001490000008000030000000700900060005803059004"],
+        "XYZ-wing": ["074600250000074000090000007002000401400006800005203000058009002000000060000530900", "001405000000600900060000020087001005000030008500980000050000600006000300000190204"],
+        "Swordfish": ["010000060003700000905000000080300500000010040000040083600051300800090010200800400"],
+      };
+      const TRAINER_BLURB = {
+        "Naked single": "A cell where eight digits are already blocked, leaving one. The bread-and-butter scan.",
+        "Hidden single": "A digit that fits only one cell of a row, column, or box — even if that cell has other candidates.",
+        "Pointing pair": "A digit confined to one row/column within a box, letting you clear it from the rest of that line.",
+        "Pointing triple": "Three cells of a box on one line pin a digit there, clearing it from the line outside the box.",
+        "Naked pair": "Two cells sharing the same two candidates — those digits leave every other cell in the unit.",
+        "Hidden pair": "Two digits that fit only the same two cells, clearing all their other candidates.",
+        "Naked triple": "Three cells holding only three digits between them — remove those digits from the rest of the unit.",
+        "Hidden triple": "Three digits locked to the same three cells, clearing every other candidate from them.",
+        "X-wing": "A digit pinned to the same two columns across two rows (or vice-versa) — eliminate it elsewhere.",
+        "XY-wing": "A pivot plus two pincers where one pincer must be Z, removing Z from any cell seeing both.",
+        "XYZ-wing": "Like an XY-wing but the pivot also shares Z, so cells seeing all three lose Z.",
+        "Swordfish": "An X-wing stretched to three rows and three columns.",
+      };
+      // Techniques we can drill, easiest → hardest (bank insertion order), skipping empty buckets.
+      const TRAINER_TECHS = Object.keys(TRAINER_BANK).filter((t) => (TRAINER_BANK[t] || []).length);
+      function loadDrill(tech) {
+        const bank = TRAINER_BANK[tech]; if (!bank || !bank.length) return;
+        closeLibrary(); document.getElementById("exModal").hidden = true;
+        const str = bank[Math.floor(Math.random() * bank.length)];
+        const grid = parsePuzzle(str), tier = tierForRank(TECH_RANK[tech] || 3);
+        resetToEdit(); writeGrid(grid); difficultyEl.value = tier; sourceEl.value = "Trainer · " + tech; renderPencils();
+        showReady(`Drill: ${tech}. This puzzle's toughest step is a ${tech.toLowerCase()} — solve it and watch for that pattern. Stuck? Hint walks you through it.`);
+      }
 
       // ---- stats / deep dive ----
       const TECH_COLORS = { "Naked single": "#4ade80", "Hidden single": "#6ea8fe", "Pointing pair": "#f59e0b",
         "Pointing triple": "#f59e0b", "Locked candidate": "#f59e0b", "Box/line reduction": "#f59e0b",
         "Naked pair": "#a78bfa", "Hidden pair": "#a78bfa", "Naked triple": "#7c3aed", "Hidden triple": "#7c3aed",
-        "X-wing": "#ec4899", "Swordfish": "#db2777", "XY-wing": "#14b8a6",
+        "X-wing": "#ec4899", "Swordfish": "#db2777", "XY-wing": "#14b8a6", "XYZ-wing": "#0d9488",
         "Advanced": "#94a3b8", "Other": "#94a3b8", "Mistake": "#ff6b6b" };
       function median(arr) { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
       function errorsIn(g) { return typeof g.errors === "number" ? g.errors : g.moves.filter((m) => !m.correct).length; }
@@ -1895,6 +2476,56 @@
         }
         return pts;
       }
+      // ---- avg time per move, by move position (used by the "Avg time per move" chart) ----
+      const DIFF_COLORS = { Easy: "#4ade80", Medium: "#f59e0b", Hard: "#ff6b6b" };
+      function movePaceSeries(games, diff) {
+        // For each move position k, average the time-per-move (dt) across all games of this
+        // difficulty that reached that position. Later positions naturally average fewer games.
+        const gs = games.filter((g) => g.difficulty === diff && (g.moves || []).length);
+        if (!gs.length) return [];
+        const maxLen = Math.max(...gs.map((g) => g.moves.length));
+        const pts = [];
+        for (let k = 0; k < maxLen; k++) {
+          let sum = 0, n = 0;
+          for (const g of gs) { const m = g.moves[k]; if (m && typeof m.dt === "number") { sum += m.dt; n++; } }
+          if (n) pts.push({ x: k + 1, v: sum / n, n });
+        }
+        return pts;
+      }
+      function movePaceChart(games, diffs) {
+        const series = diffs
+          .map((d) => ({ label: d, color: DIFF_COLORS[d] || "var(--accent)", pts: movePaceSeries(games, d), games: games.filter((g) => g.difficulty === d && (g.moves || []).length).length }))
+          .filter((s) => s.pts.length);
+        if (!series.length) return '<div class="card">Play a few games and your average time per move will chart here, by difficulty.</div>';
+        const maxX = Math.max(2, ...series.flatMap((s) => s.pts.map((p) => p.x)));
+        const maxY = Math.max(1, ...series.flatMap((s) => s.pts.map((p) => p.v)));
+        const W = 300, H = 156, padL = 46, padR = 10, padT = 8, padB = 30;
+        const plotW = W - padL - padR, plotH = H - padT - padB;
+        const sx = (x) => padL + (maxX === 1 ? 0 : (x - 1) / (maxX - 1)) * plotW;
+        const sy = (v) => padT + (1 - v / maxY) * plotH;
+        let grid = "";
+        for (const t of [0, maxY / 2, maxY]) {
+          const y = sy(t);
+          grid += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" stroke="var(--line)" stroke-width="1"></line>`;
+          grid += `<text x="${padL - 6}" y="${(y + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--muted)">${esc(fmtDt(t))}</text>`;
+        }
+        let xaxis = "";
+        for (const t of [...new Set([1, Math.round(maxX / 2), maxX])]) {
+          xaxis += `<text x="${sx(t).toFixed(1)}" y="${H - padB + 15}" text-anchor="middle" font-size="9" fill="var(--muted)">${t}</text>`;
+        }
+        xaxis += `<text x="${(padL + plotW / 2).toFixed(1)}" y="${H - 4}" text-anchor="middle" font-size="9" fill="var(--muted)">move number</text>`;
+        let lines = "";
+        for (const s of series) {
+          const pathPts = s.pts.map((p) => `${sx(p.x).toFixed(1)},${sy(p.v).toFixed(1)}`).join(" ");
+          lines += `<polyline points="${pathPts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>`;
+        }
+        const legend = series.map((s) => `<span class="lg"><span class="lgdot" style="background:${s.color}"></span>${esc(s.label)} <span class="k">(${s.games})</span></span>`).join("");
+        return `<div class="card">
+          <svg viewBox="0 0 ${W} ${H}" class="pace-chart" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Average time per move by difficulty">${grid}${lines}${xaxis}</svg>
+          <div class="chart-legend">${legend}</div>
+          <span class="k">Average time per move at each position — lower is quicker. Later positions average fewer games.</span>
+        </div>`;
+      }
 
       // ---- visual technique examples (shown from the stats technique table) ----
       const TECH_EXAMPLES = {
@@ -1923,6 +2554,12 @@
         "X-wing": { focus: ["1,2", "1,6", "5,2", "5,6"], elim: ["3,2", "7,6"],
           marks: { "1,2": [5], "1,6": [5], "5,2": [5], "5,6": [5], "3,2": [5], "7,6": [5] }, struck: { "3,2": [5], "7,6": [5] },
           caption: "In rows 2 and 6, digit 5 is pinned to the same two columns (3 and 7) — an X-wing. 5 can then be removed from those columns in every other row (crossed out)." },
+        "XY-wing": { focus: ["0,0", "0,4", "2,1"], elim: ["2,4"],
+          marks: { "0,0": [1, 2], "0,4": [1, 3], "2,1": [2, 3], "2,4": [3, 5], "0,1": [7, 8] }, struck: { "2,4": [3] },
+          caption: "Pivot R1C1 {1,2} links two pincers — R1C5 {1,3} and R3C2 {2,3}. Whichever the pivot takes, one pincer becomes 3, so any cell seeing both pincers loses 3 (crossed out)." },
+        "XYZ-wing": { focus: ["0,0", "0,4", "1,1"], elim: ["0,1", "0,2"],
+          marks: { "0,0": [1, 2, 3], "0,4": [1, 3], "1,1": [2, 3], "0,1": [3, 4, 5], "0,2": [3, 6, 7] }, struck: { "0,1": [3], "0,2": [3] },
+          caption: "Pivot R1C1 {1,2,3} plus pincers R1C5 {1,3} and R2C2 {2,3} all share 3. Every cell that sees all three — here R1C2 and R1C3 — can't be 3 (crossed out) — an XYZ-wing." },
       };
       function renderMiniBoard(container, ex) {
         container.innerHTML = "";
@@ -1945,6 +2582,16 @@
         }
         container.appendChild(b);
       }
+      // Written explanations for named techniques that don't ship a mini-board example, so the pop-up
+      // never mislabels a real rule as an unnamed "advanced" move.
+      const TECH_TEXT = {
+        "Pointing triple": "Within one box a digit is confined to a single row (or column) — three cells of it. That digit can then be removed from the rest of that row or column outside the box.",
+        "Locked candidate": "In a row or column a digit only fits inside one box. Since it must go there, the digit is removed from that box's other cells.",
+        "Box/line reduction": "In a row or column a digit only fits inside one box, so the digit is removed from that box's other cells.",
+        "Naked triple": "Three cells in a unit together hold only three digits between them, so those three digits belong to those cells — they're removed from every other cell in the unit.",
+        "Hidden triple": "Three digits in a unit can only appear in the same three cells, so those cells must hold them — every other candidate is cleared from those three cells.",
+        "Swordfish": "A digit is confined to the same three columns across three rows (or vice-versa). It can then be removed from those columns in every other row.",
+      };
       function openExample(tech) {
         const ex = TECH_EXAMPLES[tech];
         document.getElementById("exTitle").textContent = tech;
@@ -1954,9 +2601,16 @@
           board.innerHTML = "";
           document.getElementById("exCaption").textContent = tech === "Mistake"
             ? "These are entries that didn't match the solution. There's no rule to learn here — slow down and verify a digit before placing it."
-            : "This move follows from the puzzle's unique solution (an advanced technique, or simply filling neighbors first) rather than one named rule.";
+            : TECH_TEXT[tech]
+            || "This move follows from the puzzle's unique solution (an advanced technique, or simply filling neighbors first) rather than one named rule.";
         }
         renderTechGames(tech);
+        const drillBtn = document.getElementById("exDrill");
+        if (drillBtn) {
+          const canDrill = !!(TRAINER_BANK[tech] && TRAINER_BANK[tech].length);
+          drillBtn.hidden = !canDrill;
+          drillBtn.onclick = canDrill ? () => loadDrill(tech) : null;
+        }
         document.getElementById("exModal").hidden = false;
       }
       // List every logged game that used this technique, newest first, with its date and difficulty.
@@ -1983,17 +2637,137 @@
       }
       document.getElementById("exClose").addEventListener("click", () => { document.getElementById("exModal").hidden = true; });
       document.getElementById("exModal").addEventListener("click", (e) => { if (e.target.id === "exModal") e.currentTarget.hidden = true; });
-      function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; } }
+      function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause(); } }
       document.getElementById("statsBtn").addEventListener("click", () => {
-        if (statsEl.hidden) { closeLibrary(); closeHistory(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; }
+        if (statsEl.hidden) { closeLibrary(); closeHistory(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
         else closeStats();
       });
+      // Which stats tab is showing; remembered across opens. A win jumps to "this".
+      let statsTab = "all";
+      let timeChartMode = "overtime"; // "overtime" = solve time over time · "permove" = avg time per move
+      function setStatsTab(tab) {
+        statsTab = tab;
+        statsEl.querySelectorAll(".stab").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+        const t = document.getElementById("tabThis"), a = document.getElementById("tabAll");
+        if (t) t.hidden = tab !== "this";
+        if (a) a.hidden = tab !== "all";
+      }
+      // Techniques the player needed help with (hints taken + easier steps missed on a slip), most first.
+      // Reused by both stats tabs; taps open the same technique refresher pop-up.
+      function missedSection(missed, title) {
+        const entries = Object.entries(missed || {}).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+        if (!entries.length) return "";
+        let rows = "";
+        for (const [t, c] of entries) rows += `<tr class="trow" data-tech="${esc(t)}"><td><span style="color:${TECH_COLORS[t] || "#94a3b8"}">●</span> ${esc(t)}</td><td>${c}</td></tr>`;
+        return `<h3>${esc(title)}</h3><table class="grid"><tr><th>Technique</th><th>Times you needed help</th></tr>${rows}</table>
+          <p class="hintline">Counts hints you took plus the easier step available when you slipped — your weak spots. Tap one for a refresher.</p>`;
+      }
+      // "This game" pane: the live game if one's in progress, else the most recently recorded game.
+      // Mirrors every section of the "All games" tab, scoped to this single game.
+      function thisGamePane(games) {
+        const g = session
+          ? { difficulty: session.difficulty, source: session.source, totalMs: activeElapsed(), errors: session.errors || 0, hints: session.hints || 0, moves: session.moves || [], missed: session.missed || {}, live: true }
+          : games[0];
+        if (!g) return '<div class="card">No game yet. Start a puzzle and its live stats — time, errors, hints, and techniques — show here.</div>';
+        const d = g.difficulty || "";
+        const status = g.live ? "in progress" : (g.solved ? "solved" : "revealed");
+        const moves = g.moves || [];
+        const errs = errorsIn(g), hints = g.hints || 0, movesN = moves.length;
+        const correct = moves.filter((m) => m.correct).length;
+        const acc = movesN ? Math.round((correct / movesN) * 100) : 0;
+
+        // ----- overview (this game's headline numbers) -----
+        const prLine = g.isPR ? `<div class="pr-badge" style="margin:0 0 12px">🏆 Personal record — fastest ${esc(d)} yet</div>` : "";
+        const overview = `<div class="statgrid" style="grid-template-columns:repeat(2,1fr)">
+            <div class="stat"><b>${fmtTime(g.totalMs || 0)}</b><span class="k">time</span></div>
+            <div class="stat"><b>${movesN ? acc + "%" : "—"}</b><span class="k">accuracy</span></div>
+            <div class="stat"><b>${errs}</b><span class="k">error${errs === 1 ? "" : "s"}</span></div>
+            <div class="stat"><b>${hints}</b><span class="k">hint${hints === 1 ? "" : "s"}</span></div>
+          </div>
+          <div class="card"><span class="k">moves placed</span> ${movesN} · <span class="k">${correct} correct</span></div>`;
+
+        // ----- compared to your best (personal-records analog for one game) -----
+        const priorBest = games
+          .filter((x) => x !== g && x.solved && x.difficulty === d)
+          .reduce((a, x) => (a === null || x.totalMs < a.totalMs ? x : a), null);
+        let compare = "";
+        if (d && (g.solved || g.live)) {
+          if (g.isPR) {
+            compare = `<h3>Compared to your best</h3><div class="card">This is your fastest <b>${esc(d)}</b> solve yet. 🏆</div>`;
+          } else if (priorBest) {
+            const diff = (g.totalMs || 0) - priorBest.totalMs;
+            const note = diff <= 0
+              ? `<span class="trend down">on pace with your best</span>`
+              : `<span class="trend up">+${fmtTime(diff)} slower</span>`;
+            compare = `<h3>Compared to your best</h3><div class="card">Your best <b>${esc(d)}</b> is <span class="best" style="color:var(--accent);font-weight:800">${fmtTime(priorBest.totalMs)}</span> · this game ${fmtTime(g.totalMs || 0)} ${note}</div>`;
+          }
+        }
+
+        // ----- by-technique breakdown with typical time (where you spent time this game) -----
+        const byTech = {};
+        for (const m of moves) (byTech[m.tech] ||= []).push(m.dt);
+        const techRows = Object.entries(byTech).filter(([t]) => t !== "Mistake")
+          .map(([t, dts]) => ({ t, count: dts.length, med: median(dts) }))
+          .sort((a, b) => b.med - a.med);
+        const mistakes = (byTech["Mistake"] || []).length;
+        let techTable = "";
+        if (techRows.length || mistakes) {
+          techTable = `<h3>Where you spent time</h3><table class="grid"><tr><th>Technique</th><th>Moves</th><th>Typical time</th></tr>`;
+          for (const row of techRows) techTable += `<tr class="trow" data-tech="${esc(row.t)}"><td><span style="color:${TECH_COLORS[row.t] || "#94a3b8"}">●</span> ${esc(row.t)}</td><td>${row.count}</td><td>${fmtDt(row.med)}</td></tr>`;
+          if (mistakes) techTable += `<tr class="trow" data-tech="Mistake"><td><span style="color:${TECH_COLORS.Mistake}">●</span> Mistake</td><td>${mistakes}</td><td>—</td></tr>`;
+          techTable += `</table><p class="hintline">Tap a technique to see a visual example of how it works.</p>`;
+        }
+
+        // ----- takeaway (slowest technique this game) -----
+        // techRows is sorted slowest-median first, so its head is genuinely where this game's time went.
+        const focus = techRows[0];
+        let takeaway = "";
+        if (focus) {
+          const timeWord = focus.count > 1 ? `typically ${fmtDt(focus.med)}` : fmtDt(focus.med);
+          takeaway = `<div class="card takeaway">You spent longest on <b style="color:${TECH_COLORS[focus.t] || "#94a3b8"}">${esc(focus.t)}</b> placement${focus.count > 1 ? "s" : ""} this game (${timeWord}).${mistakes ? ` You made ${mistakes} mistake${mistakes > 1 ? "s" : ""} — slow down to verify before placing.` : ""}</div>`;
+        } else if (movesN) {
+          takeaway = `<div class="card takeaway">${mistakes ? `You made ${mistakes} mistake${mistakes > 1 ? "s" : ""} this game.` : "Clean game so far — no mistakes logged."}</div>`;
+        }
+
+        // ----- techniques to practice (hints taken + easier steps missed this game) -----
+        const practice = missedSection(g.missed, "Techniques to practice");
+
+        // ----- move-by-move timeline (pace / deep dive for this game) -----
+        const timeline = movesN ? `<h3>Move-by-move timeline</h3>${deepDiveHTML(g, false)}` : "";
+
+        return `${prLine}
+          <div class="card"><b>${esc(d || "—")}</b> · ${esc(g.source || "—")} · <span class="k">${status}</span></div>
+          ${overview}
+          ${compare}
+          ${takeaway}
+          ${techTable}
+          ${practice}
+          ${timeline}`;
+      }
       function renderStats() {
         const games = lsGet(STATS_KEY);
-        if (!games.length) { statsEl.innerHTML = `<button id="sb">← Back</button><h2>Your stats</h2><div class="card">No games recorded yet. Solve a puzzle and your timing breakdown will appear here.</div>`; document.getElementById("sb").onclick = () => document.getElementById("statsBtn").click(); return; }
+        if (!games.length && !session) { statsEl.innerHTML = `<button id="sb">← Back</button><h2>Your stats</h2><div class="card">No games recorded yet. Solve a puzzle and your timing breakdown will appear here.</div>`; document.getElementById("sb").onclick = () => document.getElementById("statsBtn").click(); return; }
+
+        const diffs = ["Easy", "Medium", "Hard"];
+
+        // ----- overview + personal records (All games) -----
+        const totalGames = games.length, solvedGames = games.filter((g) => g.solved).length;
+        const winRate = totalGames ? Math.round((solvedGames / totalGames) * 100) : 0;
+        const overview = `<div class="statgrid">
+          <div class="stat"><b>${totalGames}</b><span class="k">games</span></div>
+          <div class="stat"><b>${solvedGames}</b><span class="k">solved</span></div>
+          <div class="stat"><b>${winRate}%</b><span class="k">win rate</span></div>
+        </div>`;
+        let prRows = "";
+        for (const d of diffs) {
+          const solved = games.filter((g) => g.solved && g.difficulty === d);
+          if (!solved.length) { prRows += `<div class="pr-row empty"><span class="t">${d}</span><span class="best">— no solve yet</span></div>`; continue; }
+          const best = solved.reduce((a, g) => (g.totalMs < a.totalMs ? g : a));
+          const date = new Date(best.finishedAt || best.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+          prRows += `<div class="pr-row"><span class="t">${d}</span><span><span class="best">${fmtTime(best.totalMs)}</span> <span class="k">· ${date}</span></span></div>`;
+        }
 
         // by difficulty
-        const diffs = ["Easy", "Medium", "Hard"];
         let summary = "";
         for (const d of diffs) {
           const gs = games.filter((g) => g.difficulty === d); if (!gs.length) continue;
@@ -2002,7 +2776,8 @@
           const moves = gs.flatMap((g) => g.moves);
           const acc = moves.length ? Math.round((moves.filter((m) => m.correct).length / moves.length) * 100) : 0;
           const totalErrors = gs.reduce((a, g) => a + errorsIn(g), 0);
-          summary += `<div class="card"><b>${d}</b> · ${gs.length} game${gs.length > 1 ? "s" : ""} (${solved.length} solved)<br>
+          const wr = Math.round((solved.length / gs.length) * 100);
+          summary += `<div class="card"><b>${d}</b> · ${gs.length} game${gs.length > 1 ? "s" : ""} (${solved.length} solved · ${wr}% win)<br>
             <span class="k">avg solve</span> ${times.length ? fmtTime(times.reduce((a, b) => a + b, 0) / times.length) : "—"} ·
             <span class="k">best</span> ${times.length ? fmtTime(Math.min(...times)) : "—"} ·
             <span class="k">accuracy</span> ${acc}% ·
@@ -2022,6 +2797,9 @@
         }
         if (!diffTrend) diffTrend = '<div class="card">Solve a few puzzles and your times will chart here, so you can watch them drop.</div>';
 
+        // avg time per move by move position, per difficulty — the toggle-able alternate view
+        const paceHTML = movePaceChart(games, diffs);
+
         // by technique (typical time per move)
         const allMoves = games.flatMap((g) => g.moves);
         const byTech = {};
@@ -2035,7 +2813,15 @@
         if (mistakes) techTable += `<tr class="trow" data-tech="Mistake"><td><span style="color:${TECH_COLORS.Mistake}">●</span> Mistake</td><td>${mistakes}</td><td>—</td></tr>`;
         techTable += `</table><p class="hintline">Tap a technique to see a visual example and the games where it was logged.</p>`;
         const focus = techRows.filter((r) => r.count >= 3 && r.t !== "Other" && r.t !== "Advanced")[0];
-        const takeaway = focus
+
+        // techniques to practice — hints taken + easier steps missed, summed across every game
+        const missedAll = {};
+        for (const g of games) for (const [t, c] of Object.entries(g.missed || {})) missedAll[t] = (missedAll[t] || 0) + c;
+        const practicePane = missedSection(missedAll, "Techniques to practice");
+        const topMissed = Object.entries(missedAll).sort((a, b) => b[1] - a[1])[0];
+        const takeaway = topMissed
+          ? `You most often need help spotting <b style="color:${TECH_COLORS[topMissed[0]] || "#94a3b8"}">${esc(topMissed[0])}</b> (${topMissed[1]}×). Drill that one and your times should drop.${mistakes ? ` You've made ${mistakes} mistake${mistakes > 1 ? "s" : ""} total — slow down to verify before placing.` : ""}`
+          : focus
           ? `You take longest on <b style="color:${TECH_COLORS[focus.t]}">${esc(focus.t)}</b> placements (typically ${fmtDt(focus.med)}). Practice scanning for these earlier.${mistakes ? ` You've also made ${mistakes} mistake${mistakes > 1 ? "s" : ""} — slow down to verify before placing.` : ""}`
           : `Keep playing — after a few games I'll point out which technique slows you down most.`;
 
@@ -2059,28 +2845,59 @@
         let opts = "";
         games.forEach((g, i) => { opts += `<option value="${i}">${esc(g.source)} · ${esc(g.difficulty)} · ${new Date(g.startedAt).toLocaleDateString()} · ${fmtTime(g.totalMs)} ${g.solved ? "✓" : "▢"}</option>`; });
 
-        statsEl.innerHTML = `<button id="sb">← Back</button><h2>Your stats</h2>
+        const allPane = games.length ? `
+          <h3>Overview</h3>${overview}
+          <h3>Personal records</h3><div class="card">${prRows}</div>
           <div class="card takeaway">${takeaway}</div>
           <h3>By difficulty</h3>${summary || '<div class="card">No solved games yet.</div>'}
-          <h3>Solve time over time</h3>${diffTrend}
+          <h3>Solve time trends</h3>
+          <div class="chart-toggle">
+            <button class="ctog" data-mode="overtime">Solve time over time</button>
+            <button class="ctog" data-mode="permove">Avg time per move</button>
+          </div>
+          <div id="timeChartBox"></div>
           <h3>Where you spend time</h3>${techTable}
           <p class="sub" style="margin:8px 0 0">Typical = median time between your choices, so a long pause stands out without one outlier skewing it.</p>
+          ${practicePane}
           <h3>Technique time over time</h3>${techTrend}
           <h3>Deep dive — a single game</h3>
           <select id="gamePick" style="width:100%;margin-bottom:10px">${opts}</select>
-          <div id="deepDive"></div>`;
+          <div id="deepDive"></div>`
+          : '<div class="card">No finished games yet — solve one and your totals, records, and trends will appear here.</div>';
+
+        statsEl.innerHTML = `<button id="sb">← Back</button><h2>Your stats</h2>
+          <div class="stats-tabs">
+            <button class="stab" data-tab="this">This game</button>
+            <button class="stab" data-tab="all">All games</button>
+          </div>
+          <div id="tabThis" class="tabpane">${thisGamePane(games)}</div>
+          <div id="tabAll" class="tabpane">${allPane}</div>`;
         document.getElementById("sb").onclick = () => document.getElementById("statsBtn").click();
+        statsEl.querySelectorAll(".stab").forEach((btn) => { btn.onclick = () => setStatsTab(btn.dataset.tab); });
         statsEl.querySelectorAll(".trow").forEach((row) => { row.onclick = () => openExample(row.dataset.tech); });
         const pick = document.getElementById("gamePick");
-        pick.onchange = () => renderDeepDive(games[Number(pick.value)]);
-        renderDeepDive(games[0]);
+        if (pick) { pick.onchange = () => renderDeepDive(games[Number(pick.value)]); renderDeepDive(games[0]); }
+        setStatsTab(statsTab);   // apply the remembered tab
+        // Solve-time trends toggle: swap between "over time" and "avg time per move".
+        const timeCharts = { overtime: diffTrend, permove: paceHTML };
+        const paintTimeChart = () => {
+          const box = document.getElementById("timeChartBox");
+          if (box) box.innerHTML = timeCharts[timeChartMode] || "";
+          statsEl.querySelectorAll(".ctog").forEach((b) => b.classList.toggle("on", b.dataset.mode === timeChartMode));
+        };
+        statsEl.querySelectorAll(".ctog").forEach((b) => (b.onclick = () => { timeChartMode = b.dataset.mode; paintTimeChart(); }));
+        paintTimeChart();
       }
-      function renderDeepDive(g) {
-        const dd = document.getElementById("deepDive"); if (!g) { dd.innerHTML = ""; return; }
-        const maxDt = Math.max(1, ...g.moves.map((m) => m.dt));
-        const slow = Math.max(maxDt * 0.6, median(g.moves.map((m) => m.dt)) * 2.5);
-        let html = `<div class="card">${g.moves.length} moves · ${fmtTime(g.totalMs)} total · ${errorsIn(g)} error${errorsIn(g) === 1 ? "" : "s"} · ${g.solved ? "solved" : "revealed"}</div>`;
-        g.moves.forEach((m, i) => {
+      // Move-by-move timeline: one bar per move sized by the pause before it, slow moves flagged.
+      // Shared by the "All games" deep-dive selector and the "This game" pane.
+      function deepDiveHTML(g, includeSummary = true) {
+        const moves = g.moves || [];
+        if (!moves.length) return `<div class="card">No moves recorded for this game yet.</div>`;
+        const maxDt = Math.max(1, ...moves.map((m) => m.dt));
+        const slow = Math.max(maxDt * 0.6, median(moves.map((m) => m.dt)) * 2.5);
+        const statusWord = g.live ? "in progress" : (g.solved ? "solved" : "revealed");
+        let html = includeSummary ? `<div class="card">${moves.length} moves · ${fmtTime(g.totalMs)} total · ${errorsIn(g)} error${errorsIn(g) === 1 ? "" : "s"} · ${statusWord}</div>` : "";
+        moves.forEach((m, i) => {
           const color = TECH_COLORS[m.tech] || "#94a3b8";
           const w = Math.round((m.dt / maxDt) * 100);
           html += `<div class="move ${m.correct ? "" : "bad"} ${m.dt >= slow ? "slow" : ""}">
@@ -2090,7 +2907,11 @@
             <span class="meta">${fmtDt(m.dt)} · ${esc(m.tech)}${m.dt >= slow ? " ⏳" : ""}</span>
           </div>`;
         });
-        dd.innerHTML = html;
+        return html;
+      }
+      function renderDeepDive(g) {
+        const dd = document.getElementById("deepDive"); if (!g) { dd.innerHTML = ""; return; }
+        dd.innerHTML = deepDiveHTML(g);
       }
 
       // ---- image import ----
@@ -2114,10 +2935,10 @@
         } catch (err) { showExplain("Couldn't read the image", (err.message || "Unknown error") + " — you can still type the puzzle in by hand.", "bad"); }
       }
       // Bulk import: read every screenshot (a few at a time), saving each new grid straight to the
-      // library with the current default difficulty/source. Nothing is loaded onto the board.
+      // library. Each puzzle is auto-graded by difficulty (there's no per-puzzle popup in bulk).
+      // Nothing is loaded onto the board.
       async function importBulk(files) {
         const total = files.length;
-        const diff = difficultyEl.value || "Medium";
         const src = (sourceEl.value || "Unknown").trim() || "Unknown";
         let done = 0, added = 0, dup = 0; const failed = [];
         const render = () => showExplain("Bulk importing…", `Read ${done} of ${total}. Claude Vision is reading each screenshot — this can take a moment for a big batch.`, "info");
@@ -2129,6 +2950,8 @@
             try {
               const grid = await parseImageFile(job.file);
               if (isBlankGrid(grid)) throw new Error("no digits found");
+              const graded = gradeDifficulty(grid);
+              const diff = graded.solved ? graded.tier : (difficultyEl.value || "Medium");
               if (saveGameIfNew(grid, diff, src)) added++; else dup++;
             } catch { failed.push(job.file.name || `image ${job.i + 1}`); }
             done++; render();
@@ -2140,10 +2963,10 @@
         if (dup) parts.push(`${dup} already in your library`);
         if (failed.length) parts.push(`${failed.length} couldn't be read`);
         let body = (parts.join(" · ") || "Nothing to import") + `${syncNote()}.`;
-        if (added) body += ` They're saved as ${diff} · ${src} — open Saved games to play any of them, or edit the difficulty and source there.`;
+        if (added) body += ` Each was auto-graded by difficulty and filed under ${src} — open your Game library to play any of them, or edit the difficulty and source there.`;
         if (failed.length) { const names = failed.slice(0, 5).join(", ") + (failed.length > 5 ? `, +${failed.length - 5} more` : ""); body += ` Couldn't read: ${names}. Re-import those individually to fix any misreads.`; }
         showExplain(added ? "Bulk import done" : (failed.length ? "Bulk import finished" : "Nothing new"), body, added ? "ok" : (failed.length ? "bad" : "info"));
-        if (added) openLibrary();
+        if (added) openLibrary("saved");
       }
       document.getElementById("file").addEventListener("change", async (e) => {
         const files = [...e.target.files]; if (!files.length) { e.target.value = ""; return; }
@@ -2154,9 +2977,34 @@
         } finally { e.target.value = ""; }
       });
 
+      // ---- paste-a-string import ----
+      const pasteModal = document.getElementById("pasteModal"), pasteInput = document.getElementById("pasteInput"), pasteMsg = document.getElementById("pasteMsg");
+      function openPaste() {
+        if (solving) return showExplain("Already solving", "Press Edit puzzle first, then paste a new puzzle.", "info");
+        closeLibrary(); closeHistory(); closeStats();
+        pasteInput.value = ""; pasteMsg.textContent = ""; pasteModal.hidden = false; pasteInput.focus();
+      }
+      function closePaste() { pasteModal.hidden = true; }
+      document.getElementById("pastePuzzle").addEventListener("click", openPaste);
+      document.getElementById("pasteCancel").addEventListener("click", closePaste);
+      pasteModal.addEventListener("click", (e) => { if (e.target.id === "pasteModal") closePaste(); });
+      document.getElementById("pasteLoad").addEventListener("click", () => {
+        // Keep only digits and dots; treat dots as blanks so common export formats paste cleanly.
+        const cleaned = (pasteInput.value || "").replace(/[^0-9.]/g, "").replace(/\./g, "0");
+        if (cleaned.length !== 81) { pasteMsg.textContent = `Need exactly 81 cells — got ${cleaned.length}. Use 0 or . for blanks.`; return; }
+        const grid = parsePuzzle(cleaned);
+        if (hasConflict(grid)) { pasteMsg.textContent = "That grid has a repeated digit in a row, column, or box. Check it and try again."; return; }
+        if (!solve(clone(grid))) { pasteMsg.textContent = "This grid has no valid solution as entered. Check the digits."; return; }
+        closePaste();
+        writeGrid(grid); renderPencils();
+        const added = autoSaveImport(readGrid());
+        showReady(`Puzzle pasted and ${added ? "saved to your library" : "matched to one already saved"}${syncNote()}. Set the difficulty and source below, then start the timer.`);
+      });
+
       // ---- init ----
       select(0, 0);
       if (!restoreActiveGame()) renderPencils();
+      syncModeButtons();   // Candidate starts disabled until a solve is in progress
       initStores().then(() => {
         // Opening a ?share=<code> link offers to import that shared catalogue.
         const code = new URLSearchParams(location.search).get("share");
