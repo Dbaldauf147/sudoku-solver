@@ -560,9 +560,22 @@
       document.getElementById("modeNormal").onclick = () => setMode("normal");
       document.getElementById("modeCandidate").onclick = () => setMode("candidate");
       function setMode(m) {
+        // Candidate notes only make sense once you're solving — before that, digits are the puzzle's givens.
+        // Guarding here stops a stale/edit-time "candidate" from silently placing full-size numbers.
+        if (m === "candidate" && !solving) {
+          showExplain("Start solving first", "Candidate notes are for while you play. Press Start solving, then switch to Candidate to pencil in small options.", "info");
+          m = "normal";
+        }
         entryMode = m;
         document.getElementById("modeNormal").classList.toggle("on", m === "normal");
         document.getElementById("modeCandidate").classList.toggle("on", m === "candidate");
+      }
+      // Candidate is only usable during a solve; disable the toggle otherwise so it's clear why.
+      function syncModeButtons() {
+        const cand = document.getElementById("modeCandidate");
+        cand.disabled = !solving;
+        cand.title = solving ? "Pencil in small candidate notes" : "Start solving to add candidate notes";
+        if (!solving) setMode("normal");
       }
 
       document.addEventListener("keydown", (e) => {
@@ -1307,7 +1320,7 @@
           inputs[r][c].classList.remove("wrong", "solved");
           marks[r][c].clear();
         }
-        solving = true; setMode("normal");
+        solving = true; setMode("normal"); syncModeButtons();
         document.body.classList.add("solving");
         clearHighlights(); renderPencils();
         undoStack = []; redoStack = []; errorsEl.textContent = "0";
@@ -1707,7 +1720,7 @@
       }
       function resetToEdit() {
         session = null; clearInterval(timerId); timerId = null; undoStack = []; redoStack = []; activeSavedGame = null;
-        solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal");
+        solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal"); syncModeButtons();
         document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory();
         pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].classList.remove("given", "wrong", "solved"); marks[r][c].clear(); }
@@ -1836,7 +1849,7 @@
         // Time away from the app doesn't count: rebase so active time resumes from where it stood.
         const elapsed = Math.max(0, st.elapsed || 0), now = Date.now();
         session = { difficulty: st.session.difficulty, source: st.session.source, startedAt: now - elapsed, pausedMs: 0, pauseStart: null, manualPaused: false, errors: st.session.errors || 0, hints: st.session.hints || 0, lastT: st.session.lastT || 0, moves: st.session.moves || [], missed: st.session.missed || {} };
-        solving = true; setMode("normal"); document.body.classList.add("solving");
+        solving = true; setMode("normal"); syncModeButtons(); document.body.classList.add("solving");
         difficultyEl.value = session.difficulty; sourceEl.value = session.source;
         errorsEl.textContent = session.errors;
         clearHighlights(); renderPencils();
@@ -2869,6 +2882,7 @@
       // ---- init ----
       select(0, 0);
       if (!restoreActiveGame()) renderPencils();
+      syncModeButtons();   // Candidate starts disabled until a solve is in progress
       initStores().then(() => {
         // Opening a ?share=<code> link offers to import that shared catalogue.
         const code = new URLSearchParams(location.search).get("share");
