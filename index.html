@@ -90,6 +90,8 @@
         font-size: 1.1rem; background: var(--panel); border: 1px solid var(--line);
         border-radius: 8px; padding: 6px 12px; }
       .timer b { color: var(--accent); }
+      .error-meter { cursor: pointer; user-select: none; }
+      .error-meter:hover, .error-meter:focus-visible { border-color: var(--accent); outline: none; }
 
       .board {
         display: grid; grid-template-columns: repeat(9, 1fr); aspect-ratio: 1;
@@ -285,7 +287,7 @@
       <div class="topbar">
         <div class="tabs">
           <button id="homeBtn" class="home" title="Back to your game">🏠 Home</button>
-          <label class="file">Import screenshot<input id="file" type="file" accept="image/*" /></label>
+          <label class="file" title="Pick one screenshot to play now, or select several to bulk-import them all to your library">Import screenshot<input id="file" type="file" accept="image/*" multiple /></label>
           <button id="libraryBtn">Game library</button>
           <button id="practiceBtn" title="Drill one technique at a time">Practice</button>
           <button id="whoami" class="whoami" title="Profile — tap to switch or sign in">Playing as: Guest</button>
@@ -329,7 +331,7 @@
           <button id="modeCandidate">Candidate</button>
           <span class="meters">
             <span class="timer">⏱ <b id="timer">0:00</b></span>
-            <span class="timer">✗ <b id="errors">0</b></span>
+            <span class="timer error-meter" id="errorMeter" title="Made a fat-finger mistake? Tap to take one off your error count" role="button" tabindex="0">✗ <b id="errors">0</b></span>
           </span>
         </div>
         <div class="keys" id="keys"></div>
@@ -384,6 +386,17 @@
           <p>The timer is stopped and the board is hidden. Resume when you're ready.</p>
           <div class="actions">
             <button id="resumeBtn" class="primary">Resume</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="errorModal" class="overlay" hidden>
+        <div class="modal">
+          <h2>Undo an error?</h2>
+          <p>If you mis-tapped or fat-fingered a digit, you can take one error off this game's count so it doesn't skew your stats.</p>
+          <div class="actions">
+            <button id="errorCancel">Cancel</button>
+            <button id="errorUndo" class="primary">Fat finger — don't count it</button>
           </div>
         </div>
       </div>
@@ -1008,8 +1021,10 @@
           if (after) return { kind: "place", r: after.r, c: after.c, n: after.n, tech: e.tech, highlight: e.highlight.concat([[after.r, after.c]]), reason: `${e.tech}: ${e.reason} That leaves ${loc(after.r, after.c)} = ${after.n} (${after.tech.toLowerCase()}).` };
           return { kind: "eliminate", tech: e.tech, highlight: e.highlight, reason: `${e.tech}: ${e.reason} Update your candidate marks, then look again.` };
         }
-        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0)
-          return { kind: "place", r, c, n: solution[r][c], tech: "Advanced", highlight: [[r, c]], reason: `This needs a technique beyond the ones I explain (e.g. an XY-chain). The answer is ${solution[r][c]} — place it and the simpler steps reopen.` };
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0) {
+          const d = describeCorrect(M, grid, r, c, solution[r][c]);
+          return { kind: "place", r, c, n: solution[r][c], tech: d.tech, highlight: [[r, c]], reason: `${d.tech}: ${d.body} The answer is ${solution[r][c]} — place it and the simpler steps reopen.` };
+        }
         return null;
       }
 
@@ -1094,31 +1109,62 @@
         saveActiveGame();
       }
 
+      // Rank a technique by difficulty (reusing the grading map) so a move is credited to the
+      // hardest technique its deduction actually relies on.
+      const techRank = (t) => TECH_RANK[t] || 0;
+      // The first naked/hidden single in (W, g) that isn't the cell we're explaining.
+      function placeableSingle(W, g, er, ec) {
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++)
+          if (!(r === er && c === ec) && g[r][c] === 0 && W[r][c].size === 1) return { r, c, n: [...W[r][c]][0] };
+        for (const u of UNITS) for (let n = 1; n <= 9; n++) {
+          const spots = u.cells.filter(([r, c]) => g[r][c] === 0 && W[r][c].has(n));
+          if (spots.length === 1 && !(spots[0][0] === er && spots[0][1] === ec)) return { r: spots[0][0], c: spots[0][1], n };
+        }
+        return null;
+      }
+      // Place a forced single into the working grid/candidate map, pruning it from peers.
+      function fillSingle(W, g, r, c, n) {
+        g[r][c] = n;
+        for (let i = 0; i < 9; i++) { W[r][i].delete(n); W[i][c].delete(n); }
+        const br = Math.floor(r / 3) * 3, bc = Math.floor(c / 3) * 3;
+        for (let i = br; i < br + 3; i++) for (let j = bc; j < bc + 3; j++) W[i][j].delete(n);
+        W[r][c] = new Set();
+      }
+      // Explain why placing n at (r,c) is correct. We solve forward from the current board
+      // with the named techniques — propagating every basic single and elimination — until
+      // this cell is forced, then credit the move to the hardest technique the chain needed.
+      // Every move therefore lands in a real technique bucket; there's no "Advanced" catch-all.
       function describeCorrect(M, grid, r, c, n) {
-        if (M[r][c].size === 1) return { tech: "Naked single", body: `the other eight digits all already appear in ${loc(r, c)}'s row, column, or box, leaving ${n}.` };
-        for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
-          const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && M[rr][cc].has(n));
-          if (spots.length === 1) return { tech: "Hidden single", body: `${n} can't go in any other empty cell of ${u.name}, so it must be here.` };
-        }
-        // No single-cell proof yet. Apply elimination techniques one at a time, accumulating their
-        // deductions, until this cell is pinned — then credit the technique that finally unlocked it.
-        // Iterating (rather than trying a single round) means moves that need several chained
-        // eliminations get named instead of being lumped into "Advanced".
-        let cur = M;
-        for (let step = 0; step < 60; step++) {
-          let e = null;
-          for (const tech of ELIM_TECHS) { e = tech(cur, grid); if (e) break; }
-          if (!e) break;                       // nothing more to deduce with the techniques we name
-          cur = applyElims(cur, e.elims);
-          if (cur[r][c].size === 1 && [...cur[r][c]][0] === n)
-            return { tech: e.tech, body: `${e.reason} That leaves ${n} as the only candidate for ${loc(r, c)}.` };
-          for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
-            const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && cur[rr][cc].has(n));
-            if (spots.length === 1 && spots[0][0] === r && spots[0][1] === c)
-              return { tech: e.tech, body: `${e.reason} That leaves ${loc(r, c)} as the only spot for ${n} in ${u.name}.` };
+        const W = cloneMap(M), g = grid.map((row) => row.slice());
+        let hardest = null, hardestReason = null;
+        const credit = (basicBody, chainTail) => hardest
+          ? { tech: hardest, body: `${hardestReason} ${chainTail}` }
+          : { tech: basicBody.tech, body: basicBody.body };
+        for (let guard = 0; guard < 1000; guard++) {
+          if (W[r][c].size === 1) {
+            return credit(
+              { tech: "Naked single", body: `the other eight digits all already appear in ${loc(r, c)}'s row, column, or box, leaving ${n}.` },
+              `That leaves ${n} as the only candidate for ${loc(r, c)}.`);
           }
+          const hu = UNITS.find((u) => u.cells.some(([rr, cc]) => rr === r && cc === c) &&
+            u.cells.filter(([rr, cc]) => g[rr][cc] === 0 && W[rr][cc].has(n)).length === 1);
+          if (hu) {
+            return credit(
+              { tech: "Hidden single", body: `${n} can't go in any other empty cell of ${hu.name}, so it must be here.` },
+              `That leaves ${loc(r, c)} as the only spot for ${n} in ${hu.name}.`);
+          }
+          const s = placeableSingle(W, g, r, c);
+          if (s) { fillSingle(W, g, s.r, s.c, s.n); continue; }
+          let e = null;
+          for (const tech of ELIM_TECHS) { const out = tech(W, g); if (out && out.elims.length) { e = out; break; } }
+          if (!e) break; // stuck for the implemented techniques (rare for the shipped puzzles)
+          for (const [er, ec, en] of e.elims) W[er][ec].delete(en);
+          if (techRank(e.tech) >= (hardest ? techRank(hardest) : -1)) { hardest = e.tech; hardestReason = e.reason; }
         }
-        return { tech: "Advanced", body: `${n} matches the solution. It follows from a technique beyond the ones I name here, or once a few more neighbors are filled in.` };
+        // Couldn't pin it outright: credit the hardest technique that helped, or — if the cell
+        // simply needed a few neighbours filled first — frame it as a single.
+        if (hardest) return { tech: hardest, body: `${hardestReason} ${n} then follows for ${loc(r, c)} once that's combined with the surrounding cells.` };
+        return { tech: "Naked single", body: `${n} is forced here once a few neighbouring cells are filled in — every other digit then appears in ${loc(r, c)}'s row, column, or box.` };
       }
       function handleMove(r, c) {
         inputs[r][c].classList.remove("wrong");
@@ -1267,6 +1313,33 @@
         pauseTimer(true); pauseModal.hidden = false;
       });
       document.getElementById("resumeBtn").addEventListener("click", () => { pauseModal.hidden = true; resumeTimer(true); });
+      // ---- "fat finger" error undo: tap the ✗ counter to take one mistyped digit off this game's count ----
+      function undoLastError() {
+        if (!session || (session.errors || 0) <= 0) return false;
+        session.errors -= 1;
+        errorsEl.textContent = session.errors;
+        // Drop the most recent wrong move so the per-game timeline in Stats matches the lowered count.
+        for (let i = session.moves.length - 1; i >= 0; i--) {
+          if (!session.moves[i].correct) { session.moves.splice(i, 1); break; }
+        }
+        saveActiveGame();
+        return true;
+      }
+      const errorModal = document.getElementById("errorModal");
+      function openErrorUndo() {
+        if (!session) return showExplain("Not solving", "Errors are only counted while you're solving a puzzle.", "info");
+        if ((session.errors || 0) <= 0) return showExplain("No errors to undo", "Your error count is already 0 for this game.", "info");
+        errorModal.hidden = false;
+      }
+      const errorMeter = document.getElementById("errorMeter");
+      errorMeter.addEventListener("click", openErrorUndo);
+      errorMeter.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openErrorUndo(); } });
+      document.getElementById("errorCancel").addEventListener("click", () => { errorModal.hidden = true; });
+      document.getElementById("errorUndo").addEventListener("click", () => {
+        errorModal.hidden = true;
+        if (undoLastError()) showExplain("Error uncounted", "That fat-finger mistake won't count against this game.", "ok");
+      });
+      errorModal.addEventListener("click", (e) => { if (e.target === errorModal) errorModal.hidden = true; });
       function recordMove(r, c, n, correct, tech) {
         if (!session) return;
         const t = activeElapsed(), dt = t - session.lastT; session.lastT = t;
@@ -2471,6 +2544,10 @@
         "Naked pair": { focus: ["0,0", "0,1"], elim: ["0,3", "0,5"],
           marks: { "0,0": [4, 5], "0,1": [4, 5], "0,3": [4, 5, 6], "0,5": [2, 4, 5] }, struck: { "0,3": [4, 5], "0,5": [4, 5] },
           caption: "These two cells can only hold 4 or 5, so the pair belongs to them. 4 and 5 are removed from the rest of the row (crossed out) — a naked pair." },
+        "Naked triple": { focus: ["0,0", "0,1", "0,2"], elim: ["0,4", "0,6", "0,8"],
+          marks: { "0,0": [3, 4], "0,1": [4, 5], "0,2": [3, 5], "0,4": [3, 4, 7], "0,6": [5, 8], "0,8": [4, 5, 9] },
+          struck: { "0,4": [3, 4], "0,6": [5], "0,8": [4, 5] },
+          caption: "The three highlighted cells together hold only {3, 4, 5} (each takes two of them), so that trio must fill them. 3, 4 and 5 are removed from the rest of the row (crossed out) — a naked triple." },
         "Hidden pair": { focus: ["0,0", "0,1"],
           marks: { "0,0": [2, 3, 6, 8], "0,1": [2, 3, 9] }, struck: { "0,0": [6, 8], "0,1": [9] },
           caption: "2 and 3 appear only in these two cells of the row, so they must fill them. Every other candidate in the pair is removed (crossed out) — a hidden pair." },
@@ -2838,21 +2915,66 @@
       }
 
       // ---- image import ----
-      // Screenshots are read by Claude Vision via the serverless endpoint.
-      document.getElementById("file").addEventListener("change", async (e) => {
-        const file = e.target.files[0]; if (!file) return;
-        if (solving) { e.target.value = ""; return showExplain("Already solving", "Press Edit puzzle first, then import a new screenshot.", "info"); }
+      // Screenshots are read by Claude Vision via the serverless endpoint. Picking one file
+      // loads it onto the board to play now; picking several bulk-imports them all to the library.
+      async function parseImageFile(file) {
+        const dataUrl = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
+        const r = await fetch("/api/parse-sudoku-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: String(dataUrl).split(",")[1], media_type: file.type || "image/png" }) });
+        const data = await r.json();
+        if (!r.ok) { let msg = data.error || "Failed to read image"; if (data.diagnostic) msg += ` (key defined: ${data.diagnostic.defined}, length: ${data.diagnostic.length}, matching vars: ${(data.diagnostic.anthropicVars || []).join(", ") || "none"})`; throw new Error(msg); }
+        return data.grid;
+      }
+      const isBlankGrid = (grid) => grid.every((row) => row.every((c) => !c));
+      async function importSingle(file) {
         showExplain("Reading puzzle…", "Claude Vision is reading the grid from your screenshot.", "info");
         try {
-          const dataUrl = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
-          const r = await fetch("/api/parse-sudoku-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: String(dataUrl).split(",")[1], media_type: file.type || "image/png" }) });
-          const data = await r.json();
-          if (!r.ok) { let msg = data.error || "Failed to read image"; if (data.diagnostic) msg += ` (key defined: ${data.diagnostic.defined}, length: ${data.diagnostic.length}, matching vars: ${(data.diagnostic.anthropicVars || []).join(", ") || "none"})`; throw new Error(msg); }
-          writeGrid(data.grid); renderPencils();
+          const grid = await parseImageFile(file);
+          writeGrid(grid); renderPencils();
           const added = autoSaveImport(readGrid());
           showReady(`Grid imported and ${added ? "saved to your library" : "matched to a puzzle already in your library"}${syncNote()}. Fix any misread digits and set the difficulty and source below — edits update the saved copy. Then start the timer.`);
         } catch (err) { showExplain("Couldn't read the image", (err.message || "Unknown error") + " — you can still type the puzzle in by hand.", "bad"); }
-        finally { e.target.value = ""; }
+      }
+      // Bulk import: read every screenshot (a few at a time), saving each new grid straight to the
+      // library. Each puzzle is auto-graded by difficulty (there's no per-puzzle popup in bulk).
+      // Nothing is loaded onto the board.
+      async function importBulk(files) {
+        const total = files.length;
+        const src = (sourceEl.value || "Unknown").trim() || "Unknown";
+        let done = 0, added = 0, dup = 0; const failed = [];
+        const render = () => showExplain("Bulk importing…", `Read ${done} of ${total}. Claude Vision is reading each screenshot — this can take a moment for a big batch.`, "info");
+        render();
+        const queue = files.map((file, i) => ({ file, i }));
+        async function worker() {
+          let job;
+          while ((job = queue.shift())) {
+            try {
+              const grid = await parseImageFile(job.file);
+              if (isBlankGrid(grid)) throw new Error("no digits found");
+              const graded = gradeDifficulty(grid);
+              const diff = graded.solved ? graded.tier : (difficultyEl.value || "Medium");
+              if (saveGameIfNew(grid, diff, src)) added++; else dup++;
+            } catch { failed.push(job.file.name || `image ${job.i + 1}`); }
+            done++; render();
+          }
+        }
+        await Promise.all(Array.from({ length: Math.min(3, total) }, worker));
+        const parts = [];
+        if (added) parts.push(`${added} new puzzle${added === 1 ? "" : "s"} saved`);
+        if (dup) parts.push(`${dup} already in your library`);
+        if (failed.length) parts.push(`${failed.length} couldn't be read`);
+        let body = (parts.join(" · ") || "Nothing to import") + `${syncNote()}.`;
+        if (added) body += ` Each was auto-graded by difficulty and filed under ${src} — open your Game library to play any of them, or edit the difficulty and source there.`;
+        if (failed.length) { const names = failed.slice(0, 5).join(", ") + (failed.length > 5 ? `, +${failed.length - 5} more` : ""); body += ` Couldn't read: ${names}. Re-import those individually to fix any misreads.`; }
+        showExplain(added ? "Bulk import done" : (failed.length ? "Bulk import finished" : "Nothing new"), body, added ? "ok" : (failed.length ? "bad" : "info"));
+        if (added) openLibrary("saved");
+      }
+      document.getElementById("file").addEventListener("change", async (e) => {
+        const files = [...e.target.files]; if (!files.length) { e.target.value = ""; return; }
+        if (solving) { e.target.value = ""; return showExplain("Already solving", "Press Edit puzzle first, then import a new screenshot.", "info"); }
+        try {
+          if (files.length === 1) await importSingle(files[0]);
+          else await importBulk(files);
+        } finally { e.target.value = ""; }
       });
 
       // ---- paste-a-string import ----

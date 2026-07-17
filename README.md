@@ -24,7 +24,9 @@ answer.
     **Candidate** modes — Candidate mode toggles your own pencil marks;
     **Auto notes** fills every empty cell with its possible digits.
   - A **timer** runs while you solve, a live **error count** tracks wrong
-    entries, and every move is logged with the time since your last choice and
+    entries (**tap the ✗ counter** to undo a *fat-finger* mistake — it takes
+    one error off this game so a mis-tap doesn't skew your stats), and every
+    move is logged with the time since your last choice and
     the technique that justifies it. The clock **auto-pauses when you switch
     away** from the tab (and there's a manual **Pause**), so idle time doesn't
     skew your stats. **Undo** (Ctrl/⌘-Z) and **Redo** (Ctrl/⌘-Y or
@@ -90,7 +92,12 @@ answer.
     have a single solution.
   - Every time you **import a screenshot** the puzzle is **saved to your
     library automatically** (if that exact grid isn't already saved) — no
-    button to press. The **difficulty** (Easy/Medium/Hard) and **source**
+    button to press. **Bulk import**: select **several screenshots at once**
+    and the app reads them all (a few at a time), **auto-grading each puzzle by
+    difficulty** and saving it straight to your **Game library** (Saved tab) so
+    you can play or re-label them — misreads or unreadable shots are reported so
+    you can re-import those individually. The
+    **difficulty** (Easy/Medium/Hard) and **source**
     (defaults to NYT) are set right in the **"Ready to start?" popup** that
     appears on import; editing them there updates the saved copy. The
     **Saved games** button opens a history of everything you've saved —
