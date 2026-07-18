@@ -191,7 +191,6 @@
       .moves-selectable .move { grid-template-columns: 54px 56px 1fr auto; cursor: pointer; }
       .moves-selectable .move.picked { background: var(--sel); }
       .moves-selectable .move .rt-check { width: 16px; height: 16px; margin-right: 6px; vertical-align: middle; accent-color: var(--accent); }
-      .cell.retime-target { box-shadow: inset 0 0 0 3px var(--accent); }
       .rt-summary-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 6px 0 4px; }
       .rt-summary-table th, .rt-summary-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; }
       .rt-summary-table th:first-child, .rt-summary-table td:first-child { text-align: left; }
@@ -3009,15 +3008,14 @@
           cellEls[r][c].classList.remove("selected", "same", "retime-target");
           marks[r][c].clear();
         }
-        cellEls[m.r][m.c].classList.add("retime-target");
         retime.target = { r: m.r, c: m.c, n: g.solution[m.r][m.c], origMs: m.dt };
         retime.mistakes = 0;
         renderPencils(); updatePad();
-        select(m.r, m.c);
+        // Deliberately don't outline or auto-select the target — you locate the cell yourself.
         errorsEl.textContent = "0";
         retime.startAt = Date.now();
         startRetimeTimer();
-        showRetimeExplain(`Move ${retime.i + 1} of ${retime.queue.length}`, `Place the digit that belongs in ${loc(m.r, m.c)} (outlined). Your original time here was ${fmtDt(m.dt)}.`, "info");
+        showRetimeExplain(`Move ${retime.i + 1} of ${retime.queue.length}`, `Place the digit that belongs in ${loc(m.r, m.c)}. Your original time here was ${fmtDt(m.dt)}.`, "info");
       }
 
       function startRetimeTimer() {
