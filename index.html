@@ -3107,7 +3107,7 @@
       // Screenshots are read by Claude Vision via the serverless endpoint.
       document.getElementById("file").addEventListener("change", async (e) => {
         const file = e.target.files[0]; if (!file) return;
-        if (solving) { e.target.value = ""; return showExplain("Already solving", "Press Edit puzzle first, then import a new screenshot.", "info"); }
+        if (solving) { resetToEdit(); clearActiveGame(); }   // importing a screenshot replaces the game in progress
         showExplain("Reading puzzle…", "Claude Vision is reading the grid from your screenshot.", "info");
         try {
           const dataUrl = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
