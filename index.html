@@ -181,6 +181,31 @@
       .move.bad .cellref { color: var(--bad); }
       .move .meta { color: var(--muted); }
       .move.slow .meta { color: var(--bad); font-weight: 600; }
+      /* ---- retime slow moves ---- */
+      .rt-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 12px; }
+      .rt-toolbar .k { color: var(--muted); margin-right: auto; font-size: 0.85rem; }
+      .rt-toolbar button { padding: 6px 12px; font-size: 0.85rem; }
+      .rt-start { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+      .rt-start:disabled { opacity: 0.5; cursor: not-allowed; }
+      .rt-note { font-size: 0.82rem; color: var(--muted); margin: 4px 0 12px; }
+      .moves-selectable .move { grid-template-columns: 54px 56px 1fr auto; cursor: pointer; }
+      .moves-selectable .move.picked { background: var(--sel); }
+      .moves-selectable .move .rt-check { width: 16px; height: 16px; margin-right: 6px; vertical-align: middle; accent-color: var(--accent); }
+      .cell.retime-target { box-shadow: inset 0 0 0 3px var(--accent); }
+      .rt-summary-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 6px 0 4px; }
+      .rt-summary-table th, .rt-summary-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; }
+      .rt-summary-table th:first-child, .rt-summary-table td:first-child { text-align: left; }
+      .rt-summary-table th { color: var(--muted); font-weight: 600; }
+      .rt-delta.faster { color: var(--ok); font-weight: 700; }
+      .rt-delta.slower { color: var(--bad); font-weight: 700; }
+      .rt-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0 4px; }
+      .rt-totals .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 6px; text-align: center; }
+      .rt-totals .stat b { display: block; font-size: 1.15rem; line-height: 1.2; }
+      .rt-totals .stat .k { font-size: 0.7rem; color: var(--muted); }
+      .rt-verdict { margin: 12px 0 0; font-weight: 700; font-size: 1.05rem; }
+      .rt-verdict.faster { color: var(--ok); }
+      .rt-verdict.slower { color: var(--bad); }
+      .rt-load-move { font-size: 2.4rem; font-weight: 800; color: var(--accent); margin: 6px 0; }
       .overlay {
         position: fixed; inset: 0; background: rgba(17, 20, 28, 0.5);
         display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50;
@@ -399,6 +424,25 @@
         </div>
       </div>
 
+      <div id="retimeLoadModal" class="overlay" hidden>
+        <div class="modal">
+          <h2 id="retimeLoadTitle">Get ready…</h2>
+          <div class="rt-load-move" id="retimeLoadMove">Move 1</div>
+          <p id="retimeLoadMsg">Restoring the board to just before this move.</p>
+        </div>
+      </div>
+
+      <div id="retimeSummaryModal" class="overlay" hidden>
+        <div class="modal" style="max-width:440px">
+          <h2>Re-timing results</h2>
+          <div id="retimeSummaryBody"></div>
+          <div class="actions">
+            <button id="retimeAgain">Retime again</button>
+            <button id="retimeDone" class="primary">Done</button>
+          </div>
+        </div>
+      </div>
+
       <div id="profileModal" class="overlay" hidden>
         <div class="modal profile-modal">
           <h2>Profile</h2>
@@ -593,6 +637,12 @@
         }
         const bk = document.getElementById("backupModal");
         if (bk && !bk.hidden) { if (e.key === "Escape" || e.key === "Enter") bk.hidden = true; return; }
+        if (retimeLoadModal && !retimeLoadModal.hidden) return;   // during the load countdown, ignore all keys
+        if (retimeSummaryModal && !retimeSummaryModal.hidden) {
+          if (e.key === "Enter") document.getElementById("retimeDone").click();
+          else if (e.key === "Escape") { retimeSummaryModal.hidden = true; endRetime(); }
+          return;
+        }
         const sh = document.getElementById("shareModal");
         if (sh && !sh.hidden) { if (e.key === "Escape") sh.hidden = true; return; } // let inputs receive digits/letters
         const pm = document.getElementById("pauseModal");
@@ -639,6 +689,7 @@
           cellEls[i][j].classList.toggle("same", hlMatches && !!n && inputs[i][j].value === s && !(selected && selected.r === i && selected.c === j));
       }
       function applyDigit(n) {
+        if (retime.active) return retimeGuess(n);
         if (!selected) return;
         const { r, c } = selected;
         if (entryMode === "candidate" && solving) toggleMark(r, c, n);
@@ -646,6 +697,7 @@
         highlightDigit(n);
       }
       function applyClear() {
+        if (retime.active) { const t = retime.target; if (t) { inputs[t.r][t.c].value = ""; inputs[t.r][t.c].classList.remove("wrong", "solved"); } return; }
         if (!selected) return;
         const { r, c } = selected;
         if (givens[r][c]) return;
@@ -1287,6 +1339,12 @@
         session.totalMs = activeElapsed();
         clearInterval(timerId); timerId = null;
         session.solved = solved; session.finishedAt = Date.now();
+        // Snapshot the clue grid + full solution so this game can be re-timed later (restore
+        // the board to just before any move). Older games saved before this won't have them.
+        const clueGrid = blank(0);
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (givens[r][c]) clueGrid[r][c] = Number(inputs[r][c].value) || 0;
+        session.grid = clueGrid;
+        session.solution = solution ? clone(solution) : null;
         lastTotalMs = session.totalMs;
         // Personal-record check: is this the fastest solve yet for this difficulty? (compare against
         // prior solves before this game is added). The first solve of a difficulty sets the record too.
@@ -2656,7 +2714,7 @@
         const practice = missedSection(g.missed, "Techniques to practice");
 
         // ----- move-by-move timeline (pace / deep dive for this game) -----
-        const timeline = movesN ? `<h3>Move-by-move timeline</h3>${deepDiveHTML(g, false)}` : "";
+        const timeline = movesN ? `<h3>Move-by-move timeline</h3><div id="thisTimeline">${deepDiveHTML(g, false, true)}</div>` : "";
 
         return `${prLine}
           <div class="card"><b>${esc(d || "—")}</b> · ${esc(g.source || "—")} · <span class="k">${status}</span></div>
@@ -2800,6 +2858,8 @@
         statsEl.querySelectorAll(".trow").forEach((row) => { row.onclick = () => openExample(row.dataset.tech); });
         const pick = document.getElementById("gamePick");
         if (pick) { pick.onchange = () => renderDeepDive(games[Number(pick.value)]); renderDeepDive(games[0]); }
+        // Wire re-timing on the "This game" timeline (uses the most recent finished game; a live game isn't retimable).
+        if (!session && games[0]) wireRetimeControls(document.getElementById("thisTimeline"), games[0]);
         setStatsTab(statsTab);   // apply the remembered tab
         // Solve-time trends toggle: swap between "over time" and "avg time per move".
         const timeCharts = { overtime: diffTrend, permove: paceHTML };
@@ -2813,29 +2873,229 @@
       }
       // Move-by-move timeline: one bar per move sized by the pause before it, slow moves flagged.
       // Shared by the "All games" deep-dive selector and the "This game" pane.
-      function deepDiveHTML(g, includeSummary = true) {
+      function deepDiveHTML(g, includeSummary = true, selectable = false) {
         const moves = g.moves || [];
         if (!moves.length) return `<div class="card">No moves recorded for this game yet.</div>`;
         const maxDt = Math.max(1, ...moves.map((m) => m.dt));
         const slow = Math.max(maxDt * 0.6, median(moves.map((m) => m.dt)) * 2.5);
         const statusWord = g.live ? "in progress" : (g.solved ? "solved" : "revealed");
+        const canSel = selectable && canRetime(g);
         let html = includeSummary ? `<div class="card">${moves.length} moves · ${fmtTime(g.totalMs)} total · ${errorsIn(g)} error${errorsIn(g) === 1 ? "" : "s"} · ${statusWord}</div>` : "";
+        if (canSel) {
+          html += `<div class="rt-toolbar">
+            <span class="k">Pick the moves you want to re-time, then race yourself.</span>
+            <button type="button" class="rt-quick" data-n="3">Slowest 3</button>
+            <button type="button" class="rt-quick" data-n="5">Slowest 5</button>
+            <button type="button" class="rt-start" disabled>▶ Retime</button>
+          </div>`;
+        } else if (selectable && !g.live) {
+          html += `<p class="rt-note">Re-timing lets you replay your slowest moves against the clock — available for games solved after this update.</p>`;
+        }
+        html += `<div class="moves-wrap${canSel ? " moves-selectable" : ""}">`;
         moves.forEach((m, i) => {
           const color = TECH_COLORS[m.tech] || "#94a3b8";
           const w = Math.round((m.dt / maxDt) * 100);
-          html += `<div class="move ${m.correct ? "" : "bad"} ${m.dt >= slow ? "slow" : ""}">
-            <span class="meta">${i + 1}</span>
+          html += `<div class="move ${m.correct ? "" : "bad"} ${m.dt >= slow ? "slow" : ""}" data-i="${i}">
+            <span class="meta">${canSel ? `<input type="checkbox" class="rt-check" data-i="${i}" aria-label="Select move ${i + 1}">` : ""}${i + 1}</span>
             <span class="cellref">${m.correct ? "" : "✗"}${loc(m.r, m.c)}=${m.n}</span>
             <span><span class="bar" style="width:${w}%;background:${color}"></span></span>
             <span class="meta">${fmtDt(m.dt)} · ${esc(m.tech)}${m.dt >= slow ? " ⏳" : ""}</span>
           </div>`;
         });
+        html += `</div>`;
         return html;
       }
       function renderDeepDive(g) {
         const dd = document.getElementById("deepDive"); if (!g) { dd.innerHTML = ""; return; }
-        dd.innerHTML = deepDiveHTML(g);
+        dd.innerHTML = deepDiveHTML(g, true, true);
+        wireRetimeControls(dd, g);
       }
+
+      // ================= Retime slow moves =================
+      // Replay any subset of a finished game's moves against the clock: restore the board to
+      // just before each selected move, time how long the re-solve takes, then compare the new
+      // times to the originals. A finished game must carry its clue grid + solution to qualify.
+      let retime = { active: false };
+      function canRetime(g) { return !!(g && !g.live && g.grid && g.solution && (g.moves || []).length); }
+
+      // Wire the checkboxes + toolbar inside a rendered timeline container to a game object.
+      function wireRetimeControls(container, g) {
+        if (!container || !canRetime(g)) return;
+        const wrap = container.querySelector(".moves-wrap.moves-selectable");
+        const startBtn = container.querySelector(".rt-start");
+        if (!wrap || !startBtn) return;
+        const boxes = () => [...wrap.querySelectorAll(".rt-check")];
+        const selectedIdx = () => boxes().filter((b) => b.checked).map((b) => Number(b.dataset.i));
+        const refresh = () => {
+          const n = selectedIdx().length;
+          startBtn.disabled = !n;
+          startBtn.textContent = n ? `▶ Retime ${n} move${n === 1 ? "" : "s"}` : "▶ Retime";
+          boxes().forEach((b) => b.closest(".move").classList.toggle("picked", b.checked));
+        };
+        // Clicking a row (anywhere but the checkbox itself) toggles its selection.
+        wrap.addEventListener("click", (e) => {
+          if (e.target.classList.contains("rt-check")) return;
+          const row = e.target.closest(".move"); if (!row) return;
+          const cb = row.querySelector(".rt-check"); if (!cb) return;
+          cb.checked = !cb.checked; refresh();
+        });
+        wrap.addEventListener("change", (e) => { if (e.target.classList.contains("rt-check")) refresh(); });
+        container.querySelectorAll(".rt-quick").forEach((q) => {
+          q.onclick = () => {
+            const n = Number(q.dataset.n);
+            const slowest = new Set(g.moves.map((m, i) => [i, m.dt]).sort((a, b) => b[1] - a[1]).slice(0, n).map((x) => x[0]));
+            boxes().forEach((b) => { b.checked = slowest.has(Number(b.dataset.i)); });
+            refresh();
+          };
+        });
+        startBtn.onclick = () => { const idx = selectedIdx(); if (idx.length) startRetime(g, idx); };
+        refresh();
+      }
+
+      // Rebuild the board as it stood just before move index k: clues + every correct placement before k.
+      function boardBeforeMove(g, k) {
+        const b = g.grid.map((row) => row.slice());
+        for (let j = 0; j < k; j++) { const m = g.moves[j]; if (m.correct) b[m.r][m.c] = m.n; }
+        b[g.moves[k].r][g.moves[k].c] = 0;   // the target cell must be empty for the re-solve
+        return b;
+      }
+
+      const retimeLoadModal = document.getElementById("retimeLoadModal");
+      const retimeSummaryModal = document.getElementById("retimeSummaryModal");
+
+      function startRetime(g, indices) {
+        indices = [...new Set(indices)].sort((a, b) => a - b);
+        if (!indices.length) return;
+        // Preserve an in-progress game so re-timing can hand it back afterwards, then stand the
+        // live session down so its timer/auto-pause never competes with the re-time clock.
+        const restore = solving && session ? currentGameState() : null;
+        clearInterval(timerId); timerId = null; solving = false; session = null;
+        document.body.classList.remove("solving"); syncModeButtons();
+        retime = { active: true, g, queue: indices, i: 0, results: [], restore, target: null, startAt: 0, mistakes: 0 };
+        closeStats(); closeLibrary(); closeHistory();
+        showRetimeStep();
+      }
+
+      function showRetimeStep() {
+        if (!retime.active) return;
+        retime.target = null;   // no live target during the load screen — ignore stray key/tap input
+        clearInterval(timerId); timerId = null;
+        const total = retime.queue.length, k = retime.queue[retime.i], m = retime.g.moves[k];
+        document.getElementById("retimeLoadTitle").textContent = `Move ${retime.i + 1} of ${total}`;
+        document.getElementById("retimeLoadMove").textContent = loc(m.r, m.c);
+        document.getElementById("retimeLoadMsg").textContent = `Restoring the board to just before this move — get ready to solve ${loc(m.r, m.c)}.`;
+        retimeLoadModal.hidden = false;
+        // Blank the board behind the load screen so the answer isn't visible during the countdown.
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].value = ""; inputs[r][c].classList.remove("wrong", "solved", "given"); cellEls[r][c].classList.remove("selected", "same", "retime-target"); }
+        setTimeout(() => { if (retime.active) { retimeLoadModal.hidden = true; setupRetimeBoard(k); } }, 1100);
+      }
+
+      // Load one move onto the real board with every cell locked except the one to re-solve, then start its clock.
+      function setupRetimeBoard(k) {
+        const g = retime.g, m = g.moves[k], board = boardBeforeMove(g, k);
+        solution = g.solution;                 // enables the shared board's right/wrong styling
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+          const isTarget = r === m.r && c === m.c;
+          givens[r][c] = !isTarget;            // lock everything except the target so only it accepts input
+          inputs[r][c].value = board[r][c] ? String(board[r][c]) : "";
+          inputs[r][c].classList.toggle("given", !isTarget && board[r][c] !== 0);
+          inputs[r][c].classList.remove("wrong", "solved");
+          cellEls[r][c].classList.remove("selected", "same", "retime-target");
+          marks[r][c].clear();
+        }
+        cellEls[m.r][m.c].classList.add("retime-target");
+        retime.target = { r: m.r, c: m.c, n: g.solution[m.r][m.c], origMs: m.dt };
+        retime.mistakes = 0;
+        renderPencils(); updatePad();
+        select(m.r, m.c);
+        errorsEl.textContent = "0";
+        retime.startAt = Date.now();
+        startRetimeTimer();
+        showRetimeExplain(`Move ${retime.i + 1} of ${retime.queue.length}`, `Place the digit that belongs in ${loc(m.r, m.c)} (outlined). Your original time here was ${fmtDt(m.dt)}.`, "info");
+      }
+
+      function startRetimeTimer() {
+        clearInterval(timerId);
+        const paint = () => { timerEl.textContent = fmtTime(Date.now() - retime.startAt); };
+        paint();
+        timerId = setInterval(paint, 250);
+      }
+
+      function showRetimeExplain(title, body, kind) {
+        showExplain(title, body, kind, { label: "Quit re-timing", onClick: quitRetime });
+      }
+
+      // Called from applyDigit while a re-time is active — checks the guess against the solution.
+      function retimeGuess(n) {
+        if (!retime.active || !retime.target) return;
+        const t = retime.target;
+        inputs[t.r][t.c].value = String(n);
+        if (n === t.n) {
+          const ms = Date.now() - retime.startAt;
+          clearInterval(timerId); timerId = null;
+          inputs[t.r][t.c].classList.remove("wrong"); inputs[t.r][t.c].classList.add("solved");
+          cellEls[t.r][t.c].classList.remove("retime-target");
+          retime.results.push({ r: t.r, c: t.c, origMs: t.origMs, newMs: ms, mistakes: retime.mistakes });
+          retime.i++;
+          if (retime.i >= retime.queue.length) setTimeout(() => { if (retime.active) finishRetime(); }, 650);
+          else setTimeout(() => { if (retime.active) showRetimeStep(); }, 750);
+        } else {
+          retime.mistakes++;
+          errorsEl.textContent = retime.mistakes;
+          inputs[t.r][t.c].classList.add("wrong");
+          showRetimeExplain("Not quite", `${n} isn't the digit for ${loc(t.r, t.c)}. The clock's still running — try again.`, "bad");
+          setTimeout(() => { if (retime.active && retime.target === t) { inputs[t.r][t.c].value = ""; inputs[t.r][t.c].classList.remove("wrong"); } }, 550);
+        }
+      }
+
+      function finishRetime() {
+        clearInterval(timerId); timerId = null;
+        retimeLoadModal.hidden = true;
+        const res = retime.results;
+        const origTotal = res.reduce((a, x) => a + x.origMs, 0);
+        const newTotal = res.reduce((a, x) => a + x.newMs, 0);
+        let rows = "";
+        for (const x of res) {
+          const d = x.newMs - x.origMs, faster = d < 0;
+          rows += `<tr><td>${loc(x.r, x.c)}</td><td>${fmtDt(x.origMs)}</td><td>${fmtDt(x.newMs)}</td><td class="rt-delta ${faster ? "faster" : "slower"}">${faster ? "−" : "+"}${fmtDt(Math.abs(d))}</td></tr>`;
+        }
+        const diff = newTotal - origTotal, beat = diff < 0;
+        const verdict = beat
+          ? `⚡ You were ${fmtDt(Math.abs(diff))} faster this time!`
+          : (diff === 0 ? "Dead even with your original pace." : `You were ${fmtDt(diff)} slower this time — run it again to beat it.`);
+        document.getElementById("retimeSummaryBody").innerHTML = `
+          <p style="color:var(--muted);margin:0 0 6px">Re-timed ${res.length} move${res.length === 1 ? "" : "s"}: your original solve vs. now.</p>
+          <table class="rt-summary-table"><tr><th>Cell</th><th>Original</th><th>New</th><th>Δ</th></tr>${rows}</table>
+          <div class="rt-totals">
+            <div class="stat"><b>${fmtDt(origTotal)}</b><span class="k">original total</span></div>
+            <div class="stat"><b>${fmtDt(newTotal)}</b><span class="k">new total</span></div>
+            <div class="stat"><b class="rt-delta ${beat ? "faster" : "slower"}">${beat ? "−" : "+"}${fmtDt(Math.abs(diff))}</b><span class="k">difference</span></div>
+          </div>
+          <p class="rt-verdict ${beat ? "faster" : (diff === 0 ? "" : "slower")}">${verdict}</p>`;
+        retimeSummaryModal.hidden = false;
+      }
+
+      // Restore the app to a clean state (or hand back the game that was interrupted) and clear re-time mode.
+      function endRetime() {
+        const restore = retime.restore;
+        retime = { active: false };
+        retimeLoadModal.hidden = true; retimeSummaryModal.hidden = true;
+        clearInterval(timerId); timerId = null;
+        resetToEdit();
+        if (restore) applyGameState(restore);
+      }
+      function quitRetime() {
+        if (!retime.active) return;
+        if (retime.results.length) { finishRetime(); return; }   // show partial results if any move was completed
+        endRetime();
+      }
+      document.getElementById("retimeDone").addEventListener("click", () => { retimeSummaryModal.hidden = true; endRetime(); });
+      document.getElementById("retimeAgain").addEventListener("click", () => {
+        const g = retime.g, queue = retime.queue, restore = retime.restore;
+        retimeSummaryModal.hidden = true;
+        retime = { active: true, g, queue, i: 0, results: [], restore, target: null, startAt: 0, mistakes: 0 };
+        showRetimeStep();
+      });
 
       // ---- image import ----
       // Screenshots are read by Claude Vision via the serverless endpoint.
