@@ -696,7 +696,7 @@
         highlightDigit(n);
       }
       function applyClear() {
-        if (retime.active) { const t = retime.target; if (t) { inputs[t.r][t.c].value = ""; inputs[t.r][t.c].classList.remove("wrong", "solved"); } return; }
+        if (retime.active) { if (selected && !givens[selected.r][selected.c]) { inputs[selected.r][selected.c].value = ""; inputs[selected.r][selected.c].classList.remove("wrong", "solved"); } return; }
         if (!selected) return;
         const { r, c } = selected;
         if (givens[r][c]) return;
@@ -2986,9 +2986,9 @@
         retime.target = null;   // no live target during the load screen — ignore stray key/tap input
         clearInterval(timerId); timerId = null;
         const total = retime.queue.length, k = retime.queue[retime.i], m = retime.g.moves[k];
-        document.getElementById("retimeLoadTitle").textContent = `Move ${retime.i + 1} of ${total}`;
-        document.getElementById("retimeLoadMove").textContent = loc(m.r, m.c);
-        document.getElementById("retimeLoadMsg").textContent = `Restoring the board to just before this move — get ready to solve ${loc(m.r, m.c)}.`;
+        document.getElementById("retimeLoadTitle").textContent = "Get ready…";
+        document.getElementById("retimeLoadMove").textContent = `Move ${retime.i + 1} of ${total}`;
+        document.getElementById("retimeLoadMsg").textContent = "Restoring the board to just before this move — then find the move and make it.";
         retimeLoadModal.hidden = false;
         // Blank the board behind the load screen so the answer isn't visible during the countdown.
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].value = ""; inputs[r][c].classList.remove("wrong", "solved", "given"); cellEls[r][c].classList.remove("selected", "same", "retime-target"); }
@@ -3000,22 +3000,23 @@
         const g = retime.g, m = g.moves[k], board = boardBeforeMove(g, k);
         solution = g.solution;                 // enables the shared board's right/wrong styling
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
-          const isTarget = r === m.r && c === m.c;
-          givens[r][c] = !isTarget;            // lock everything except the target so only it accepts input
+          // Lock the filled cells (clues + earlier placements); leave every empty cell open so you
+          // have to find which one comes next yourself — the target isn't singled out.
+          givens[r][c] = board[r][c] !== 0;
           inputs[r][c].value = board[r][c] ? String(board[r][c]) : "";
-          inputs[r][c].classList.toggle("given", !isTarget && board[r][c] !== 0);
+          inputs[r][c].classList.toggle("given", board[r][c] !== 0);
           inputs[r][c].classList.remove("wrong", "solved");
           cellEls[r][c].classList.remove("selected", "same", "retime-target");
           marks[r][c].clear();
         }
+        selected = null;                       // no cell pre-selected — you pick where the move goes
         retime.target = { r: m.r, c: m.c, n: g.solution[m.r][m.c], origMs: m.dt };
         retime.mistakes = 0;
         renderPencils(); updatePad();
-        // Deliberately don't outline or auto-select the target — you locate the cell yourself.
         errorsEl.textContent = "0";
         retime.startAt = Date.now();
         startRetimeTimer();
-        showRetimeExplain(`Move ${retime.i + 1} of ${retime.queue.length}`, `Place the digit that belongs in ${loc(m.r, m.c)}. Your original time here was ${fmtDt(m.dt)}.`, "info");
+        showRetimeExplain(`Move ${retime.i + 1} of ${retime.queue.length}`, `Find the next move and make it — tap the cell it goes in, then the digit. Your original time here was ${fmtDt(m.dt)}.`, "info");
       }
 
       function startRetimeTimer() {
@@ -3029,16 +3030,19 @@
         showExplain(title, body, kind, { label: "Quit re-timing", onClick: quitRetime });
       }
 
-      // Called from applyDigit while a re-time is active — checks the guess against the solution.
+      // Called from applyDigit while a re-time is active — the guess only lands if it's the exact
+      // cell + digit you originally played, so you have to locate the move on the board yourself.
       function retimeGuess(n) {
         if (!retime.active || !retime.target) return;
+        if (!selected) { showRetimeExplain(`Move ${retime.i + 1} of ${retime.queue.length}`, "Tap the cell you think comes next, then choose its digit.", "info"); return; }
+        const { r, c } = selected;
+        if (givens[r][c]) return;              // a locked clue / already-placed cell — nothing to solve there
         const t = retime.target;
-        inputs[t.r][t.c].value = String(n);
-        if (n === t.n) {
+        inputs[r][c].value = String(n);
+        if (r === t.r && c === t.c && n === t.n) {
           const ms = Date.now() - retime.startAt;
           clearInterval(timerId); timerId = null;
-          inputs[t.r][t.c].classList.remove("wrong"); inputs[t.r][t.c].classList.add("solved");
-          cellEls[t.r][t.c].classList.remove("retime-target");
+          inputs[r][c].classList.remove("wrong"); inputs[r][c].classList.add("solved");
           retime.results.push({ r: t.r, c: t.c, origMs: t.origMs, newMs: ms, mistakes: retime.mistakes });
           retime.i++;
           if (retime.i >= retime.queue.length) setTimeout(() => { if (retime.active) finishRetime(); }, 650);
@@ -3046,9 +3050,10 @@
         } else {
           retime.mistakes++;
           errorsEl.textContent = retime.mistakes;
-          inputs[t.r][t.c].classList.add("wrong");
-          showRetimeExplain("Not quite", `${n} isn't the digit for ${loc(t.r, t.c)}. The clock's still running — try again.`, "bad");
-          setTimeout(() => { if (retime.active && retime.target === t) { inputs[t.r][t.c].value = ""; inputs[t.r][t.c].classList.remove("wrong"); } }, 550);
+          inputs[r][c].classList.add("wrong");
+          const msg = (r === t.r && c === t.c) ? `${n} isn't the digit that goes here.` : "That isn't the move you made here.";
+          showRetimeExplain("Not quite", `${msg} The clock's still running — try again.`, "bad");
+          setTimeout(() => { if (retime.active && !inputs[r][c].classList.contains("solved")) { inputs[r][c].value = ""; inputs[r][c].classList.remove("wrong"); } }, 550);
         }
       }
 
