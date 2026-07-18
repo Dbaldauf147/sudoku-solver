@@ -2883,7 +2883,7 @@
         let html = includeSummary ? `<div class="card">${moves.length} moves · ${fmtTime(g.totalMs)} total · ${errorsIn(g)} error${errorsIn(g) === 1 ? "" : "s"} · ${statusWord}</div>` : "";
         if (canSel) {
           html += `<div class="rt-toolbar">
-            <span class="k">Pick the moves you want to re-time, then race yourself.</span>
+            <span class="k">Your slowest moves are pre-selected — adjust the picks, then race yourself.</span>
             <button type="button" class="rt-quick" data-n="3">Slowest 3</button>
             <button type="button" class="rt-quick" data-n="5">Slowest 5</button>
             <button type="button" class="rt-start" disabled>▶ Retime</button>
@@ -2891,12 +2891,18 @@
         } else if (selectable && !g.live) {
           html += `<p class="rt-note">Re-timing lets you replay your slowest moves against the clock — available for games solved after this update.</p>`;
         }
+        // Pre-select the moves worth re-timing: the slow-flagged ones (the ⏳ moves that took
+        // longest), or the 3 slowest overall when a very even game trips no slow flags.
+        const slowFlagged = moves.map((m, i) => i).filter((i) => moves[i].dt >= slow);
+        const preSel = new Set(canSel
+          ? (slowFlagged.length ? slowFlagged : moves.map((m, i) => [i, m.dt]).sort((a, b) => b[1] - a[1]).slice(0, Math.min(3, moves.length)).map((x) => x[0]))
+          : []);
         html += `<div class="moves-wrap${canSel ? " moves-selectable" : ""}">`;
         moves.forEach((m, i) => {
           const color = TECH_COLORS[m.tech] || "#94a3b8";
           const w = Math.round((m.dt / maxDt) * 100);
-          html += `<div class="move ${m.correct ? "" : "bad"} ${m.dt >= slow ? "slow" : ""}" data-i="${i}">
-            <span class="meta">${canSel ? `<input type="checkbox" class="rt-check" data-i="${i}" aria-label="Select move ${i + 1}">` : ""}${i + 1}</span>
+          html += `<div class="move ${m.correct ? "" : "bad"} ${m.dt >= slow ? "slow" : ""}${preSel.has(i) ? " picked" : ""}" data-i="${i}">
+            <span class="meta">${canSel ? `<input type="checkbox" class="rt-check" data-i="${i}"${preSel.has(i) ? " checked" : ""} aria-label="Select move ${i + 1}">` : ""}${i + 1}</span>
             <span class="cellref">${m.correct ? "" : "✗"}${loc(m.r, m.c)}=${m.n}</span>
             <span><span class="bar" style="width:${w}%;background:${color}"></span></span>
             <span class="meta">${fmtDt(m.dt)} · ${esc(m.tech)}${m.dt >= slow ? " ⏳" : ""}</span>
