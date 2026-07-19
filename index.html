@@ -1078,7 +1078,7 @@
       // A puzzle's grade is the hardest technique its logical solution needs — clue count doesn't factor in.
       const TECH_RANK = { "Naked single": 1, "Hidden single": 2, "Pointing pair": 3, "Pointing triple": 3, "Locked candidate": 3,
         "Naked pair": 4, "Hidden pair": 4, "Naked triple": 5, "Hidden triple": 5,
-        "X-wing": 6, "XY-wing": 6, "Swordfish": 7, "XYZ-wing": 7, "Advanced": 9 };
+        "X-wing": 6, "XY-wing": 6, "Swordfish": 7, "XYZ-wing": 7, "Advanced": 9, "Forced": 9 };
       function tierForRank(rank) { return rank <= 2 ? "Easy" : rank <= 5 ? "Medium" : "Hard"; }
       // Solve using only the techniques we can name, keeping a persistent candidate map so elimination
       // techniques stack, and record the hardest technique the solution required.
@@ -1179,7 +1179,7 @@
               return { tech: e.tech, body: `${e.reason} That leaves ${loc(r, c)} as the only spot for ${n} in ${u.name}.` };
           }
         }
-        return { tech: "Advanced", body: `${n} matches the solution. It follows from a technique beyond the ones I name here, or once a few more neighbors are filled in.` };
+        return { tech: "Forced", body: `${n} is correct — it's the only digit that lets the rest of the grid be completed from ${loc(r, c)}.` };
       }
       function handleMove(r, c) {
         inputs[r][c].classList.remove("wrong");
@@ -1336,7 +1336,7 @@
       // Log a named technique the player couldn't spot on their own — a hint they took, or the simpler
       // step that was available when they slipped. Feeds the "techniques to practice" stats.
       function noteMiss(tech) {
-        if (!session || !tech || tech === "Advanced" || tech === "Mistake") return;
+        if (!session || !tech || tech === "Advanced" || tech === "Forced" || tech === "Mistake") return;
         session.missed ||= {};
         session.missed[tech] = (session.missed[tech] || 0) + 1;
       }
@@ -1716,8 +1716,19 @@
         const s = findNakedSingle(M, grid) || findHiddenSingle(M, grid);
         if (s) return { kind: "place", r: s.r, c: s.c, n: s.n, tech: s.tech, highlight: [[s.r, s.c]], reason: `${s.tech}: ${s.reason}` };
         for (const tech of ELIM_TECHS) { const e = tech(M, grid); if (e) return { kind: "eliminate", tech: e.tech, highlight: e.highlight, reason: `${e.tech}: ${e.reason}`, elims: e.elims }; }
-        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0)
-          return { kind: "place", r, c, n: solution[r][c], tech: "Advanced", highlight: [[r, c]], reason: `This needs a technique beyond the ones I explain (e.g. an XY-chain). The answer is ${solution[r][c]}.` };
+        // Named techniques stalled — rather than a generic "Advanced", give a concrete forced move:
+        // pick the most-constrained cell and prove its digit by showing the other candidates dead-end.
+        let best = null;
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0) { const sz = M[r][c].size; if (!best || sz < best.sz) best = { r, c, sz }; }
+        if (best) {
+          const { r, c } = best, n = solution[r][c];
+          const others = [...M[r][c]].filter((d) => d !== n);
+          const dead = others.filter((d) => { const g = clone(grid); g[r][c] = d; return !solve(g); });
+          const reason = (others.length && dead.length === others.length)
+            ? `Placing ${others.join(" or ")} in ${loc(r, c)} leaves the puzzle with no valid completion, so ${n} is the only digit that works here.`
+            : `${n} is the only digit that lets the rest of the grid be completed from ${loc(r, c)}.`;
+          return { kind: "place", r, c, n, tech: "Forced", highlight: [[r, c]], reason };
+        }
         return null;
       }
       // Walk from the current board through every elimination needed until a placement is forced,
@@ -1739,9 +1750,11 @@
         const placeAction = { label: `Place ${place.n} in ${loc(place.r, place.c)}`, onClick: () => { pendingTech = place.tech; setValue(place.r, place.c, place.n); } };
         // Direct single (no eliminations): concise view, with an optional detailed breakdown.
         if (!chain.steps.length) {
-          const stepAction = (detailed || place.tech === "Advanced") ? null : { label: "Explain step by step", onClick: () => showHint(chain, true) };
+          // "Forced" isn't a named technique — show no tech label and skip the step-by-step breakdown.
+          const named = place.tech !== "Forced";
+          const stepAction = (detailed || !named) ? null : { label: "Explain step by step", onClick: () => showHint(chain, true) };
           const body = detailed ? detailedHintText(place) : place.reason;
-          return showExplain(detailed ? `Why ${loc(place.r, place.c)} = ${place.n}?` : `Hint: ${loc(place.r, place.c)} = ${place.n}`, body, "hint", [placeAction, stepAction], place.tech);
+          return showExplain(detailed ? `Why ${loc(place.r, place.c)} = ${place.n}?` : `Hint: ${loc(place.r, place.c)} = ${place.n}`, body, "hint", [placeAction, stepAction], named ? place.tech : undefined);
         }
         // Needs eliminations first: don't stop on them — walk every step, then explain the number.
         // No single tech label here (each step already names its technique inline in the body).
@@ -2452,7 +2465,7 @@
         "Pointing triple": "#f59e0b", "Locked candidate": "#f59e0b", "Box/line reduction": "#f59e0b",
         "Naked pair": "#a78bfa", "Hidden pair": "#a78bfa", "Naked triple": "#7c3aed", "Hidden triple": "#7c3aed",
         "X-wing": "#ec4899", "Swordfish": "#db2777", "XY-wing": "#14b8a6", "XYZ-wing": "#0d9488",
-        "Advanced": "#94a3b8", "Other": "#94a3b8", "Mistake": "#ff6b6b" };
+        "Advanced": "#94a3b8", "Forced": "#94a3b8", "Other": "#94a3b8", "Mistake": "#ff6b6b" };
       function median(arr) { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
       function errorsIn(g) { return typeof g.errors === "number" ? g.errors : g.moves.filter((m) => !m.correct).length; }
       // ---- over-time trends ----
@@ -2829,7 +2842,7 @@
         for (const row of techRows) techTable += `<tr class="trow" data-tech="${esc(row.t)}"><td><span style="color:${TECH_COLORS[row.t] || "#94a3b8"}">●</span> ${esc(row.t)}</td><td>${row.count}</td><td>${fmtDt(row.med)}</td></tr>`;
         if (mistakes) techTable += `<tr class="trow" data-tech="Mistake"><td><span style="color:${TECH_COLORS.Mistake}">●</span> Mistake</td><td>${mistakes}</td><td>—</td></tr>`;
         techTable += `</table><p class="hintline">Tap a technique to see a visual example and the games where it was logged.</p>`;
-        const focus = techRows.filter((r) => r.count >= 3 && r.t !== "Other" && r.t !== "Advanced")[0];
+        const focus = techRows.filter((r) => r.count >= 3 && r.t !== "Other" && r.t !== "Advanced" && r.t !== "Forced")[0];
 
         // techniques to practice — hints taken + easier steps missed, summed across every game
         const missedAll = {};
