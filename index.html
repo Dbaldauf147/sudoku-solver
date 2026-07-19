@@ -1710,40 +1710,51 @@
         }
         return `${hint.reason}\n\nThat elimination is what frees ${loc(r, c)} — apply it to your notes and ${loc(r, c)} = ${n} becomes forced.`;
       }
-      // Progressive hint state: the working candidate map + board the hint is stepping through.
-      // Each "Keep going" applies the shown elimination to hintM so the next step advances.
-      let hintM = null, hintGrid = null;
       // The next step from a candidate map + board: a placement if one is forced, else the first
       // available elimination, else the Advanced fallback (which just reveals the solution digit).
       function hintStepFrom(M, grid) {
         const s = findNakedSingle(M, grid) || findHiddenSingle(M, grid);
         if (s) return { kind: "place", r: s.r, c: s.c, n: s.n, tech: s.tech, highlight: [[s.r, s.c]], reason: `${s.tech}: ${s.reason}` };
-        for (const tech of ELIM_TECHS) { const e = tech(M, grid); if (e) return { kind: "eliminate", tech: e.tech, highlight: e.highlight, reason: `${e.tech}: ${e.reason} Update your candidate marks, then look again.`, elims: e.elims }; }
+        for (const tech of ELIM_TECHS) { const e = tech(M, grid); if (e) return { kind: "eliminate", tech: e.tech, highlight: e.highlight, reason: `${e.tech}: ${e.reason}`, elims: e.elims }; }
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0)
-          return { kind: "place", r, c, n: solution[r][c], tech: "Advanced", highlight: [[r, c]], reason: `This needs a technique beyond the ones I explain (e.g. an XY-chain). The answer is ${solution[r][c]} — place it and the simpler steps reopen.` };
+          return { kind: "place", r, c, n: solution[r][c], tech: "Advanced", highlight: [[r, c]], reason: `This needs a technique beyond the ones I explain (e.g. an XY-chain). The answer is ${solution[r][c]}.` };
         return null;
       }
-      function showHintStep(step, detailed) {
-        renderHintHighlights(step);
-        if (step.kind === "place") { lastHint = step; select(step.r, step.c); }
-        const body = detailed ? detailedHintText(step) : step.reason;
-        const stepAction = detailed ? null : { label: "Explain step by step", onClick: () => showHintStep(step, true) };
-        if (step.kind === "place") {
-          const placeAction = { label: `Place ${step.n} in ${loc(step.r, step.c)}`, onClick: () => { pendingTech = step.tech; setValue(step.r, step.c, step.n); } };
-          showExplain(detailed ? `Why ${loc(step.r, step.c)} = ${step.n}?` : `Hint: ${loc(step.r, step.c)} = ${step.n}`, body, "hint", [placeAction, stepAction], step.tech);
-        } else {
-          // Elimination step: no placement yet — let the player keep going until an actual move appears.
-          const moreAction = { label: "Keep going — show the move →", onClick: () => { hintM = applyElims(hintM, step.elims); const next = hintStepFrom(hintM, hintGrid); if (next) showHintStep(next, false); } };
-          showExplain(detailed ? "Step by step" : "Hint: eliminate candidates", body, "hint", [moreAction, stepAction], step.tech);
+      // Walk from the current board through every elimination needed until a placement is forced,
+      // collecting each step so the hint can explain the whole way to why that cell = its number.
+      function hintChain(grid) {
+        let M = candMap(grid); const steps = [];
+        for (let guard = 0; guard < 200; guard++) {
+          const step = hintStepFrom(M, grid);
+          if (!step) return { steps, place: null };
+          if (step.kind === "place") return { steps, place: step };
+          steps.push(step); M = applyElims(M, step.elims);
         }
+        return { steps, place: null };
+      }
+      function showHint(chain, detailed) {
+        const place = chain.place;
+        renderHintHighlights(place);
+        lastHint = place; select(place.r, place.c);
+        const placeAction = { label: `Place ${place.n} in ${loc(place.r, place.c)}`, onClick: () => { pendingTech = place.tech; setValue(place.r, place.c, place.n); } };
+        // Direct single (no eliminations): concise view, with an optional detailed breakdown.
+        if (!chain.steps.length) {
+          const stepAction = (detailed || place.tech === "Advanced") ? null : { label: "Explain step by step", onClick: () => showHint(chain, true) };
+          const body = detailed ? detailedHintText(place) : place.reason;
+          return showExplain(detailed ? `Why ${loc(place.r, place.c)} = ${place.n}?` : `Hint: ${loc(place.r, place.c)} = ${place.n}`, body, "hint", [placeAction, stepAction], place.tech);
+        }
+        // Needs eliminations first: don't stop on them — walk every step, then explain the number.
+        // No single tech label here (each step already names its technique inline in the body).
+        const lines = chain.steps.map((s, i) => `${i + 1}. ${s.reason}`);
+        lines.push(`${chain.steps.length + 1}. That leaves ${loc(place.r, place.c)} = ${place.n} — ${place.reason}`);
+        showExplain(`Hint: ${loc(place.r, place.c)} = ${place.n}`, lines.join("\n\n"), "hint", [placeAction]);
       }
       document.getElementById("hint").addEventListener("click", () => {
         closeStats(); closeLibrary(); closeHistory(); // Hint now lives in the menu — make sure the board is visible
-        hintGrid = progressGrid(); hintM = candMap(hintGrid);
-        const step = hintStepFrom(hintM, hintGrid);
-        if (!step) return showExplain("Nothing left to place", "The grid is complete.", "ok");
-        if (session) { session.hints = (session.hints || 0) + 1; noteMiss(step.tech); saveActiveGame(); }
-        showHintStep(step, false);
+        const chain = hintChain(progressGrid());
+        if (!chain.place) return showExplain("Nothing left to place", "The grid is complete.", "ok");
+        if (session) { session.hints = (session.hints || 0) + 1; noteMiss(chain.steps.length ? chain.steps[0].tech : chain.place.tech); saveActiveGame(); }
+        showHint(chain, false);
       });
 
       document.getElementById("check").addEventListener("click", () => {
