@@ -1700,24 +1700,40 @@
         }
         return `${hint.reason}\n\nThat elimination is what frees ${loc(r, c)} — apply it to your notes and ${loc(r, c)} = ${n} becomes forced.`;
       }
-      function showHintExplain(hint, detailed) {
-        const body = detailed ? detailedHintText(hint) : hint.reason;
-        const stepAction = detailed ? null : { label: "Explain step by step", onClick: () => showHintExplain(hint, true) };
-        if (hint.kind === "place") {
-          const placeAction = { label: `Place ${hint.n} in ${loc(hint.r, hint.c)}`, onClick: () => { pendingTech = hint.tech; setValue(hint.r, hint.c, hint.n); } };
-          showExplain(detailed ? `Why ${loc(hint.r, hint.c)} = ${hint.n}?` : `Hint: ${loc(hint.r, hint.c)} = ${hint.n}`, body, "hint", [placeAction, stepAction], hint.tech);
+      // Progressive hint state: the working candidate map + board the hint is stepping through.
+      // Each "Keep going" applies the shown elimination to hintM so the next step advances.
+      let hintM = null, hintGrid = null;
+      // The next step from a candidate map + board: a placement if one is forced, else the first
+      // available elimination, else the Advanced fallback (which just reveals the solution digit).
+      function hintStepFrom(M, grid) {
+        const s = findNakedSingle(M, grid) || findHiddenSingle(M, grid);
+        if (s) return { kind: "place", r: s.r, c: s.c, n: s.n, tech: s.tech, highlight: [[s.r, s.c]], reason: `${s.tech}: ${s.reason}` };
+        for (const tech of ELIM_TECHS) { const e = tech(M, grid); if (e) return { kind: "eliminate", tech: e.tech, highlight: e.highlight, reason: `${e.tech}: ${e.reason} Update your candidate marks, then look again.`, elims: e.elims }; }
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0)
+          return { kind: "place", r, c, n: solution[r][c], tech: "Advanced", highlight: [[r, c]], reason: `This needs a technique beyond the ones I explain (e.g. an XY-chain). The answer is ${solution[r][c]} — place it and the simpler steps reopen.` };
+        return null;
+      }
+      function showHintStep(step, detailed) {
+        renderHintHighlights(step);
+        if (step.kind === "place") { lastHint = step; select(step.r, step.c); }
+        const body = detailed ? detailedHintText(step) : step.reason;
+        const stepAction = detailed ? null : { label: "Explain step by step", onClick: () => showHintStep(step, true) };
+        if (step.kind === "place") {
+          const placeAction = { label: `Place ${step.n} in ${loc(step.r, step.c)}`, onClick: () => { pendingTech = step.tech; setValue(step.r, step.c, step.n); } };
+          showExplain(detailed ? `Why ${loc(step.r, step.c)} = ${step.n}?` : `Hint: ${loc(step.r, step.c)} = ${step.n}`, body, "hint", [placeAction, stepAction], step.tech);
         } else {
-          showExplain(detailed ? "Step by step" : "Hint: eliminate candidates", body, "hint", [stepAction], hint.tech);
+          // Elimination step: no placement yet — let the player keep going until an actual move appears.
+          const moreAction = { label: "Keep going — show the move →", onClick: () => { hintM = applyElims(hintM, step.elims); const next = hintStepFrom(hintM, hintGrid); if (next) showHintStep(next, false); } };
+          showExplain(detailed ? "Step by step" : "Hint: eliminate candidates", body, "hint", [moreAction, stepAction], step.tech);
         }
       }
       document.getElementById("hint").addEventListener("click", () => {
         closeStats(); closeLibrary(); closeHistory(); // Hint now lives in the menu — make sure the board is visible
-        const hint = findHint(progressGrid());
-        if (!hint) return showExplain("Nothing left to place", "The grid is complete.", "ok");
-        if (session) { session.hints = (session.hints || 0) + 1; noteMiss(hint.tech); saveActiveGame(); }
-        renderHintHighlights(hint);
-        if (hint.kind === "place") { lastHint = hint; select(hint.r, hint.c); }
-        showHintExplain(hint, false);
+        hintGrid = progressGrid(); hintM = candMap(hintGrid);
+        const step = hintStepFrom(hintM, hintGrid);
+        if (!step) return showExplain("Nothing left to place", "The grid is complete.", "ok");
+        if (session) { session.hints = (session.hints || 0) + 1; noteMiss(step.tech); saveActiveGame(); }
+        showHintStep(step, false);
       });
 
       document.getElementById("check").addEventListener("click", () => {
