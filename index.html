@@ -2343,7 +2343,14 @@
             <div class="saved-actions"><button class="drill-learn" data-t="${esc(t)}">Learn</button><button class="drill-play primary" data-t="${esc(t)}">Drill</button></div>
           </div>`;
         }
-        content.innerHTML = `<div class="card">Drill one technique at a time. Each puzzle is picked so that technique is its toughest step — solve it and train your eye for the pattern. <b>Learn</b> shows a worked example; <b>Drill</b> loads a puzzle.</div>${rows}`;
+        // Personalized recommendations pulled from where the player has needed help or been slow.
+        const recHTML = recommendedDrillsHTML(lsGet(STATS_KEY));
+        const recBlock = recHTML
+          ? `<h3 style="margin:6px 0 8px">Recommended for you</h3>
+             <div class="card">Picked from where you've needed help or run slow. Drill these first.</div>${recHTML}
+             <h3 style="margin:16px 0 8px">All techniques</h3>`
+          : `<div class="card">Play a few games and I'll recommend drills for the techniques you're weakest at. For now, pick any below.</div>`;
+        content.innerHTML = `<div class="card">Drill one technique at a time. Each puzzle is picked so that technique is its toughest step — solve it and train your eye for the pattern. <b>Learn</b> shows a worked example; <b>Drill</b> loads a puzzle.</div>${recBlock}${rows}`;
         content.querySelectorAll(".drill-learn").forEach((b) => (b.onclick = () => openExample(b.dataset.t)));
         content.querySelectorAll(".drill-play").forEach((b) => (b.onclick = () => loadDrill(b.dataset.t)));
       }
@@ -2458,6 +2465,51 @@
         const grid = parsePuzzle(str), tier = tierForRank(TECH_RANK[tech] || 3);
         resetToEdit(); writeGrid(grid); difficultyEl.value = tier; sourceEl.value = "Trainer · " + tech; renderPencils();
         showReady(`Drill: ${tech}. This puzzle's toughest step is a ${tech.toLowerCase()} — solve it and watch for that pattern. Stuck? Hint walks you through it.`);
+      }
+
+      // Recommend drills for the techniques the player is weakest at: primarily the ones they've
+      // needed help with (hints taken + easier steps missed on a slip), plus any they solve much
+      // slower than their usual pace. Only techniques that have a drill bank are suggested.
+      // Returns [{ t, reason, score }], strongest weakness first.
+      function recommendedDrills(games) {
+        const drillable = new Set(TRAINER_TECHS);
+        const missed = {};
+        for (const g of games) for (const [t, c] of Object.entries(g.missed || {})) if (drillable.has(t)) missed[t] = (missed[t] || 0) + c;
+        const correct = games.flatMap((g) => (g.moves || []).filter((m) => m.correct));
+        const overall = median(correct.map((m) => m.dt));
+        const byTech = {};
+        for (const m of correct) if (drillable.has(m.tech)) (byTech[m.tech] ||= []).push(m.dt);
+        const recs = [];
+        for (const t of drillable) {
+          const miss = missed[t] || 0;
+          const dts = byTech[t] || [];
+          const med = dts.length >= 3 ? median(dts) : 0;
+          const slow = med > 0 && overall > 0 && med >= overall * 1.6;
+          if (!miss && !slow) continue;
+          const score = miss * 2 + (slow ? Math.min(3, med / overall) : 0);
+          const reason = miss && slow
+            ? `Needed help ${miss}× and slower than usual here (${fmtDt(med)} vs ${fmtDt(overall)} typical).`
+            : miss
+            ? `You've needed help with this ${miss} time${miss > 1 ? "s" : ""}.`
+            : `Slower than your usual pace here — ${fmtDt(med)} vs ${fmtDt(overall)} typical.`;
+          recs.push({ t, reason, score });
+        }
+        return recs.sort((a, b) => b.score - a.score);
+      }
+      // Rendered rows for the recommended drills (empty string when there's no weakness signal yet).
+      function recommendedDrillsHTML(games, limit = 3) {
+        const recs = recommendedDrills(games).slice(0, limit);
+        if (!recs.length) return "";
+        let rows = "";
+        for (const { t, reason } of recs) {
+          const color = TECH_COLORS[t] || "#94a3b8", tier = tierForRank(TECH_RANK[t] || 3);
+          rows += `<div class="saved-row">
+            <div class="saved-meta"><b><span style="color:${color}">●</span> ${esc(t)}</b> <span class="pr-badge" style="font-size:0.7rem;padding:1px 7px">${esc(tier)}</span><br>
+              <span class="k">${esc(reason)}</span></div>
+            <div class="saved-actions"><button class="drill-learn" data-t="${esc(t)}">Learn</button><button class="drill-play primary" data-t="${esc(t)}">Drill</button></div>
+          </div>`;
+        }
+        return rows;
       }
 
       // ---- stats / deep dive ----
@@ -2875,10 +2927,12 @@
         let opts = "";
         games.forEach((g, i) => { opts += `<option value="${i}">${esc(g.source)} · ${esc(g.difficulty)} · ${new Date(g.startedAt).toLocaleDateString()} · ${fmtTime(g.totalMs)} ${g.solved ? "✓" : "▢"}</option>`; });
 
+        const recDrills = recommendedDrillsHTML(games);
         const allPane = games.length ? `
           <h3>Overview</h3>${overview}
           <h3>Personal records</h3><div class="card">${prRows}</div>
           <div class="card takeaway">${takeaway}</div>
+          ${recDrills ? `<h3>Recommended drills for you</h3>${recDrills}` : ""}
           <h3>By difficulty</h3>${summary || '<div class="card">No solved games yet.</div>'}
           <h3>Solve time trends</h3>
           <div class="chart-toggle">
@@ -2905,6 +2959,8 @@
         document.getElementById("sb").onclick = () => document.getElementById("statsBtn").click();
         statsEl.querySelectorAll(".stab").forEach((btn) => { btn.onclick = () => setStatsTab(btn.dataset.tab); });
         statsEl.querySelectorAll(".trow").forEach((row) => { row.onclick = () => openExample(row.dataset.tech); });
+        statsEl.querySelectorAll(".drill-learn").forEach((b) => (b.onclick = () => openExample(b.dataset.t)));
+        statsEl.querySelectorAll(".drill-play").forEach((b) => (b.onclick = () => loadDrill(b.dataset.t)));
         const pick = document.getElementById("gamePick");
         if (pick) { pick.onchange = () => renderDeepDive(games[Number(pick.value)]); renderDeepDive(games[0]); }
         // Wire re-timing on the "This game" timeline (uses the most recent finished game; a live game isn't retimable).
