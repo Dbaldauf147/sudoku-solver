@@ -4,6 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Sudoku Coach</title>
+    <!-- App icon + install metadata: a purple-background sudoku tile for the home screen -->
+    <meta name="theme-color" content="#7c3aed" />
+    <link rel="icon" type="image/svg+xml" href="/assets/icon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png" />
+    <link rel="apple-touch-icon" href="/assets/icon-180.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Sudoku Coach" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <script>
       // Diagnostic: surface any uncaught error on-screen (a syntax/runtime error in the main
       // script would otherwise fail silently and leave every button dead). Separate <script>
@@ -181,6 +191,30 @@
       .move.bad .cellref { color: var(--bad); }
       .move .meta { color: var(--muted); }
       .move.slow .meta { color: var(--bad); font-weight: 600; }
+      /* ---- retime slow moves ---- */
+      .rt-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 12px; }
+      .rt-toolbar .k { color: var(--muted); margin-right: auto; font-size: 0.85rem; }
+      .rt-toolbar button { padding: 6px 12px; font-size: 0.85rem; }
+      .rt-start { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+      .rt-start:disabled { opacity: 0.5; cursor: not-allowed; }
+      .rt-note { font-size: 0.82rem; color: var(--muted); margin: 4px 0 12px; }
+      .moves-selectable .move { grid-template-columns: 54px 56px 1fr auto; cursor: pointer; }
+      .moves-selectable .move.picked { background: var(--sel); }
+      .moves-selectable .move .rt-check { width: 16px; height: 16px; margin-right: 6px; vertical-align: middle; accent-color: var(--accent); }
+      .rt-summary-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 6px 0 4px; }
+      .rt-summary-table th, .rt-summary-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; }
+      .rt-summary-table th:first-child, .rt-summary-table td:first-child { text-align: left; }
+      .rt-summary-table th { color: var(--muted); font-weight: 600; }
+      .rt-delta.faster { color: var(--ok); font-weight: 700; }
+      .rt-delta.slower { color: var(--bad); font-weight: 700; }
+      .rt-totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 14px 0 4px; }
+      .rt-totals .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 6px; text-align: center; }
+      .rt-totals .stat b { display: block; font-size: 1.15rem; line-height: 1.2; }
+      .rt-totals .stat .k { font-size: 0.7rem; color: var(--muted); }
+      .rt-verdict { margin: 12px 0 0; font-weight: 700; font-size: 1.05rem; }
+      .rt-verdict.faster { color: var(--ok); }
+      .rt-verdict.slower { color: var(--bad); }
+      .rt-load-move { font-size: 2.4rem; font-weight: 800; color: var(--accent); margin: 6px 0; }
       .overlay {
         position: fixed; inset: 0; background: rgba(17, 20, 28, 0.5);
         display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50;
@@ -401,6 +435,25 @@
         </div>
       </div>
 
+      <div id="retimeLoadModal" class="overlay" hidden>
+        <div class="modal">
+          <h2 id="retimeLoadTitle">Get ready…</h2>
+          <div class="rt-load-move" id="retimeLoadMove">Move 1</div>
+          <p id="retimeLoadMsg">Restoring the board to just before this move.</p>
+        </div>
+      </div>
+
+      <div id="retimeSummaryModal" class="overlay" hidden>
+        <div class="modal" style="max-width:440px">
+          <h2>Re-timing results</h2>
+          <div id="retimeSummaryBody"></div>
+          <div class="actions">
+            <button id="retimeAgain">Retime again</button>
+            <button id="retimeDone" class="primary">Done</button>
+          </div>
+        </div>
+      </div>
+
       <div id="profileModal" class="overlay" hidden>
         <div class="modal profile-modal">
           <h2>Profile</h2>
@@ -595,6 +648,12 @@
         }
         const bk = document.getElementById("backupModal");
         if (bk && !bk.hidden) { if (e.key === "Escape" || e.key === "Enter") bk.hidden = true; return; }
+        if (retimeLoadModal && !retimeLoadModal.hidden) return;   // during the load countdown, ignore all keys
+        if (retimeSummaryModal && !retimeSummaryModal.hidden) {
+          if (e.key === "Enter") document.getElementById("retimeDone").click();
+          else if (e.key === "Escape") { retimeSummaryModal.hidden = true; endRetime(); }
+          return;
+        }
         const sh = document.getElementById("shareModal");
         if (sh && !sh.hidden) { if (e.key === "Escape") sh.hidden = true; return; } // let inputs receive digits/letters
         const pm = document.getElementById("pauseModal");
@@ -641,6 +700,7 @@
           cellEls[i][j].classList.toggle("same", hlMatches && !!n && inputs[i][j].value === s && !(selected && selected.r === i && selected.c === j));
       }
       function applyDigit(n) {
+        if (retime.active) return retimeGuess(n);
         if (!selected) return;
         const { r, c } = selected;
         if (entryMode === "candidate" && solving) toggleMark(r, c, n);
@@ -648,6 +708,7 @@
         highlightDigit(n);
       }
       function applyClear() {
+        if (retime.active) { if (selected && !givens[selected.r][selected.c]) { inputs[selected.r][selected.c].value = ""; inputs[selected.r][selected.c].classList.remove("wrong", "solved"); } return; }
         if (!selected) return;
         const { r, c } = selected;
         if (givens[r][c]) return;
@@ -1282,9 +1343,11 @@
 
       // ---- technique-based difficulty grading ----
       // A puzzle's grade is the hardest technique its logical solution needs — clue count doesn't factor in.
-      const TECH_RANK = { "Naked single": 1, "Hidden single": 2, "Pointing pair": 3, "Pointing triple": 3, "Locked candidate": 3,
-        "Naked pair": 4, "Hidden pair": 4, "Naked triple": 5, "Hidden triple": 5,
-        "X-wing": 6, "XY-wing": 6, "Swordfish": 7, "XYZ-wing": 7, "Advanced": 9 };
+      const TECH_RANK = { "Full house": 1, "Naked single": 1, "Hidden single": 2, "Pointing pair": 3, "Pointing triple": 3, "Locked candidate": 3,
+        "Naked pair": 4, "Hidden pair": 4, "Naked triple": 5, "Hidden triple": 5, "Naked quad": 5, "Hidden quad": 5,
+        "X-wing": 6, "XY-wing": 6, "Skyscraper": 6, "Two-string kite": 6,
+        "Swordfish": 7, "XYZ-wing": 7, "Jellyfish": 7, "W-wing": 7, "Simple colouring": 7, "Remote pairs": 7, "XY-chain": 8,
+        "Advanced": 9, "Forced": 9 };
       function tierForRank(rank) { return rank <= 2 ? "Easy" : rank <= 5 ? "Medium" : "Hard"; }
       // Solve using only the techniques we can name, keeping a persistent candidate map so elimination
       // techniques stack, and record the hardest technique the solution required.
@@ -1387,7 +1450,7 @@
               return { tech: e.tech, body: `${e.reason} That leaves ${loc(r, c)} as the only spot for ${n} in ${u.name}.` };
           }
         }
-        return { tech: "Advanced", body: `${n} matches the solution. It follows from a technique beyond the ones I name here (such as a forcing chain or ALS move), or once a few more neighbors are filled in.` };
+        return { tech: "Forced", body: `${n} is correct — it's the only digit that lets the rest of the grid be completed from ${loc(r, c)}.` };
       }
       function handleMove(r, c) {
         inputs[r][c].classList.remove("wrong");
@@ -1544,7 +1607,7 @@
       // Log a named technique the player couldn't spot on their own — a hint they took, or the simpler
       // step that was available when they slipped. Feeds the "techniques to practice" stats.
       function noteMiss(tech) {
-        if (!session || !tech || tech === "Advanced" || tech === "Mistake") return;
+        if (!session || !tech || tech === "Advanced" || tech === "Forced" || tech === "Mistake") return;
         session.missed ||= {};
         session.missed[tech] = (session.missed[tech] || 0) + 1;
       }
@@ -1556,6 +1619,12 @@
         session.totalMs = activeElapsed();
         clearInterval(timerId); timerId = null;
         session.solved = solved; session.finishedAt = Date.now();
+        // Snapshot the clue grid + full solution so this game can be re-timed later (restore
+        // the board to just before any move). Older games saved before this won't have them.
+        const clueGrid = blank(0);
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (givens[r][c]) clueGrid[r][c] = Number(inputs[r][c].value) || 0;
+        session.grid = clueGrid;
+        session.solution = solution ? clone(solution) : null;
         lastTotalMs = session.totalMs;
         // Personal-record check: is this the fastest solve yet for this difficulty? (compare against
         // prior solves before this game is added). The first solve of a difficulty sets the record too.
@@ -1912,24 +1981,64 @@
         }
         return `${hint.reason}\n\nThat elimination is what frees ${loc(r, c)} — apply it to your notes and ${loc(r, c)} = ${n} becomes forced.`;
       }
-      function showHintExplain(hint, detailed) {
-        const body = detailed ? detailedHintText(hint) : hint.reason;
-        const stepAction = detailed ? null : { label: "Explain step by step", onClick: () => showHintExplain(hint, true) };
-        if (hint.kind === "place") {
-          const placeAction = { label: `Place ${hint.n} in ${loc(hint.r, hint.c)}`, onClick: () => { pendingTech = hint.tech; setValue(hint.r, hint.c, hint.n); } };
-          showExplain(detailed ? `Why ${loc(hint.r, hint.c)} = ${hint.n}?` : `Hint: ${loc(hint.r, hint.c)} = ${hint.n}`, body, "hint", [placeAction, stepAction], hint.tech);
-        } else {
-          showExplain(detailed ? "Step by step" : "Hint: eliminate candidates", body, "hint", [stepAction], hint.tech);
+      // The next step from a candidate map + board: a placement if one is forced, else the first
+      // available elimination, else the Advanced fallback (which just reveals the solution digit).
+      function hintStepFrom(M, grid) {
+        const s = findNakedSingle(M, grid) || findHiddenSingle(M, grid);
+        if (s) return { kind: "place", r: s.r, c: s.c, n: s.n, tech: s.tech, highlight: [[s.r, s.c]], reason: `${s.tech}: ${s.reason}` };
+        for (const tech of ELIM_TECHS) { const e = tech(M, grid); if (e) return { kind: "eliminate", tech: e.tech, highlight: e.highlight, reason: `${e.tech}: ${e.reason}`, elims: e.elims }; }
+        // Named techniques stalled — rather than a generic "Advanced", give a concrete forced move:
+        // pick the most-constrained cell and prove its digit by showing the other candidates dead-end.
+        let best = null;
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0) { const sz = M[r][c].size; if (!best || sz < best.sz) best = { r, c, sz }; }
+        if (best) {
+          const { r, c } = best, n = solution[r][c];
+          const others = [...M[r][c]].filter((d) => d !== n);
+          const dead = others.filter((d) => { const g = clone(grid); g[r][c] = d; return !solve(g); });
+          const reason = (others.length && dead.length === others.length)
+            ? `Placing ${others.join(" or ")} in ${loc(r, c)} leaves the puzzle with no valid completion, so ${n} is the only digit that works here.`
+            : `${n} is the only digit that lets the rest of the grid be completed from ${loc(r, c)}.`;
+          return { kind: "place", r, c, n, tech: "Forced", highlight: [[r, c]], reason };
         }
+        return null;
+      }
+      // Walk from the current board through every elimination needed until a placement is forced,
+      // collecting each step so the hint can explain the whole way to why that cell = its number.
+      function hintChain(grid) {
+        let M = candMap(grid); const steps = [];
+        for (let guard = 0; guard < 200; guard++) {
+          const step = hintStepFrom(M, grid);
+          if (!step) return { steps, place: null };
+          if (step.kind === "place") return { steps, place: step };
+          steps.push(step); M = applyElims(M, step.elims);
+        }
+        return { steps, place: null };
+      }
+      function showHint(chain, detailed) {
+        const place = chain.place;
+        renderHintHighlights(place);
+        lastHint = place; select(place.r, place.c);
+        const placeAction = { label: `Place ${place.n} in ${loc(place.r, place.c)}`, onClick: () => { pendingTech = place.tech; setValue(place.r, place.c, place.n); } };
+        // Direct single (no eliminations): concise view, with an optional detailed breakdown.
+        if (!chain.steps.length) {
+          // "Forced" isn't a named technique — show no tech label and skip the step-by-step breakdown.
+          const named = place.tech !== "Forced";
+          const stepAction = (detailed || !named) ? null : { label: "Explain step by step", onClick: () => showHint(chain, true) };
+          const body = detailed ? detailedHintText(place) : place.reason;
+          return showExplain(detailed ? `Why ${loc(place.r, place.c)} = ${place.n}?` : `Hint: ${loc(place.r, place.c)} = ${place.n}`, body, "hint", [placeAction, stepAction], named ? place.tech : undefined);
+        }
+        // Needs eliminations first: don't stop on them — walk every step, then explain the number.
+        // No single tech label here (each step already names its technique inline in the body).
+        const lines = chain.steps.map((s, i) => `${i + 1}. ${s.reason}`);
+        lines.push(`${chain.steps.length + 1}. That leaves ${loc(place.r, place.c)} = ${place.n} — ${place.reason}`);
+        showExplain(`Hint: ${loc(place.r, place.c)} = ${place.n}`, lines.join("\n\n"), "hint", [placeAction]);
       }
       document.getElementById("hint").addEventListener("click", () => {
         closeStats(); closeLibrary(); closeHistory(); // Hint now lives in the menu — make sure the board is visible
-        const hint = findHint(progressGrid());
-        if (!hint) return showExplain("Nothing left to place", "The grid is complete.", "ok");
-        if (session) { session.hints = (session.hints || 0) + 1; noteMiss(hint.tech); saveActiveGame(); }
-        renderHintHighlights(hint);
-        if (hint.kind === "place") { lastHint = hint; select(hint.r, hint.c); }
-        showHintExplain(hint, false);
+        const chain = hintChain(progressGrid());
+        if (!chain.place) return showExplain("Nothing left to place", "The grid is complete.", "ok");
+        if (session) { session.hints = (session.hints || 0) + 1; noteMiss(chain.steps.length ? chain.steps[0].tech : chain.place.tech); saveActiveGame(); }
+        showHint(chain, false);
       });
 
       document.getElementById("check").addEventListener("click", () => {
@@ -2505,7 +2614,14 @@
             <div class="saved-actions"><button class="drill-learn" data-t="${esc(t)}">Learn</button><button class="drill-play primary" data-t="${esc(t)}">Drill</button></div>
           </div>`;
         }
-        content.innerHTML = `<div class="card">Drill one technique at a time. Each puzzle is picked so that technique is its toughest step — solve it and train your eye for the pattern. <b>Learn</b> shows a worked example; <b>Drill</b> loads a puzzle.</div>${rows}`;
+        // Personalized recommendations pulled from where the player has needed help or been slow.
+        const recHTML = recommendedDrillsHTML(lsGet(STATS_KEY));
+        const recBlock = recHTML
+          ? `<h3 style="margin:6px 0 8px">Recommended for you</h3>
+             <div class="card">Picked from where you've needed help or run slow. Drill these first.</div>${recHTML}
+             <h3 style="margin:16px 0 8px">All techniques</h3>`
+          : `<div class="card">Play a few games and I'll recommend drills for the techniques you're weakest at. For now, pick any below.</div>`;
+        content.innerHTML = `<div class="card">Drill one technique at a time. Each puzzle is picked so that technique is its toughest step — solve it and train your eye for the pattern. <b>Learn</b> shows a worked example; <b>Drill</b> loads a puzzle.</div>${recBlock}${rows}`;
         content.querySelectorAll(".drill-learn").forEach((b) => (b.onclick = () => openExample(b.dataset.t)));
         content.querySelectorAll(".drill-play").forEach((b) => (b.onclick = () => loadDrill(b.dataset.t)));
       }
@@ -2622,6 +2738,51 @@
         showReady(`Drill: ${tech}. This puzzle's toughest step is a ${tech.toLowerCase()} — solve it and watch for that pattern. Stuck? Hint walks you through it.`);
       }
 
+      // Recommend drills for the techniques the player is weakest at: primarily the ones they've
+      // needed help with (hints taken + easier steps missed on a slip), plus any they solve much
+      // slower than their usual pace. Only techniques that have a drill bank are suggested.
+      // Returns [{ t, reason, score }], strongest weakness first.
+      function recommendedDrills(games) {
+        const drillable = new Set(TRAINER_TECHS);
+        const missed = {};
+        for (const g of games) for (const [t, c] of Object.entries(g.missed || {})) if (drillable.has(t)) missed[t] = (missed[t] || 0) + c;
+        const correct = games.flatMap((g) => (g.moves || []).filter((m) => m.correct));
+        const overall = median(correct.map((m) => m.dt));
+        const byTech = {};
+        for (const m of correct) if (drillable.has(m.tech)) (byTech[m.tech] ||= []).push(m.dt);
+        const recs = [];
+        for (const t of drillable) {
+          const miss = missed[t] || 0;
+          const dts = byTech[t] || [];
+          const med = dts.length >= 3 ? median(dts) : 0;
+          const slow = med > 0 && overall > 0 && med >= overall * 1.6;
+          if (!miss && !slow) continue;
+          const score = miss * 2 + (slow ? Math.min(3, med / overall) : 0);
+          const reason = miss && slow
+            ? `Needed help ${miss}× and slower than usual here (${fmtDt(med)} vs ${fmtDt(overall)} typical).`
+            : miss
+            ? `You've needed help with this ${miss} time${miss > 1 ? "s" : ""}.`
+            : `Slower than your usual pace here — ${fmtDt(med)} vs ${fmtDt(overall)} typical.`;
+          recs.push({ t, reason, score });
+        }
+        return recs.sort((a, b) => b.score - a.score);
+      }
+      // Rendered rows for the recommended drills (empty string when there's no weakness signal yet).
+      function recommendedDrillsHTML(games, limit = 3) {
+        const recs = recommendedDrills(games).slice(0, limit);
+        if (!recs.length) return "";
+        let rows = "";
+        for (const { t, reason } of recs) {
+          const color = TECH_COLORS[t] || "#94a3b8", tier = tierForRank(TECH_RANK[t] || 3);
+          rows += `<div class="saved-row">
+            <div class="saved-meta"><b><span style="color:${color}">●</span> ${esc(t)}</b> <span class="pr-badge" style="font-size:0.7rem;padding:1px 7px">${esc(tier)}</span><br>
+              <span class="k">${esc(reason)}</span></div>
+            <div class="saved-actions"><button class="drill-learn" data-t="${esc(t)}">Learn</button><button class="drill-play primary" data-t="${esc(t)}">Drill</button></div>
+          </div>`;
+        }
+        return rows;
+      }
+
       // ---- stats / deep dive ----
       const TECH_COLORS = { "Full house": "#86efac", "Naked single": "#4ade80", "Hidden single": "#6ea8fe", "Pointing pair": "#f59e0b",
         "Pointing triple": "#f59e0b", "Locked candidate": "#f59e0b", "Box/line reduction": "#f59e0b",
@@ -2631,7 +2792,7 @@
         "Skyscraper": "#0ea5e9", "Two-string kite": "#0284c7",
         "XY-wing": "#14b8a6", "XYZ-wing": "#0d9488", "W-wing": "#0f766e",
         "Simple colouring": "#f97316", "Remote pairs": "#ea580c", "XY-chain": "#c2410c",
-        "Advanced": "#94a3b8", "Other": "#94a3b8", "Mistake": "#ff6b6b" };
+        "Advanced": "#94a3b8", "Forced": "#94a3b8", "Other": "#94a3b8", "Mistake": "#ff6b6b" };
       function median(arr) { if (!arr.length) return 0; const s = [...arr].sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
       function errorsIn(g) { return typeof g.errors === "number" ? g.errors : g.moves.filter((m) => !m.correct).length; }
       // ---- over-time trends ----
@@ -2896,7 +3057,7 @@
         ["Single-digit & colouring", ["Skyscraper", "Two-string kite", "Simple colouring"]],
         ["Wings", ["XY-wing", "XYZ-wing", "W-wing"]],
         ["Chains", ["Remote pairs", "XY-chain"]],
-        ["Beyond", ["Advanced"]],
+        ["Beyond", ["Forced", "Advanced"]],
       ];
       const TECH_INFO = {
         "Full house": "The last empty cell in a row, column, or box — only one digit can go there.",
@@ -2922,7 +3083,8 @@
         "W-wing": "Two matching pairs joined by a strong link, clearing their shared digit from common peers.",
         "Remote pairs": "A chain of identical pairs whose alternating digits clear cells seeing both ends.",
         "XY-chain": "A chain of two-candidate cells that forces one end to a value — the general form of the XY-wing.",
-        "Advanced": "Anything past the methods above (uniqueness, ALS, forcing chains, and friends). Still tracked as one bucket for now.",
+        "Forced": "A correct move that follows from the puzzle's unique solution rather than a single named rule — the grid can't be completed otherwise.",
+        "Advanced": "Anything past the methods above (uniqueness, ALS, forcing chains, and friends). Older games logged these here before the “Forced” label.",
       };
       function closeTechniques() {
         const p = document.getElementById("techniques");
@@ -3046,7 +3208,7 @@
         const practice = missedSection(g.missed, "Techniques to practice");
 
         // ----- move-by-move timeline (pace / deep dive for this game) -----
-        const timeline = movesN ? `<h3>Move-by-move timeline</h3>${deepDiveHTML(g, false)}` : "";
+        const timeline = movesN ? `<h3>Move-by-move timeline</h3><div id="thisTimeline">${deepDiveHTML(g, false, true)}</div>` : "";
 
         return `${prLine}
           <div class="card"><b>${esc(d || "—")}</b> · ${esc(g.source || "—")} · <span class="k">${status}</span></div>
@@ -3125,7 +3287,7 @@
         for (const row of techRows) techTable += `<tr class="trow" data-tech="${esc(row.t)}"><td><span style="color:${TECH_COLORS[row.t] || "#94a3b8"}">●</span> ${esc(row.t)}</td><td>${row.count}</td><td>${fmtDt(row.med)}</td></tr>`;
         if (mistakes) techTable += `<tr class="trow" data-tech="Mistake"><td><span style="color:${TECH_COLORS.Mistake}">●</span> Mistake</td><td>${mistakes}</td><td>—</td></tr>`;
         techTable += `</table><p class="hintline">Tap a technique to see a visual example and the games where it was logged.</p>`;
-        const focus = techRows.filter((r) => r.count >= 3 && r.t !== "Other" && r.t !== "Advanced")[0];
+        const focus = techRows.filter((r) => r.count >= 3 && r.t !== "Other" && r.t !== "Advanced" && r.t !== "Forced")[0];
 
         // techniques to practice — hints taken + easier steps missed, summed across every game
         const missedAll = {};
@@ -3158,10 +3320,12 @@
         let opts = "";
         games.forEach((g, i) => { opts += `<option value="${i}">${esc(g.source)} · ${esc(g.difficulty)} · ${new Date(g.startedAt).toLocaleDateString()} · ${fmtTime(g.totalMs)} ${g.solved ? "✓" : "▢"}</option>`; });
 
+        const recDrills = recommendedDrillsHTML(games);
         const allPane = games.length ? `
           <h3>Overview</h3>${overview}
           <h3>Personal records</h3><div class="card">${prRows}</div>
           <div class="card takeaway">${takeaway}</div>
+          ${recDrills ? `<h3>Recommended drills for you</h3>${recDrills}` : ""}
           <h3>By difficulty</h3>${summary || '<div class="card">No solved games yet.</div>'}
           <h3>Solve time trends</h3>
           <div class="chart-toggle">
@@ -3188,8 +3352,12 @@
         document.getElementById("sb").onclick = () => document.getElementById("statsBtn").click();
         statsEl.querySelectorAll(".stab").forEach((btn) => { btn.onclick = () => setStatsTab(btn.dataset.tab); });
         statsEl.querySelectorAll(".trow").forEach((row) => { row.onclick = () => openExample(row.dataset.tech); });
+        statsEl.querySelectorAll(".drill-learn").forEach((b) => (b.onclick = () => openExample(b.dataset.t)));
+        statsEl.querySelectorAll(".drill-play").forEach((b) => (b.onclick = () => loadDrill(b.dataset.t)));
         const pick = document.getElementById("gamePick");
         if (pick) { pick.onchange = () => renderDeepDive(games[Number(pick.value)]); renderDeepDive(games[0]); }
+        // Wire re-timing on the "This game" timeline (uses the most recent finished game; a live game isn't retimable).
+        if (!session && games[0]) wireRetimeControls(document.getElementById("thisTimeline"), games[0]);
         setStatsTab(statsTab);   // apply the remembered tab
         // Solve-time trends toggle: swap between "over time" and "avg time per move".
         const timeCharts = { overtime: diffTrend, permove: paceHTML };
@@ -3203,35 +3371,245 @@
       }
       // Move-by-move timeline: one bar per move sized by the pause before it, slow moves flagged.
       // Shared by the "All games" deep-dive selector and the "This game" pane.
-      function deepDiveHTML(g, includeSummary = true) {
+      function deepDiveHTML(g, includeSummary = true, selectable = false) {
         const moves = g.moves || [];
         if (!moves.length) return `<div class="card">No moves recorded for this game yet.</div>`;
         const maxDt = Math.max(1, ...moves.map((m) => m.dt));
         const slow = Math.max(maxDt * 0.6, median(moves.map((m) => m.dt)) * 2.5);
         const statusWord = g.live ? "in progress" : (g.solved ? "solved" : "revealed");
+        const canSel = selectable && canRetime(g);
         let html = includeSummary ? `<div class="card">${moves.length} moves · ${fmtTime(g.totalMs)} total · ${errorsIn(g)} error${errorsIn(g) === 1 ? "" : "s"} · ${statusWord}</div>` : "";
+        if (canSel) {
+          html += `<div class="rt-toolbar">
+            <span class="k">Your slowest moves are pre-selected — adjust the picks, then race yourself.</span>
+            <button type="button" class="rt-quick" data-n="3">Slowest 3</button>
+            <button type="button" class="rt-quick" data-n="5">Slowest 5</button>
+            <button type="button" class="rt-start" disabled>▶ Retime</button>
+          </div>`;
+        } else if (selectable && !g.live) {
+          html += `<p class="rt-note">Re-timing lets you replay your slowest moves against the clock — available for games solved after this update.</p>`;
+        }
+        // Pre-select the moves worth re-timing: the slow-flagged ones (the ⏳ moves that took
+        // longest), or the 3 slowest overall when a very even game trips no slow flags.
+        const slowFlagged = moves.map((m, i) => i).filter((i) => moves[i].dt >= slow);
+        const preSel = new Set(canSel
+          ? (slowFlagged.length ? slowFlagged : moves.map((m, i) => [i, m.dt]).sort((a, b) => b[1] - a[1]).slice(0, Math.min(3, moves.length)).map((x) => x[0]))
+          : []);
+        html += `<div class="moves-wrap${canSel ? " moves-selectable" : ""}">`;
         moves.forEach((m, i) => {
           const color = TECH_COLORS[m.tech] || "#94a3b8";
           const w = Math.round((m.dt / maxDt) * 100);
-          html += `<div class="move ${m.correct ? "" : "bad"} ${m.dt >= slow ? "slow" : ""}">
-            <span class="meta">${i + 1}</span>
+          html += `<div class="move ${m.correct ? "" : "bad"} ${m.dt >= slow ? "slow" : ""}${preSel.has(i) ? " picked" : ""}" data-i="${i}">
+            <span class="meta">${canSel ? `<input type="checkbox" class="rt-check" data-i="${i}"${preSel.has(i) ? " checked" : ""} aria-label="Select move ${i + 1}">` : ""}${i + 1}</span>
             <span class="cellref">${m.correct ? "" : "✗"}${loc(m.r, m.c)}=${m.n}</span>
             <span><span class="bar" style="width:${w}%;background:${color}"></span></span>
             <span class="meta">${fmtDt(m.dt)} · ${esc(m.tech)}${m.dt >= slow ? " ⏳" : ""}</span>
           </div>`;
         });
+        html += `</div>`;
         return html;
       }
       function renderDeepDive(g) {
         const dd = document.getElementById("deepDive"); if (!g) { dd.innerHTML = ""; return; }
-        dd.innerHTML = deepDiveHTML(g);
+        dd.innerHTML = deepDiveHTML(g, true, true);
+        wireRetimeControls(dd, g);
       }
+
+      // ================= Retime slow moves =================
+      // Replay any subset of a finished game's moves against the clock: restore the board to
+      // just before each selected move, time how long the re-solve takes, then compare the new
+      // times to the originals. A finished game must carry its clue grid + solution to qualify.
+      let retime = { active: false };
+      function canRetime(g) { return !!(g && !g.live && g.grid && g.solution && (g.moves || []).length); }
+
+      // Wire the checkboxes + toolbar inside a rendered timeline container to a game object.
+      function wireRetimeControls(container, g) {
+        if (!container || !canRetime(g)) return;
+        const wrap = container.querySelector(".moves-wrap.moves-selectable");
+        const startBtn = container.querySelector(".rt-start");
+        if (!wrap || !startBtn) return;
+        const boxes = () => [...wrap.querySelectorAll(".rt-check")];
+        const selectedIdx = () => boxes().filter((b) => b.checked).map((b) => Number(b.dataset.i));
+        const refresh = () => {
+          const n = selectedIdx().length;
+          startBtn.disabled = !n;
+          startBtn.textContent = n ? `▶ Retime ${n} move${n === 1 ? "" : "s"}` : "▶ Retime";
+          boxes().forEach((b) => b.closest(".move").classList.toggle("picked", b.checked));
+        };
+        // Clicking a row (anywhere but the checkbox itself) toggles its selection.
+        wrap.addEventListener("click", (e) => {
+          if (e.target.classList.contains("rt-check")) return;
+          const row = e.target.closest(".move"); if (!row) return;
+          const cb = row.querySelector(".rt-check"); if (!cb) return;
+          cb.checked = !cb.checked; refresh();
+        });
+        wrap.addEventListener("change", (e) => { if (e.target.classList.contains("rt-check")) refresh(); });
+        container.querySelectorAll(".rt-quick").forEach((q) => {
+          q.onclick = () => {
+            const n = Number(q.dataset.n);
+            const slowest = new Set(g.moves.map((m, i) => [i, m.dt]).sort((a, b) => b[1] - a[1]).slice(0, n).map((x) => x[0]));
+            boxes().forEach((b) => { b.checked = slowest.has(Number(b.dataset.i)); });
+            refresh();
+          };
+        });
+        startBtn.onclick = () => { const idx = selectedIdx(); if (idx.length) startRetime(g, idx); };
+        refresh();
+      }
+
+      // Rebuild the board as it stood just before move index k: clues + every correct placement before k.
+      function boardBeforeMove(g, k) {
+        const b = g.grid.map((row) => row.slice());
+        for (let j = 0; j < k; j++) { const m = g.moves[j]; if (m.correct) b[m.r][m.c] = m.n; }
+        b[g.moves[k].r][g.moves[k].c] = 0;   // the target cell must be empty for the re-solve
+        return b;
+      }
+
+      const retimeLoadModal = document.getElementById("retimeLoadModal");
+      const retimeSummaryModal = document.getElementById("retimeSummaryModal");
+
+      function startRetime(g, indices) {
+        indices = [...new Set(indices)].sort((a, b) => a - b);
+        if (!indices.length) return;
+        // Preserve an in-progress game so re-timing can hand it back afterwards, then stand the
+        // live session down so its timer/auto-pause never competes with the re-time clock.
+        const restore = solving && session ? currentGameState() : null;
+        clearInterval(timerId); timerId = null; solving = false; session = null;
+        document.body.classList.remove("solving"); syncModeButtons();
+        retime = { active: true, g, queue: indices, i: 0, results: [], restore, target: null, startAt: 0, mistakes: 0 };
+        closeStats(); closeLibrary(); closeHistory();
+        showRetimeStep();
+      }
+
+      function showRetimeStep() {
+        if (!retime.active) return;
+        retime.target = null;   // no live target during the load screen — ignore stray key/tap input
+        clearInterval(timerId); timerId = null;
+        const total = retime.queue.length, k = retime.queue[retime.i], m = retime.g.moves[k];
+        document.getElementById("retimeLoadTitle").textContent = "Get ready…";
+        document.getElementById("retimeLoadMove").textContent = `Move ${retime.i + 1} of ${total}`;
+        document.getElementById("retimeLoadMsg").textContent = "Restoring the board to just before this move — then find the move and make it.";
+        retimeLoadModal.hidden = false;
+        // Blank the board behind the load screen so the answer isn't visible during the countdown.
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].value = ""; inputs[r][c].classList.remove("wrong", "solved", "given"); cellEls[r][c].classList.remove("selected", "same", "retime-target"); }
+        setTimeout(() => { if (retime.active) { retimeLoadModal.hidden = true; setupRetimeBoard(k); } }, 1100);
+      }
+
+      // Load one move onto the real board with every cell locked except the one to re-solve, then start its clock.
+      function setupRetimeBoard(k) {
+        const g = retime.g, m = g.moves[k], board = boardBeforeMove(g, k);
+        solution = g.solution;                 // enables the shared board's right/wrong styling
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+          // Lock the filled cells (clues + earlier placements); leave every empty cell open so you
+          // have to find which one comes next yourself — the target isn't singled out.
+          givens[r][c] = board[r][c] !== 0;
+          inputs[r][c].value = board[r][c] ? String(board[r][c]) : "";
+          inputs[r][c].classList.toggle("given", board[r][c] !== 0);
+          inputs[r][c].classList.remove("wrong", "solved");
+          cellEls[r][c].classList.remove("selected", "same", "retime-target");
+          marks[r][c].clear();
+        }
+        selected = null;                       // no cell pre-selected — you pick where the move goes
+        retime.target = { r: m.r, c: m.c, n: g.solution[m.r][m.c], origMs: m.dt };
+        retime.mistakes = 0;
+        renderPencils(); updatePad();
+        errorsEl.textContent = "0";
+        retime.startAt = Date.now();
+        startRetimeTimer();
+        showRetimeExplain(`Move ${retime.i + 1} of ${retime.queue.length}`, `Find the next move and make it — tap the cell it goes in, then the digit. Your original time here was ${fmtDt(m.dt)}.`, "info");
+      }
+
+      function startRetimeTimer() {
+        clearInterval(timerId);
+        const paint = () => { timerEl.textContent = fmtTime(Date.now() - retime.startAt); };
+        paint();
+        timerId = setInterval(paint, 250);
+      }
+
+      function showRetimeExplain(title, body, kind) {
+        showExplain(title, body, kind, { label: "Quit re-timing", onClick: quitRetime });
+      }
+
+      // Called from applyDigit while a re-time is active — the guess only lands if it's the exact
+      // cell + digit you originally played, so you have to locate the move on the board yourself.
+      function retimeGuess(n) {
+        if (!retime.active || !retime.target) return;
+        if (!selected) { showRetimeExplain(`Move ${retime.i + 1} of ${retime.queue.length}`, "Tap the cell you think comes next, then choose its digit.", "info"); return; }
+        const { r, c } = selected;
+        if (givens[r][c]) return;              // a locked clue / already-placed cell — nothing to solve there
+        const t = retime.target;
+        inputs[r][c].value = String(n);
+        if (r === t.r && c === t.c && n === t.n) {
+          const ms = Date.now() - retime.startAt;
+          clearInterval(timerId); timerId = null;
+          inputs[r][c].classList.remove("wrong"); inputs[r][c].classList.add("solved");
+          retime.results.push({ r: t.r, c: t.c, origMs: t.origMs, newMs: ms, mistakes: retime.mistakes });
+          retime.i++;
+          if (retime.i >= retime.queue.length) setTimeout(() => { if (retime.active) finishRetime(); }, 650);
+          else setTimeout(() => { if (retime.active) showRetimeStep(); }, 750);
+        } else {
+          retime.mistakes++;
+          errorsEl.textContent = retime.mistakes;
+          inputs[r][c].classList.add("wrong");
+          const msg = (r === t.r && c === t.c) ? `${n} isn't the digit that goes here.` : "That isn't the move you made here.";
+          showRetimeExplain("Not quite", `${msg} The clock's still running — try again.`, "bad");
+          setTimeout(() => { if (retime.active && !inputs[r][c].classList.contains("solved")) { inputs[r][c].value = ""; inputs[r][c].classList.remove("wrong"); } }, 550);
+        }
+      }
+
+      function finishRetime() {
+        clearInterval(timerId); timerId = null;
+        retimeLoadModal.hidden = true;
+        const res = retime.results;
+        const origTotal = res.reduce((a, x) => a + x.origMs, 0);
+        const newTotal = res.reduce((a, x) => a + x.newMs, 0);
+        let rows = "";
+        for (const x of res) {
+          const d = x.newMs - x.origMs, faster = d < 0;
+          rows += `<tr><td>${loc(x.r, x.c)}</td><td>${fmtDt(x.origMs)}</td><td>${fmtDt(x.newMs)}</td><td class="rt-delta ${faster ? "faster" : "slower"}">${faster ? "−" : "+"}${fmtDt(Math.abs(d))}</td></tr>`;
+        }
+        const diff = newTotal - origTotal, beat = diff < 0;
+        const verdict = beat
+          ? `⚡ You were ${fmtDt(Math.abs(diff))} faster this time!`
+          : (diff === 0 ? "Dead even with your original pace." : `You were ${fmtDt(diff)} slower this time — run it again to beat it.`);
+        document.getElementById("retimeSummaryBody").innerHTML = `
+          <p style="color:var(--muted);margin:0 0 6px">Re-timed ${res.length} move${res.length === 1 ? "" : "s"}: your original solve vs. now.</p>
+          <table class="rt-summary-table"><tr><th>Cell</th><th>Original</th><th>New</th><th>Δ</th></tr>${rows}</table>
+          <div class="rt-totals">
+            <div class="stat"><b>${fmtDt(origTotal)}</b><span class="k">original total</span></div>
+            <div class="stat"><b>${fmtDt(newTotal)}</b><span class="k">new total</span></div>
+            <div class="stat"><b class="rt-delta ${beat ? "faster" : "slower"}">${beat ? "−" : "+"}${fmtDt(Math.abs(diff))}</b><span class="k">difference</span></div>
+          </div>
+          <p class="rt-verdict ${beat ? "faster" : (diff === 0 ? "" : "slower")}">${verdict}</p>`;
+        retimeSummaryModal.hidden = false;
+      }
+
+      // Restore the app to a clean state (or hand back the game that was interrupted) and clear re-time mode.
+      function endRetime() {
+        const restore = retime.restore;
+        retime = { active: false };
+        retimeLoadModal.hidden = true; retimeSummaryModal.hidden = true;
+        clearInterval(timerId); timerId = null;
+        resetToEdit();
+        if (restore) applyGameState(restore);
+      }
+      function quitRetime() {
+        if (!retime.active) return;
+        if (retime.results.length) { finishRetime(); return; }   // show partial results if any move was completed
+        endRetime();
+      }
+      document.getElementById("retimeDone").addEventListener("click", () => { retimeSummaryModal.hidden = true; endRetime(); });
+      document.getElementById("retimeAgain").addEventListener("click", () => {
+        const g = retime.g, queue = retime.queue, restore = retime.restore;
+        retimeSummaryModal.hidden = true;
+        retime = { active: true, g, queue, i: 0, results: [], restore, target: null, startAt: 0, mistakes: 0 };
+        showRetimeStep();
+      });
 
       // ---- image import ----
       // Screenshots are read by Claude Vision via the serverless endpoint.
       document.getElementById("file").addEventListener("change", async (e) => {
         const file = e.target.files[0]; if (!file) return;
-        if (solving) { e.target.value = ""; return showExplain("Already solving", "Press Edit puzzle first, then import a new screenshot.", "info"); }
+        if (solving) { resetToEdit(); clearActiveGame(); }   // importing a screenshot replaces the game in progress
         showExplain("Reading puzzle…", "Claude Vision is reading the grid from your screenshot.", "info");
         try {
           const dataUrl = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
