@@ -104,10 +104,13 @@ answer.
   **without an API key** — only the optional screenshot import calls Claude
   (Claude Vision reads the grid; you fix any misreads before starting).
 
-- **`api/games.js`** — optional cross-device sync for the saved library,
-  backed by a Redis store. When a store is connected the library syncs across
-  devices; when it isn't, the front end silently falls back to the browser's
-  `localStorage` (per device), so nothing breaks either way.
+- **`api/games.js`** — optional cross-device sync for the saved library, play
+  history, and the **game currently in progress**, backed by a Redis store. When
+  a store is connected these sync across devices — start a puzzle on the website
+  and pick it up right where you left off in the installed app (or vice-versa),
+  with the most recently touched copy winning. When it isn't connected, the front
+  end silently falls back to the browser's `localStorage` (per device), so nothing
+  breaks either way.
 
   Your game data is protected by four backup layers: (1) primary
   `localStorage`; (2) cloud sync — coalesced and **retried with backoff**, and
@@ -130,8 +133,9 @@ To sync saved puzzles across devices, connect a Redis store:
    integration also sets `UPSTASH_REDIS_REST_*`; `api/games.js` accepts either).
 3. **Redeploy** so the function picks up the new variables.
 
-The library is stored as a single shared collection (no per-user auth), which
-is fine for a personal tool — add auth before sharing it broadly.
+The library, history, and the in-progress game are each stored under their own
+key (namespaced per profile when you sign in), with no per-user auth, which is
+fine for a personal tool — add auth before sharing it broadly.
 - **`api/parse-sudoku-image.js`** — a Vercel serverless function that forwards
   the screenshot to Claude Vision and returns the parsed grid as a `9×9` array
   of numbers (`0` = empty).

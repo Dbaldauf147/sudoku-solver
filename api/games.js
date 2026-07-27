@@ -5,8 +5,11 @@
 // collection. If no store is connected the endpoint replies 501 and the front
 // end silently falls back to per-device localStorage.
 //
-//   GET  /api/games?collection=library|stats            -> { games: [...] }
-//   PUT  /api/games?collection=library|stats  { games }  -> { ok: true, count }
+//   GET  /api/games?collection=library|stats|active            -> { games: [...] }
+//   PUT  /api/games?collection=library|stats|active  { games }  -> { ok: true, count }
+//
+// The `active` collection holds the single in-progress game (a 0-or-1-element
+// array) so it can be resumed on any device; the rest are ordinary lists.
 //
 // Connect a store in Vercel and it injects the credentials below automatically
 // (redeploy afterwards). This is a single shared dataset — there's no per-user
@@ -19,6 +22,9 @@ const REST_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_RE
 const COLLECTIONS = {
   library: "sudoku-coach:games",
   stats: "sudoku-coach:stats",
+  // The single game in progress, so it can be resumed on any device. Stored as a
+  // 0-or-1-element array to fit the same `{ games: [...] }` contract as the others.
+  active: "sudoku-coach:active",
   share: "sudoku-coach:share", // shared catalogues, keyed by a share code (passed as `profile`)
 };
 
