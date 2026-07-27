@@ -2195,7 +2195,13 @@
       }
 
       // ---- in-progress game persistence (survives closing the tab / reloading later) ----
-      function clearActiveGame() { try { localStorage.removeItem(ACTIVE_KEY); } catch {} }
+      function clearActiveGame() {
+        let existed = false;
+        try { existed = localStorage.getItem(ACTIVE_KEY) != null; localStorage.removeItem(ACTIVE_KEY); } catch {}
+        // Only tombstone the cloud when this device actually had a game to end (finished or reset);
+        // otherwise an idle device holding no game could wipe an in-progress game synced from another.
+        if (existed) cloudSave("active", [{ cleared: true, clearedAt: Date.now() }]);
+      }
       // Snapshot of the game in progress — shared by the auto-save (ACTIVE_KEY) and the manual "Save game".
       function currentGameState() {
         return {
@@ -2211,7 +2217,9 @@
       }
       function saveActiveGame() {
         if (!solving || !session) { clearActiveGame(); return; }
-        try { localStorage.setItem(ACTIVE_KEY, JSON.stringify(currentGameState())); } catch {}
+        const state = currentGameState();
+        try { localStorage.setItem(ACTIVE_KEY, JSON.stringify(state)); } catch {}
+        cloudSave("active", [state]); // mirror the in-progress game to the cloud so it follows you across devices
       }
       // Load a saved in-progress snapshot (from ACTIVE_KEY auto-save or a library "Save game") onto the board.
       function applyGameState(st) {
@@ -2242,6 +2250,33 @@
         applyGameState(st);
         showExplain("Welcome back", "Your in-progress puzzle was restored — pick up right where you left off.", "info");
         return true;
+      }
+      // Latest-write-wins timestamp for a cloud active-game entry — a live snapshot carries `savedAt`,
+      // a "cleared" tombstone carries `clearedAt`. Missing/empty entries sort oldest.
+      function activeStamp(entry) {
+        if (!entry) return -1;
+        return entry.cleared ? (entry.clearedAt || 0) : (entry.savedAt || 0);
+      }
+      // Reconcile this device's in-progress game with the copy synced from the cloud. Whichever was
+      // touched most recently wins, so a puzzle started on the website can be finished in the installed
+      // app (and vice-versa) without losing your place. Called once on load, after cloud sync is confirmed.
+      function reconcileActiveGame(cloudEntry) {
+        let local = null; try { local = JSON.parse(localStorage.getItem(ACTIVE_KEY)); } catch {}
+        const hasLocal = !!(local && local.values && local.solution && local.session);
+        const localTs = hasLocal ? (local.savedAt || 0) : -1;
+        const cloudTs = activeStamp(cloudEntry);
+        if (cloudEntry && !cloudEntry.cleared && cloudEntry.values && cloudTs > localTs) {
+          // A newer in-progress game is waiting on another device — bring it onto this board.
+          applyGameState(cloudEntry);
+          saveActiveGame(); // re-store it locally and re-assert the same state as the latest cloud copy
+          showExplain("Resumed your latest game", "Picked up the puzzle you had in progress on another device.", "info");
+        } else if (cloudEntry && cloudEntry.cleared && hasLocal && cloudTs > localTs) {
+          // That game was finished or reset more recently elsewhere — clear it here too.
+          if (solving) resetToEdit(); else clearActiveGame();
+        } else if (hasLocal && localTs > cloudTs) {
+          // This device holds the freshest game — seed or refresh the cloud copy.
+          cloudSave("active", [local]);
+        }
       }
       let cloudOn = false;
       async function cloudLoad(collection) {
@@ -2316,6 +2351,11 @@
             const merged = mergeCollections(lsGet(STATS_KEY), cloud, (g) => String(g.startedAt) + "|" + (g.finishedAt || ""), (a, b) => (b.finishedAt || b.startedAt || 0) - (a.finishedAt || a.startedAt || 0));
             lsSet(STATS_KEY, merged); cloudSave("stats", merged);
           }
+        } catch {}
+        try {
+          // Sync the single in-progress game so it can be resumed on whichever device you pick up next.
+          const cloud = await cloudLoad("active");
+          if (cloud) reconcileActiveGame(cloud[0] || null);
         } catch {}
         // Backup layer 3: if cloud + local both came back empty, fall back to the newest local snapshot.
         if (recoverFromBackupIfEmpty()) showExplain("Recovered your data", "Your saved games and history were restored from an automatic local backup.", "ok");
