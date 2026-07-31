@@ -759,10 +759,29 @@
       try { autoUpdateNotes = localStorage.getItem("sudoku-coach:autonotes") === "on"; } catch {}
       function cellSnap(r, c) { return { r, c, value: inputs[r][c].value, marks: new Set(marks[r][c]) }; }
       function snapCells(cells) { return cells.map(({ r, c }) => cellSnap(r, c)); }
+      // What this action is about to change in the session log, captured before it happens: the move
+      // count, the error tally, and the missed-technique credits. Undoing rewinds all three, so taking
+      // back a mistake takes back its error too instead of leaving it on your record.
+      // lastT rides along because the undone move owned the time since the previous one — restoring it
+      // rolls that time into whatever you place next, rather than losing it from the timeline.
+      // The move list is copied rather than counted so redo can put a move back, not just drop one.
+      // Move records are never edited after they're logged, so sharing their references is safe.
+      function sessionSnap() {
+        if (!session) return null;
+        return { moves: [...(session.moves || [])], errors: session.errors || 0, missed: { ...(session.missed || {}) }, lastT: session.lastT || 0 };
+      }
+      function restoreSession(snap) {
+        if (!session || !snap) return;
+        session.moves = [...snap.moves];
+        session.errors = snap.errors;
+        session.missed = { ...snap.missed };
+        session.lastT = snap.lastT;
+        errorsEl.textContent = session.errors;
+      }
       // Record the pre-change state of one or more cells so it can be undone. A fresh action clears redo.
       function pushUndo(cells) {
         if (!solving) return;
-        undoStack.push(snapCells(Array.isArray(cells) ? cells : [cells]));
+        undoStack.push({ cells: snapCells(Array.isArray(cells) ? cells : [cells]), session: sessionSnap() });
         if (undoStack.length > 300) undoStack.shift();
         redoStack = [];
       }
@@ -771,20 +790,33 @@
         inputs[s.r][s.c].classList.remove("wrong", "solved");
         if (errorFlags && s.value && Number(s.value) !== solution[s.r][s.c]) inputs[s.r][s.c].classList.add("wrong");
       }
-      function applySnaps(entry) { entry.forEach(restoreCell); renderPencils(); const last = entry[entry.length - 1]; if (last) select(last.r, last.c); }
+      function applySnaps(entry) {
+        entry.cells.forEach(restoreCell);
+        restoreSession(entry.session);
+        renderPencils();
+        const last = entry.cells[entry.cells.length - 1]; if (last) select(last.r, last.c);
+      }
+      // The state to come back to if this step is reversed again — the board and log as they stand now.
+      function inverseEntry(entry) { return { cells: snapCells(entry.cells), session: sessionSnap() }; }
       function undo() {
         const entry = undoStack.pop();
         if (!entry) return showExplain("Nothing to undo", "You're back at the start of this puzzle.", "info");
-        redoStack.push(snapCells(entry));   // capture current state so this undo can be redone
+        const dropped = session && entry.session ? (session.errors || 0) - entry.session.errors : 0;
+        redoStack.push(inverseEntry(entry));
         applySnaps(entry);
-        showExplain("Undid last action", `Restored ${loc(entry[entry.length - 1].r, entry[entry.length - 1].c)}.`, "info");
+        saveActiveGame();   // the move log and error count changed — persist the rewound version
+        const last = entry.cells[entry.cells.length - 1];
+        showExplain("Undid last action", `Restored ${loc(last.r, last.c)}.${dropped > 0 ? ` That was a mistake — it's off your error count and out of this game's move log.` : ""}`, "info");
       }
       function redo() {
         const entry = redoStack.pop();
         if (!entry) return showExplain("Nothing to redo", "You're at your latest action.", "info");
-        undoStack.push(snapCells(entry));
+        const back = session && entry.session ? entry.session.errors - (session.errors || 0) : 0;
+        undoStack.push(inverseEntry(entry));
         applySnaps(entry);
-        showExplain("Redid action", `Reapplied ${loc(entry[entry.length - 1].r, entry[entry.length - 1].c)}.`, "info");
+        saveActiveGame();
+        const last = entry.cells[entry.cells.length - 1];
+        showExplain("Redid action", `Reapplied ${loc(last.r, last.c)}.${back > 0 ? ` The mistake is back on your error count.` : ""}`, "info");
       }
       // Cells sharing a row, column, or box with (r,c), including the cell itself — for auto-note upkeep.
       function peersOf(r, c) {
