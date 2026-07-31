@@ -190,6 +190,14 @@
       .move .bar { height: 8px; border-radius: 4px; background: var(--accent); min-width: 2px; }
       .move.bad .cellref { color: var(--bad); }
       .move .meta { color: var(--muted); }
+      /* Rows are press-and-hold targets, so suppress the text selection and iOS callout a hold triggers. */
+      .moves-wrap .move { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+      .move.holding { background: var(--sel); }
+      .mv-meta { color: var(--muted); font-size: 0.85rem; margin: 0 0 12px; }
+      .mv-why { text-align: left; line-height: 1.5; }
+      .mv-why .tech { color: var(--accent); font-weight: 700; }
+      .mv-why .tech.bad { color: var(--bad); }
+      .mv-note { color: var(--muted); font-size: 0.82rem; margin: 10px 0 0; text-align: left; }
       /* Over your target pace (amber) and slowest-of-this-game (red) are separate flags; a move can
          trip both, and the sharper red wins the colour by coming last. */
       .move.over .meta { color: var(--warn); font-weight: 600; }
@@ -495,6 +503,20 @@
         </div>
       </div>
 
+      <div id="moveModal" class="overlay" hidden>
+        <div class="modal" style="max-width:400px">
+          <h2 id="moveTitle">Move</h2>
+          <p id="moveMeta" class="mv-meta"></p>
+          <div id="moveBoard"></div>
+          <p id="moveWhy" class="body mv-why"></p>
+          <p id="moveNote" class="mv-note" hidden></p>
+          <div class="actions">
+            <button id="moveTechBtn">About this technique</button>
+            <button id="moveClose" class="primary">Close</button>
+          </div>
+        </div>
+      </div>
+
       <div id="targetModal" class="overlay" hidden>
         <div class="modal profile-modal">
           <h2>Target times</h2>
@@ -681,6 +703,8 @@
         }
         const bk = document.getElementById("backupModal");
         if (bk && !bk.hidden) { if (e.key === "Escape" || e.key === "Enter") bk.hidden = true; return; }
+        const mv = document.getElementById("moveModal");
+        if (mv && !mv.hidden) { if (e.key === "Escape" || e.key === "Enter") mv.hidden = true; return; }
         const tgt = document.getElementById("targetModal");
         if (tgt && !tgt.hidden) {
           if (e.key === "Escape") tgt.hidden = true;
@@ -1751,6 +1775,12 @@
         session.missed ||= {};
         session.missed[tech] = (session.missed[tech] || 0) + 1;
       }
+      // The clue grid as it stands right now — the givens, without anything you've placed.
+      function clueGridNow() {
+        const b = blank(0);
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (givens[r][c]) b[r][c] = Number(inputs[r][c].value) || 0;
+        return b;
+      }
       // Set by finalizeSession so the celebration knows whether a solve was a personal best.
       let lastWasPR = false, lastPRKind = "";
       function finalizeSession(solved) {
@@ -1761,9 +1791,7 @@
         session.solved = solved; session.finishedAt = Date.now();
         // Snapshot the clue grid + full solution so this game can be re-timed later (restore
         // the board to just before any move). Older games saved before this won't have them.
-        const clueGrid = blank(0);
-        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (givens[r][c]) clueGrid[r][c] = Number(inputs[r][c].value) || 0;
-        session.grid = clueGrid;
+        session.grid = clueGridNow();
         session.solution = solution ? clone(solution) : null;
         lastTotalMs = session.totalMs;
         // Personal-record check: is this the fastest solve yet for this difficulty? (compare against
@@ -3380,13 +3408,17 @@
         return `<h3>${esc(title)}</h3><table class="grid"><tr><th>Technique</th><th>Times you needed help</th></tr>${rows}</table>
           <p class="hintline">Counts hints you took plus the easier step available when you slipped — your weak spots. Tap one for a refresher.</p>`;
       }
+      // The game the "This game" pane last rendered — live or finished — so its timeline can be wired up.
+      let thisPaneGame = null;
       // "This game" pane: the live game if one's in progress, else the most recently recorded game.
       // Mirrors every section of the "All games" tab, scoped to this single game.
       function thisGamePane(games) {
         const g = session
           ? { difficulty: session.difficulty, source: session.source, totalMs: activeElapsed(), errors: session.errors || 0, hints: session.hints || 0, moves: session.moves || [], missed: session.missed || {}, live: true,
-              cells: givens.flat().filter((x) => !x).length }   // cells still to fill when this game began
+              cells: givens.flat().filter((x) => !x).length,   // cells still to fill when this game began
+              grid: clueGridNow(), solution: solution ? clone(solution) : null }   // lets a move in progress be explained
           : games[0];
+        thisPaneGame = g;
         if (!g) return '<div class="card">No game yet. Start a puzzle and its live stats — time, errors, hints, and techniques — show here.</div>';
         const d = g.difficulty || "";
         const status = g.live ? "in progress" : (g.solved ? "solved" : "revealed");
@@ -3618,6 +3650,9 @@
         if (pick) { pick.onchange = () => renderDeepDive(games[Number(pick.value)]); renderDeepDive(games[0]); }
         // Wire re-timing on the "This game" timeline (uses the most recent finished game; a live game isn't retimable).
         if (!session && games[0]) wireRetimeControls(document.getElementById("thisTimeline"), games[0]);
+        // Press-and-hold works on either — including the game in progress, which carries its own clue
+        // grid and solution precisely so its moves can be explained mid-game.
+        wireMoveDetail(document.getElementById("thisTimeline"), thisPaneGame);
         setStatsTab(statsTab);   // apply the remembered tab
         // Solve-time trends toggle: swap between "over time" and "avg time per move".
         const timeCharts = { overtime: diffTrend, permove: paceHTML };
@@ -3680,14 +3715,126 @@
           </div>`;
         });
         html += `</div>`;
-        if (pace) html += `<p class="rt-note">⏱ over your target pace · ⏳ slowest of this game</p>`;
-        else if (moves.length) html += `<p class="rt-note">⏳ slowest of this game. Set a <b>Target time</b> in the ⚙ menu to flag moves against a pace you choose instead.</p>`;
+        const hold = `Press and hold a move to see the board as it stood and why it counts as its technique.`;
+        if (pace) html += `<p class="rt-note">⏱ over your target pace · ⏳ slowest of this game. ${hold}</p>`;
+        else if (moves.length) html += `<p class="rt-note">⏳ slowest of this game. ${hold} Set a <b>Target time</b> in the ⚙ menu to flag moves against a pace you choose too.</p>`;
         return html;
       }
       function renderDeepDive(g) {
         const dd = document.getElementById("deepDive"); if (!g) { dd.innerHTML = ""; return; }
         dd.innerHTML = deepDiveHTML(g, true, true);
         wireRetimeControls(dd, g);
+        wireMoveDetail(dd, g);
+      }
+
+      // ================= Why a move classifies as its technique =================
+      // Press and hold a timeline row to replay the board as it stood just before that move and see the
+      // proof behind its label. A game needs its clue grid + solution to be reconstructable this way.
+      function canExplainMove(g) { return !!(g && g.grid && g.solution && (g.moves || []).length); }
+
+      // The cells that prove this move — the unit that pins it, or the pattern the technique fired on.
+      function proofCells(M, grid, r, c, n, tech) {
+        for (const u of UNITS) {
+          if (!u.cells.some(([rr, cc]) => rr === r && cc === c)) continue;
+          if (tech === "Full house" && u.cells.every(([rr, cc]) => (rr === r && cc === c) || grid[rr][cc] !== 0)) return u.cells;
+          if (tech === "Hidden single") {
+            const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && M[rr][cc].has(n));
+            if (spots.length === 1) return u.cells;
+          }
+        }
+        const peers = () => peersOf(r, c).filter((p) => !(p.r === r && p.c === c)).map((p) => [p.r, p.c]);
+        if (tech === "Naked single") return peers();
+        // An elimination unlocked the cell — walk the same escalation describeCorrect uses and highlight
+        // the pattern of the technique it credited.
+        let cur = M;
+        for (let step = 0; step < 60; step++) {
+          let e = null;
+          for (const t of ELIM_TECHS) { e = t(cur, grid); if (e) break; }
+          if (!e) break;
+          if (e.tech === tech) return e.highlight;
+          cur = applyElims(cur, e.elims);
+        }
+        return peers();
+      }
+
+      // Board-before-the-move, the technique's own wording, and the cells behind it.
+      function moveProof(g, k) {
+        const m = g.moves[k], grid = boardBeforeMove(g, k), { r, c, n } = m;
+        if (!m.correct) {
+          const conf = findConflicts(grid, r, c, n);
+          const body = conf.cells.length
+            ? `${n} was already in this ${listUnits(conf.units)} — at ${listUnits(conf.cells.map((x) => loc(x.r, x.c)))}. A ${listUnits(conf.units)} can't hold two ${n}s, so this entry broke a rule outright.`
+            : `${n} broke no rule on the board yet, but it isn't what ${loc(r, c)} resolves to — it would have made the puzzle impossible to finish. ${loc(r, c)} is ${g.solution[r][c]}.`;
+          return { grid, tech: "Mistake", body, focus: conf.cells.map((x) => [x.r, x.c]), logged: m.tech };
+        }
+        const M = candMap(grid);
+        const d = describeCorrect(M, grid, r, c, n);
+        return { grid, tech: d.tech, body: d.body, focus: proofCells(M, grid, r, c, n, d.tech), logged: m.tech };
+      }
+
+      const moveModal = document.getElementById("moveModal");
+      function openMoveDetail(g, k) {
+        const m = (g.moves || [])[k]; if (!m) return;
+        // Older games kept no clue grid, so the board can't be rebuilt — fall back to the technique's
+        // own explainer, which is the same thing minus this move's specifics.
+        if (!canExplainMove(g)) return openExample(m.tech || "Forced");
+        const p = moveProof(g, k);
+        const focus = new Set(p.focus.map(([r, c]) => r + "," + c));
+        focus.delete(m.r + "," + m.c);
+        // Pencil in the candidates on the cells that carry the proof, so it reads off the board.
+        const givensMap = {}, marks = {};
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+          const key = r + "," + c;
+          if (p.grid[r][c]) givensMap[key] = String(p.grid[r][c]);
+          else if (focus.has(key) || (r === m.r && c === m.c)) marks[key] = candidates(p.grid, r, c);
+        }
+        document.getElementById("moveTitle").textContent = `Move ${k + 1}: ${loc(m.r, m.c)} = ${m.n}`;
+        const pace = paceFor(g);
+        document.getElementById("moveMeta").innerHTML = `${fmtDt(m.dt)}${pace && m.dt > pace ? ` · <span style="color:var(--warn);font-weight:600">over your ${fmtDt(pace)} pace ⏱</span>` : ""}${m.correct ? "" : ` · <span style="color:var(--bad);font-weight:600">mistake</span>`}`;
+        renderMiniBoard(document.getElementById("moveBoard"), {
+          givens: givensMap, marks,
+          target: [m.r + "," + m.c],
+          focus: [...focus],
+        });
+        const why = document.getElementById("moveWhy");
+        why.innerHTML = "";
+        const tag = document.createElement("span"); tag.className = "tech" + (m.correct ? "" : " bad"); tag.textContent = p.tech + " — ";
+        why.append(tag, document.createTextNode(p.body));
+        // The logged label can differ from a fresh reading — e.g. the move was placed from a hint.
+        const note = document.getElementById("moveNote");
+        note.hidden = !p.logged || p.logged === p.tech;
+        if (!note.hidden) note.textContent = `The timeline logs this move as “${p.logged}”. Read fresh from the board above it comes out as ${p.tech} — the two differ when a move was placed straight from a hint, which logs the hint's own label.`;
+        const techBtn = document.getElementById("moveTechBtn");
+        techBtn.onclick = () => { moveModal.hidden = true; openExample(p.tech); };
+        moveModal.hidden = false;
+      }
+      document.getElementById("moveClose").addEventListener("click", () => { moveModal.hidden = true; });
+      moveModal.addEventListener("click", (e) => { if (e.target === moveModal) moveModal.hidden = true; });
+
+      // Press-and-hold on a timeline row. Works for mouse and touch through pointer events; the click
+      // that follows a hold is swallowed so it can't also toggle the row's re-time checkbox.
+      const HOLD_MS = 450;
+      function wireMoveDetail(container, g) {
+        const wrap = container && container.querySelector(".moves-wrap");
+        if (!wrap || !g || !(g.moves || []).length) return;
+        let timer = null, held = false, from = null, row = null;
+        const cancel = () => { clearTimeout(timer); timer = null; if (row) row.classList.remove("holding"); row = null; };
+        wrap.addEventListener("pointerdown", (e) => {
+          const target = e.target.closest(".move"); if (!target) return;
+          held = false; from = [e.clientX, e.clientY]; row = target; row.classList.add("holding");
+          timer = setTimeout(() => {
+            timer = null; held = true;
+            if (row) row.classList.remove("holding");
+            openMoveDetail(g, Number(target.dataset.i));
+            row = null;
+          }, HOLD_MS);
+        });
+        wrap.addEventListener("pointermove", (e) => {
+          if (timer && from && Math.hypot(e.clientX - from[0], e.clientY - from[1]) > 10) cancel();  // a scroll, not a hold
+        });
+        ["pointerup", "pointercancel", "pointerleave"].forEach((ev) => wrap.addEventListener(ev, cancel));
+        wrap.addEventListener("click", (e) => { if (held) { held = false; e.stopPropagation(); e.preventDefault(); } }, true);
+        wrap.addEventListener("contextmenu", (e) => { if (e.target.closest(".move")) e.preventDefault(); });
       }
 
       // ================= Retime slow moves =================
