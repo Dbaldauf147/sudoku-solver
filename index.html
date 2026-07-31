@@ -808,6 +808,34 @@
         }
         return true;
       }
+      // solve() searches row-major and without a ceiling — fine for a button the player pressed and can
+      // wait on, but a hint fires while a clock is running and must never lock the tab. This one always
+      // branches on the most-constrained cell and gives up after `budget` nodes:
+      // true = solvable, false = proved unsolvable, null = undecided inside the budget.
+      function solvableWithin(grid, budget) {
+        const g = clone(grid);
+        let nodes = 0, gaveUp = false;
+        const bt = () => {
+          if (++nodes > budget) { gaveUp = true; return false; }
+          let br = -1, bc = -1, best = null;
+          for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (g[r][c] === 0) {
+            const cand = candidates(g, r, c);
+            if (!cand.length) return false;                       // dead cell — this branch is finished
+            if (!best || cand.length < best.length) { best = cand; br = r; bc = c; }
+          }
+          if (!best) return true;                                 // no empty cells left — solved
+          for (const n of best) {
+            g[br][bc] = n;
+            const ok = bt();
+            g[br][bc] = 0;
+            if (ok) return true;
+            if (gaveUp) return false;
+          }
+          return false;
+        };
+        const ok = bt();
+        return gaveUp ? null : ok;
+      }
       function countSolutions(grid, limit) {
         const g = clone(grid); let count = 0;
         (function bt() {
@@ -2035,6 +2063,7 @@
       }
       document.getElementById("hint").addEventListener("click", () => {
         closeStats(); closeLibrary(); closeHistory(); // Hint now lives in the menu — make sure the board is visible
+        if (retime.active) return retimeHint();       // during a re-time, hint at the move being re-solved
         const chain = hintChain(progressGrid());
         if (!chain.place) return showExplain("Nothing left to place", "The grid is complete.", "ok");
         if (session) { session.hints = (session.hints || 0) + 1; noteMiss(chain.steps.length ? chain.steps[0].tech : chain.place.tech); saveActiveGame(); }
@@ -3515,7 +3544,7 @@
         const restore = solving && session ? currentGameState() : null;
         clearInterval(timerId); timerId = null; solving = false; session = null;
         document.body.classList.remove("solving"); syncModeButtons();
-        retime = { active: true, g, queue: indices, i: 0, results: [], restore, target: null, startAt: 0, mistakes: 0 };
+        retime = { active: true, g, queue: indices, i: 0, results: [], restore, target: null, startAt: 0, mistakes: 0, hints: 0 };
         closeStats(); closeLibrary(); closeHistory();
         showRetimeStep();
       }
@@ -3530,6 +3559,7 @@
         document.getElementById("retimeLoadMsg").textContent = "Restoring the board to just before this move — then find the move and make it.";
         retimeLoadModal.hidden = false;
         // Blank the board behind the load screen so the answer isn't visible during the countdown.
+        clearHighlights();   // drop any hint tint left over from the previous move
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].value = ""; inputs[r][c].classList.remove("wrong", "solved", "given"); cellEls[r][c].classList.remove("selected", "same", "retime-target"); }
         setTimeout(() => { if (retime.active) { retimeLoadModal.hidden = true; setupRetimeBoard(k); } }, 1100);
       }
@@ -3551,11 +3581,12 @@
         selected = null;                       // no cell pre-selected — you pick where the move goes
         retime.target = { r: m.r, c: m.c, n: g.solution[m.r][m.c], origMs: m.dt };
         retime.mistakes = 0;
+        retime.hints = 0;
         renderPencils(); updatePad();
         errorsEl.textContent = "0";
         retime.startAt = Date.now();
         startRetimeTimer();
-        showRetimeExplain(`Move ${retime.i + 1} of ${retime.queue.length}`, `Find the next move and make it — tap the cell it goes in, then the digit. Your original time here was ${fmtDt(m.dt)}.`, "info");
+        showRetimeExplain(`Move ${retime.i + 1} of ${retime.queue.length}`, `Find the next move and make it — tap the cell it goes in, then the digit. Your original time here was ${fmtDt(m.dt)}. Stuck? Hint (⚙ menu) walks you through this move — the clock keeps running.`, "info");
       }
 
       function startRetimeTimer() {
@@ -3565,8 +3596,102 @@
         timerId = setInterval(paint, 250);
       }
 
-      function showRetimeExplain(title, body, kind) {
-        showExplain(title, body, kind, { label: "Quit re-timing", onClick: quitRetime });
+      // Every re-time message keeps a Quit button; hints pass their own actions in ahead of it.
+      function showRetimeExplain(title, body, kind, actions, tech) {
+        const extra = Array.isArray(actions) ? actions : actions ? [actions] : [];
+        showExplain(title, body, kind, [...extra, { label: "Quit re-timing", onClick: quitRetime }], tech);
+      }
+
+      // ---- hints during a re-time ----
+      // The main hint engine answers "what's the easiest move anywhere on this board?" — which during a
+      // re-time is usually some other cell entirely. These helpers answer the question you actually have
+      // here: "why does the move I'm hunting for go where it goes?"
+
+      // The engine's single-cell logic asked of one specific cell: is (tr,tc) forced by this candidate map?
+      function singleAt(M, grid, tr, tc) {
+        if (grid[tr][tc] !== 0) return null;
+        if (M[tr][tc].size === 1) {
+          const n = [...M[tr][tc]][0];
+          return { n, tech: "Naked single", reason: `${loc(tr, tc)} can only be ${n}: every other digit already appears in its row, column, or 3×3 box.` };
+        }
+        for (const u of UNITS) {
+          if (!u.cells.some(([r, c]) => r === tr && c === tc)) continue;
+          for (const n of M[tr][tc]) {
+            const spots = u.cells.filter(([r, c]) => grid[r][c] === 0 && M[r][c].has(n));
+            if (spots.length === 1) return { n, tech: "Hidden single", reason: `Within ${u.name}, ${n} can only go in ${loc(tr, tc)} — every other empty cell there is blocked from being ${n}.` };
+          }
+        }
+        return null;
+      }
+
+      // Does an elimination bear on the target at all? Only candidates in the target's own cell or in a
+      // cell sharing a unit with it can turn the target into a naked or hidden single.
+      function touchesTarget(elims, tr, tc) {
+        return elims.some(([r, c]) => r === tr || c === tc || (Math.floor(r / 3) === Math.floor(tr / 3) && Math.floor(c / 3) === Math.floor(tc / 3)));
+      }
+
+      // Walk eliminations until the target cell itself is forced, collecting each step the way hintChain
+      // does — but preferring eliminations that bear on the target, so the explanation is about the move
+      // you're hunting rather than whatever else the board happens to offer, and stopping after a handful
+      // of steps. A re-timed move isn't always the move logic would pick next: if the original game played
+      // it ahead of the deductions, no chain reaches it and RETIME_MAX_STEPS ends the search.
+      const RETIME_MAX_STEPS = 8;
+      function retimeHintChain(grid, tr, tc, digit) {
+        let M = candMap(grid);
+        const steps = [];
+        while (steps.length <= RETIME_MAX_STEPS) {
+          const s = singleAt(M, grid, tr, tc);
+          if (s) return { steps, place: { kind: "place", r: tr, c: tc, n: s.n, tech: s.tech, highlight: [[tr, tc]], reason: `${s.tech}: ${s.reason}` } };
+          if (steps.length === RETIME_MAX_STEPS) break;
+          // Collect what fires now, then take a step that bears on the target if one is on offer.
+          const fired = [];
+          for (const tech of ELIM_TECHS) {
+            const e = tech(M, grid); if (!e) continue;
+            const live = e.elims.filter(([r, c, n]) => M[r][c].has(n));
+            if (live.length) fired.push({ ...e, elims: live });   // ignore techniques with nothing left to remove
+          }
+          const e = fired.find((x) => touchesTarget(x.elims, tr, tc)) || fired[0];
+          if (!e) break;                     // no technique fires — the cell can't be reasoned out from here
+          steps.push({ kind: "eliminate", tech: e.tech, highlight: e.highlight, reason: `${e.tech}: ${e.reason}`, elims: e.elims });
+          M = applyElims(M, e.elims);
+        }
+        // Out of reach of the techniques: say so plainly, and rule the other candidates out if that can be
+        // settled quickly. Reported as "Forced" so it renders with no technique label and no breakdown.
+        const others = [...M[tr][tc]].filter((d) => d !== digit);
+        const dead = others.filter((d) => { const g = clone(grid); g[tr][tc] = d; return solvableWithin(g, 40000) === false; });
+        const proved = others.length && dead.length === others.length;
+        const reason = `Nothing on the board forces this one yet — you were reading ahead of the techniques when you played it. ` + (proved
+          ? `Placing ${others.join(" or ")} in ${loc(tr, tc)} leaves the puzzle with no valid completion, so ${digit} is the only digit that works here.`
+          : `The digit you placed was ${digit}.`);
+        return { steps: [], place: { kind: "place", r: tr, c: tc, n: digit, tech: "Forced", highlight: [[tr, tc]], reason } };
+      }
+
+      // Same shape as the in-game hint — highlighted units, technique label, reasoning, a Place button and
+      // a step-by-step breakdown — but pointed at the move being re-timed. Placing goes through
+      // retimeGuess so it lands as a real answer and the move completes normally.
+      function showRetimeHint(chain, detailed) {
+        const place = chain.place;
+        renderHintHighlights(place);
+        select(place.r, place.c);
+        const placeAction = { label: `Place ${place.n} in ${loc(place.r, place.c)}`, onClick: () => { select(place.r, place.c); retimeGuess(place.n); } };
+        if (!chain.steps.length) {
+          const named = place.tech !== "Forced";   // "Forced" isn't a technique — no label, no breakdown
+          const stepAction = (detailed || !named) ? null : { label: "Explain step by step", onClick: () => showRetimeHint(chain, true) };
+          const body = detailed ? detailedHintText(place) : place.reason;
+          return showRetimeExplain(detailed ? `Why ${loc(place.r, place.c)} = ${place.n}?` : `Hint: ${loc(place.r, place.c)} = ${place.n}`,
+            body, "hint", [placeAction, stepAction], named ? place.tech : undefined);
+        }
+        const lines = chain.steps.map((s, i) => `${i + 1}. ${s.reason}`);
+        lines.push(`${chain.steps.length + 1}. That leaves ${loc(place.r, place.c)} = ${place.n} — ${place.reason}`);
+        showRetimeExplain(`Hint: ${loc(place.r, place.c)} = ${place.n}`, lines.join("\n\n"), "hint", [placeAction]);
+      }
+
+      function retimeHint() {
+        if (!retime.active || !retime.target) return;
+        const t = retime.target;
+        if (inputs[t.r][t.c].classList.contains("solved")) return;   // already answered, waiting on the next move
+        retime.hints = (retime.hints || 0) + 1;
+        showRetimeHint(retimeHintChain(progressGrid(), t.r, t.c, t.n), false);
       }
 
       // Called from applyDigit while a re-time is active — the guess only lands if it's the exact
@@ -3582,7 +3707,7 @@
           const ms = Date.now() - retime.startAt;
           clearInterval(timerId); timerId = null;
           inputs[r][c].classList.remove("wrong"); inputs[r][c].classList.add("solved");
-          retime.results.push({ r: t.r, c: t.c, origMs: t.origMs, newMs: ms, mistakes: retime.mistakes });
+          retime.results.push({ r: t.r, c: t.c, origMs: t.origMs, newMs: ms, mistakes: retime.mistakes, hints: retime.hints || 0 });
           retime.i++;
           if (retime.i >= retime.queue.length) setTimeout(() => { if (retime.active) finishRetime(); }, 650);
           else setTimeout(() => { if (retime.active) showRetimeStep(); }, 750);
@@ -3605,15 +3730,18 @@
         let rows = "";
         for (const x of res) {
           const d = x.newMs - x.origMs, faster = d < 0;
-          rows += `<tr><td>${loc(x.r, x.c)}</td><td>${fmtDt(x.origMs)}</td><td>${fmtDt(x.newMs)}</td><td class="rt-delta ${faster ? "faster" : "slower"}">${faster ? "−" : "+"}${fmtDt(Math.abs(d))}</td></tr>`;
+          rows += `<tr><td>${loc(x.r, x.c)}${x.hints ? " ★" : ""}</td><td>${fmtDt(x.origMs)}</td><td>${fmtDt(x.newMs)}</td><td class="rt-delta ${faster ? "faster" : "slower"}">${faster ? "−" : "+"}${fmtDt(Math.abs(d))}</td></tr>`;
         }
+        // Flag the moves you needed help on, so a fast time you were talked through reads as one.
+        const hintedMoves = res.filter((x) => x.hints).length, totalHints = res.reduce((a, x) => a + (x.hints || 0), 0);
+        const hintNote = hintedMoves ? `<p class="rt-note" style="margin:2px 0 0">★ ${hintedMoves} move${hintedMoves === 1 ? "" : "s"} solved with help (${totalHints} hint${totalHints === 1 ? "" : "s"}) — the clock kept running.</p>` : "";
         const diff = newTotal - origTotal, beat = diff < 0;
         const verdict = beat
           ? `⚡ You were ${fmtDt(Math.abs(diff))} faster this time!`
           : (diff === 0 ? "Dead even with your original pace." : `You were ${fmtDt(diff)} slower this time — run it again to beat it.`);
         document.getElementById("retimeSummaryBody").innerHTML = `
           <p style="color:var(--muted);margin:0 0 6px">Re-timed ${res.length} move${res.length === 1 ? "" : "s"}: your original solve vs. now.</p>
-          <table class="rt-summary-table"><tr><th>Cell</th><th>Original</th><th>New</th><th>Δ</th></tr>${rows}</table>
+          <table class="rt-summary-table"><tr><th>Cell</th><th>Original</th><th>New</th><th>Δ</th></tr>${rows}</table>${hintNote}
           <div class="rt-totals">
             <div class="stat"><b>${fmtDt(origTotal)}</b><span class="k">original total</span></div>
             <div class="stat"><b>${fmtDt(newTotal)}</b><span class="k">new total</span></div>
@@ -3641,7 +3769,7 @@
       document.getElementById("retimeAgain").addEventListener("click", () => {
         const g = retime.g, queue = retime.queue, restore = retime.restore;
         retimeSummaryModal.hidden = true;
-        retime = { active: true, g, queue, i: 0, results: [], restore, target: null, startAt: 0, mistakes: 0 };
+        retime = { active: true, g, queue, i: 0, results: [], restore, target: null, startAt: 0, mistakes: 0, hints: 0 };
         showRetimeStep();
       });
 
