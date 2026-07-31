@@ -186,7 +186,9 @@
       table.grid th, table.grid td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
       table.grid th { color: var(--muted); font-weight: 600; }
       .move { display: grid; grid-template-columns: 28px 56px 1fr auto; gap: 8px; align-items: center;
-        padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 0.88rem; }
+        padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 0.88rem;
+        user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+      .move.pressing { background: var(--panel); outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
       .move .bar { height: 8px; border-radius: 4px; background: var(--accent); min-width: 2px; }
       .move.bad .cellref { color: var(--bad); }
       .move .meta { color: var(--muted); }
@@ -276,6 +278,7 @@
       .mcell.m-target { background: #bbf7d0; }
       .mcell.m-focus { background: #cfe0ff; }
       .mcell.m-elim { background: #fee2e2; }
+      .mcell.m-place { color: var(--accent); }
       .mcell[data-col="2"], .mcell[data-col="5"] { box-shadow: inset -2px 0 0 var(--thick); }
       .mcell[data-row="2"], .mcell[data-row="5"] { box-shadow: inset 0 -2px 0 var(--thick); }
       .mpencil { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(3, 1fr);
@@ -301,6 +304,8 @@
         padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 0.88rem; }
       #exGames .ex-game-row:last-child { border-bottom: none; }
       #exGames .ex-game-row .k { color: var(--muted); }
+      #moveTech { margin: 0 0 10px; font-weight: 600; }
+      #moveWhy { text-align: left; }
 
       .confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
       .confetti i { position: absolute; top: -14px; width: 9px; height: 9px; border-radius: 2px; animation: cfall linear forwards; }
@@ -515,6 +520,16 @@
           <p id="exCaption" class="body"></p>
           <div id="exGames"></div>
           <div class="actions"><button id="exDrill" hidden>Practice this</button><button id="exClose" class="primary">Got it</button></div>
+        </div>
+      </div>
+
+      <div id="moveModal" class="overlay" hidden>
+        <div class="modal">
+          <h2 id="moveTitle">Move</h2>
+          <div id="moveBoard"></div>
+          <p id="moveTech"></p>
+          <p id="moveWhy" class="body"></p>
+          <div class="actions"><button id="moveClose" class="primary">Got it</button></div>
         </div>
       </div>
 
@@ -3006,7 +3021,7 @@
       };
       function renderMiniBoard(container, ex) {
         container.innerHTML = "";
-        const givens = ex.givens || {}, focus = new Set(ex.focus || []), target = new Set(ex.target || []), elim = new Set(ex.elim || []), marks = ex.marks || {}, struck = ex.struck || {};
+        const givens = ex.givens || {}, focus = new Set(ex.focus || []), target = new Set(ex.target || []), elim = new Set(ex.elim || []), place = new Set(ex.place || []), marks = ex.marks || {}, struck = ex.struck || {};
         const b = document.createElement("div"); b.className = "miniboard";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
           const key = r + "," + c, cell = document.createElement("div");
@@ -3014,7 +3029,7 @@
           if (target.has(key)) cell.classList.add("m-target");
           else if (focus.has(key)) cell.classList.add("m-focus");
           if (elim.has(key)) cell.classList.add("m-elim");
-          if (givens[key]) cell.textContent = givens[key];
+          if (givens[key]) { cell.textContent = givens[key]; if (place.has(key)) cell.classList.add("m-place"); }
           else if (marks[key]) {
             const pen = document.createElement("div"); pen.className = "mpencil";
             const st = struck[key] || [];
@@ -3398,6 +3413,9 @@
         if (pick) { pick.onchange = () => renderDeepDive(games[Number(pick.value)]); renderDeepDive(games[0]); }
         // Wire re-timing on the "This game" timeline (uses the most recent finished game; a live game isn't retimable).
         if (!session && games[0]) wireRetimeControls(document.getElementById("thisTimeline"), games[0]);
+        // Press-and-hold a move to inspect it — works for the live game (read off the board) and finished games.
+        const thisTL = document.getElementById("thisTimeline");
+        if (thisTL) wireMoveInspect(thisTL, session ? { live: true, moves: session.moves || [] } : games[0]);
         setStatsTab(statsTab);   // apply the remembered tab
         // Solve-time trends toggle: swap between "over time" and "avg time per move".
         const timeCharts = { overtime: diffTrend, permove: paceHTML };
@@ -3447,13 +3465,107 @@
           </div>`;
         });
         html += `</div>`;
+        html += `<p class="hintline">Press and hold any move to see the board at that point and why it's that technique.</p>`;
         return html;
       }
       function renderDeepDive(g) {
         const dd = document.getElementById("deepDive"); if (!g) { dd.innerHTML = ""; return; }
         dd.innerHTML = deepDiveHTML(g, true, true);
         wireRetimeControls(dd, g);
+        wireMoveInspect(dd, g);
       }
+
+      // ---- press-and-hold a move → pop up a board "screenshot" of that move plus why it's that technique ----
+      // Which cells of the target's unit prove the placement, so the mini-board can highlight them.
+      function moveFocusKeys(before, r, c, n, tech) {
+        const K = (cells) => cells.map(([rr, cc]) => rr + "," + cc);
+        if (tech === "Full house") {
+          const u = UNITS.find((u) => u.cells.some(([rr, cc]) => rr === r && cc === c) && u.cells.every(([rr, cc]) => (rr === r && cc === c) || before[rr][cc] !== 0));
+          if (u) return K(u.cells);
+        }
+        if (tech === "Hidden single") {
+          for (const u of UNITS) {
+            if (!u.cells.some(([rr, cc]) => rr === r && cc === c)) continue;
+            const spots = u.cells.filter(([rr, cc]) => before[rr][cc] === 0 && candidates(before, rr, cc).includes(n));
+            if (spots.length === 1) return K(u.cells);
+          }
+        }
+        if (tech === "Naked single") return peersOf(r, c).filter((p) => !(p.r === r && p.c === c)).map((p) => p.r + "," + p.c);
+        return [];
+      }
+      // Build the pop-up for move index k of game g: reconstruct the board as it stood just before the
+      // move, then re-run the same reasoning engine that named the technique live so the "why" always matches.
+      function openMoveDetail(g, k) {
+        const moves = g.moves || [], m = moves[k];
+        if (!m) return;
+        // The clue grid + solution are recorded on finished games; for the live game read them off the board.
+        let clue = g.grid || null, sol = g.solution || null;
+        if (!clue && g.live && solving) {
+          clue = blank(0);
+          for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (givens[r][c]) clue[r][c] = Number(inputs[r][c].value) || 0;
+          sol = solution ? clone(solution) : null;
+        }
+        const canDerive = !!clue;
+        // Replay the givens + every earlier correct placement to rebuild the board right before this move.
+        const before = clue ? clone(clue) : blank(0);
+        for (let i = 0; i < k; i++) { const p = moves[i]; if (p && p.correct && !before[p.r][p.c]) before[p.r][p.c] = p.n; }
+        before[m.r][m.c] = 0;
+        // Mini-board spec: all filled cells (clues + prior placements), the move's own value on the target.
+        const filled = {}, place = [];
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (before[r][c]) { filled[r + "," + c] = before[r][c]; if (clue && !clue[r][c]) place.push(r + "," + c); }
+        const key = m.r + "," + m.c;
+        filled[key] = m.n;
+        const ex = { givens: filled, place };
+        let tech = m.tech || "", why = "";
+        if (m.correct) {
+          if (canDerive) {
+            const d = describeCorrect(candMap(before), before, m.r, m.c, m.n);
+            tech = d.tech;
+            why = d.body.charAt(0).toUpperCase() + d.body.slice(1);
+            ex.focus = moveFocusKeys(before, m.r, m.c, m.n, d.tech);
+          } else {
+            const generic = (TECH_EXAMPLES[tech] && TECH_EXAMPLES[tech].caption) || TECH_TEXT[tech] || TECH_INFO[tech] || "";
+            why = `Placed ${m.n} at ${loc(m.r, m.c)}${tech ? ` via ${tech}` : ""}.${generic ? " " + generic : ""} (This older game didn't record its starting clues, so the board above shows only the moves played.)`;
+          }
+          ex.target = [key];
+        } else {
+          tech = "Mistake";
+          ex.elim = [key];
+          const cands = canDerive ? candidates(before, m.r, m.c) : [];
+          const right = sol ? sol[m.r][m.c] : null;
+          why = `You entered ${m.n} at ${loc(m.r, m.c)}, but ${right ? `the answer there is ${right}` : "it didn't match the solution"} — a slip rather than a technique.` +
+            (cands.length ? ` Only ${cands.join(", ")} actually fit this cell at that point.` : "") +
+            ` Scan the cell's row, column, and box before committing.`;
+        }
+        const color = TECH_COLORS[tech] || "#94a3b8";
+        document.getElementById("moveTitle").innerHTML = `Move ${k + 1} · <span class="cellref">${m.correct ? "" : "✗ "}${loc(m.r, m.c)} = ${m.n}</span>`;
+        renderMiniBoard(document.getElementById("moveBoard"), ex);
+        document.getElementById("moveTech").innerHTML = `<span style="color:${color}">●</span> <b>${esc(tech || "—")}</b> · ${fmtDt(m.dt)} to place`;
+        document.getElementById("moveWhy").textContent = why;
+        document.getElementById("moveModal").hidden = false;
+      }
+      // Attach the press-and-hold gesture to a rendered timeline. A tap still toggles re-time selection;
+      // only a ~450ms hold (that doesn't turn into a scroll) opens the move pop-up.
+      function wireMoveInspect(container, g) {
+        if (!container || !g || !(g.moves || []).length) return;
+        const wrap = container.querySelector(".moves-wrap"); if (!wrap) return;
+        let timer = null, row = null, sx = 0, sy = 0, fired = false;
+        const cancel = () => { if (timer) clearTimeout(timer); timer = null; if (row) row.classList.remove("pressing"); row = null; };
+        container.addEventListener("pointerdown", (e) => {
+          if (e.target.classList && e.target.classList.contains("rt-check")) return;
+          const r = e.target.closest(".move"); if (!r || !wrap.contains(r)) return;
+          row = r; sx = e.clientX; sy = e.clientY; fired = false; r.classList.add("pressing");
+          timer = setTimeout(() => { fired = true; r.classList.remove("pressing"); openMoveDetail(g, Number(r.dataset.i)); }, 450);
+        });
+        container.addEventListener("pointermove", (e) => { if (row && (Math.abs(e.clientX - sx) > 10 || Math.abs(e.clientY - sy) > 10)) cancel(); });
+        container.addEventListener("pointerup", cancel);
+        container.addEventListener("pointercancel", cancel);
+        container.addEventListener("pointerleave", cancel);
+        // Swallow the click that follows a hold so it doesn't also toggle the re-time checkbox.
+        container.addEventListener("click", (e) => { if (fired) { e.stopPropagation(); e.preventDefault(); fired = false; } }, true);
+      }
+      document.getElementById("moveClose").addEventListener("click", () => { document.getElementById("moveModal").hidden = true; });
+      document.getElementById("moveModal").addEventListener("click", (e) => { if (e.target.id === "moveModal") e.currentTarget.hidden = true; });
 
       // ================= Retime slow moves =================
       // Replay any subset of a finished game's moves against the clock: restore the board to
