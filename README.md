@@ -112,6 +112,17 @@ answer.
   end silently falls back to the browser's `localStorage` (per device), so nothing
   breaks either way.
 
+  Devices **stay** in step, not just at startup: each one re-syncs whenever it
+  comes back to the foreground, wakes from the back/forward cache, reconnects, or
+  has been left open a while, so a tab (or an installed app you never actually
+  reload) doesn't keep showing the history it had when it opened. A launch that
+  couldn't reach the store retries with backoff instead of staying device-only for
+  the rest of the session. Merges are a union, so no device can wipe another's
+  data — with two refinements that keep them from disagreeing forever: **deletes
+  are recorded as tombstones** and replayed on your other devices instead of being
+  undone by them, and on a collision the **most recently edited copy wins**, so
+  re-labelling a game on one device isn't reverted by another holding the old one.
+
   Your game data is protected by four backup layers: (1) primary
   `localStorage`; (2) cloud sync — coalesced and **retried with backoff**, and
   re-pushed when the network reconnects; (3) **rolling local snapshots** (the
@@ -133,9 +144,18 @@ To sync saved puzzles across devices, connect a Redis store:
    integration also sets `UPSTASH_REDIS_REST_*`; `api/games.js` accepts either).
 3. **Redeploy** so the function picks up the new variables.
 
-The library, history, and the in-progress game are each stored under their own
-key (namespaced per profile when you sign in), with no per-user auth, which is
-fine for a personal tool — add auth before sharing it broadly.
+The library, history, the in-progress game, and the deletion tombstones are each
+stored under their own key (namespaced per profile when you sign in), with no
+per-user auth, which is fine for a personal tool — add auth before sharing it
+broadly.
+
+**If two devices show different history**, they're almost certainly on different
+profiles. A profile is `name + passphrase`, so the same name with a different
+passphrase is a different account with its own history. The sync line under the
+board shows a short **profile code** — if it differs between your phone and your
+laptop, sign in on both with exactly the same name and passphrase and they'll
+converge. (Both are whitespace-trimmed, so a keyboard that slips in a trailing
+space can't quietly split a profile in two.)
 - **`api/parse-sudoku-image.js`** — a Vercel serverless function that forwards
   the screenshot to Claude Vision and returns the parsed grid as a `9×9` array
   of numbers (`0` = empty).
