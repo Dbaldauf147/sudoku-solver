@@ -1878,7 +1878,7 @@
         document.getElementById("profilePass").value = "";
         document.getElementById("profileSignout").style.display = profile ? "" : "none";
         document.getElementById("profileMsg").textContent = profile
-          ? `Signed in as “${profile.name}”. Your history, stats, and saved games are kept under this profile and synced across devices that use the same name and passphrase.`
+          ? `Signed in as “${profile.name}” (profile code ${profileCode()}). Your history, stats, and saved games are kept under this profile and synced across devices that use the same name and passphrase. If another device shows a different code, it's on a different profile — sign in there with exactly the same name and passphrase to bring them together.`
           : "Set a profile to keep your history, stats, and saved games separate from other players on this site. Add a passphrase to keep them private across devices.";
         profileModal.hidden = false;
         setTimeout(() => document.getElementById("profileName").focus(), 0);
@@ -1887,10 +1887,31 @@
         const name = document.getElementById("profileName").value.trim();
         const pass = document.getElementById("profilePass").value;
         if (!name) { document.getElementById("profileMsg").textContent = "Enter a profile name first."; return; }
-        const id = await deriveProfileId(name, pass);
+        let id = await deriveProfileId(name, pass);
+        // Passphrases used to be hashed exactly as typed. If this one has surrounding whitespace the
+        // old id differs from the new one, so adopt the old id when it's the one holding the data —
+        // signing in must never land you on an empty profile.
+        if (pass !== pass.trim()) {
+          const legacyId = await deriveProfileId(name, pass, true);
+          if (legacyId !== id && !(await profileHasData(id)) && (await profileHasData(legacyId))) id = legacyId;
+        }
         if (profile && profile.id === id) { profileModal.hidden = true; return; }
         localStorage.setItem(PROFILE_KEY, JSON.stringify({ name, id }));
         location.reload(); // reload so every store re-reads under the new profile namespace
+      }
+      // Does this profile id have anything stored — locally or in the cloud? Used to pick the right id
+      // when a legacy (untrimmed-passphrase) namespace exists alongside the normalised one.
+      async function profileHasData(id) {
+        for (const k of ["sudoku-coach:games", "sudoku-coach:stats"]) {
+          try { if ((JSON.parse(localStorage.getItem(`${k}:${id}`)) || []).length) return true; } catch {}
+        }
+        for (const c of ["library", "stats"]) {
+          try {
+            const r = await fetch(`/api/games?collection=${c}&profile=${encodeURIComponent(id)}`);
+            if (r.ok && (((await r.json()).games) || []).length) return true;
+          } catch {}
+        }
+        return false;
       }
       document.getElementById("profileBtn").addEventListener("click", openProfile);
       // "Playing as" chip in the top bar — shows Guest vs the active profile, opens the profile dialog.
@@ -1957,8 +1978,10 @@
           const lib = Array.isArray(data.library) ? data.library : [];
           const st = Array.isArray(data.stats) ? data.stats : [];
           if (!lib.length && !st.length) throw new Error("empty");
-          const mLib = mergeCollections(lsGet(STORE_KEY), lib, (g) => g.id || gridKey(g.grid), (a, b) => (b.savedAt || 0) - (a.savedAt || 0));
-          const mSt = mergeCollections(lsGet(STATS_KEY), st, (g) => String(g.startedAt) + "|" + (g.finishedAt || ""), (a, b) => (b.finishedAt || b.startedAt || 0) - (a.finishedAt || a.startedAt || 0));
+          // Restoring is an explicit "bring this back", so it outranks any earlier delete of the same game.
+          forgetTombstonesFor("library", lib); forgetTombstonesFor("stats", st);
+          const mLib = mergeSynced("library", lsGet(STORE_KEY), lib);
+          const mSt = mergeSynced("stats", lsGet(STATS_KEY), st);
           lsSet(STORE_KEY, mLib); cloudSave("library", mLib);
           lsSet(STATS_KEY, mSt); cloudSave("stats", mSt);
           // Restore an in-progress game from the backup only if there isn't one locally already.
@@ -2088,7 +2111,8 @@
           if (!r.ok) throw new Error();
           const shared = (await r.json()).games || [];
           if (!shared.length) { document.getElementById("shareMsg").textContent = "That code has no puzzles — it may be wrong or expired."; return; }
-          const merged = mergeCollections(lsGet(STORE_KEY), shared, (g) => g.id || gridKey(g.grid), (a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+          forgetTombstonesFor("library", shared); // importing a code is an explicit ask for these puzzles
+          const merged = mergeSynced("library", lsGet(STORE_KEY), shared);
           lsSet(STORE_KEY, merged); cloudSave("library", merged);
           document.getElementById("shareMsg").textContent = `Imported ${shared.length} puzzle${shared.length === 1 ? "" : "s"} — your catalogue now has ${merged.length}. Reloading…`;
           setTimeout(() => location.reload(), 1100);
@@ -2347,11 +2371,24 @@
       // ---- profile: namespaces local + cloud storage (PROFILE_KEY/profile/keys are declared near
       // the top of the script so load-time code can read them safely) ----
       // A profile id is derived from name + passphrase so the cloud key isn't guessable without the passphrase.
-      async function deriveProfileId(name, pass) {
-        const data = new TextEncoder().encode(name.trim().toLowerCase() + " " + (pass || ""));
+      // Two devices must derive the *same* id from the same typing or they read different cloud
+      // namespaces and each shows its own history, so the inputs are normalised:
+      //   * the separator is written as the escape "\uFFFD" rather than a literal NUL byte. The HTML
+      //     tokenizer rewrites a raw NUL in script data to U+FFFD, so this is the identical string —
+      //     but it no longer depends on a control byte surviving every editor, CDN and transfer intact.
+      //     (Do not "tidy" it to \0: that changes the hash and orphans every existing profile.)
+      //   * the passphrase is trimmed. A phone keyboard that slips a trailing space in would otherwise
+      //     derive a different id from what the same person typed on their laptop.
+      async function deriveProfileId(name, pass, legacyUntrimmed = false) {
+        const secret = legacyUntrimmed ? (pass || "") : (pass || "").trim();
+        const data = new TextEncoder().encode(name.trim().toLowerCase() + "\uFFFD" + secret);
         const buf = await crypto.subtle.digest("SHA-256", data);
         return [...new Uint8Array(buf)].slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
       }
+      // Short fingerprint of the active profile. Two devices showing the same profile name but
+      // different codes are reading different cloud namespaces — the failure that was previously
+      // invisible — so the code is surfaced in the profile dialog and the sync line.
+      function profileCode() { return profile && profile.id ? profile.id.slice(0, 6) : ""; }
       function profileParam() { return profile && profile.id ? `&profile=${encodeURIComponent(profile.id)}` : ""; }
       // Difficulty and source now live in the "Ready to start?" popup shown on import,
       // so these point at the modal controls rather than a row on the main page.
@@ -2515,12 +2552,14 @@
           cloudSave("active", [local]);
         }
       }
-      let cloudOn = false;
+      // `cloudUnconfigured` separates "this deployment has no store connected" (501 — nothing to retry)
+      // from "the request failed" (offline, blip — worth retrying, see syncStores).
+      let cloudOn = false, cloudUnconfigured = false;
       async function cloudLoad(collection) {
         const r = await fetch(`/api/games?collection=${collection}${profileParam()}`);
-        if (r.status === 501) { cloudOn = false; return null; }
+        if (r.status === 501) { cloudOn = false; cloudUnconfigured = true; return null; }
         if (!r.ok) throw new Error("sync unavailable");
-        cloudOn = true; return (await r.json()).games || [];
+        cloudOn = true; cloudUnconfigured = false; return (await r.json()).games || [];
       }
       // Cloud writes are coalesced (latest state per collection wins) and retried with backoff,
       // so a transient network blip never leaves the cloud copy stale.
@@ -2551,17 +2590,32 @@
           if (collection in cloudQueue && cloudQueue[collection] !== items && !cloudRetry[collection]) scheduleCloudFlush(collection, 0);
         }
       }
-      // Re-push anything still pending the moment the network comes back.
-      window.addEventListener("online", () => Object.keys(cloudQueue).forEach((c) => { cloudRetry[c] = 0; scheduleCloudFlush(c, 0); }));
+      // Re-push anything still pending the moment the network comes back — and pull too, since whatever
+      // happened on another device while this one was offline is still missing here.
+      window.addEventListener("online", () => {
+        Object.keys(cloudQueue).forEach((c) => { cloudRetry[c] = 0; scheduleCloudFlush(c, 0); });
+        syncStores();
+      });
       const syncNote = () => (cloudOn ? " and synced across your devices" : " on this device");
       // Surface whether cloud sync is live so the user can tell if data will follow them across devices.
-      let syncChecked = false;
+      let syncChecked = false, lastSyncAt = 0;
+      // How stale what you're looking at might be. An installed app can sit open for days, so "synced"
+      // on its own doesn't tell you whether this screen has caught up with your other devices.
+      function syncAgo() {
+        if (!lastSyncAt) return "";
+        const mins = Math.floor((Date.now() - lastSyncAt) / 60000);
+        if (mins < 1) return " · updated just now";
+        if (mins < 60) return ` · updated ${mins}m ago`;
+        return ` · updated ${Math.floor(mins / 60)}h ago`;
+      }
       function updateSyncStatus() {
         const el = document.getElementById("syncStatus"); if (!el) return;
         if (!syncChecked) { el.textContent = "Checking sync…"; el.classList.remove("on", "off"); return; }
         if (cloudOn) {
-          const who = profile && profile.name ? `as ${profile.name}` : "as Guest";
-          el.textContent = `☁ Synced across your devices (${who})`;
+          // The profile code goes on screen because two devices signed in under the same *name* but a
+          // different passphrase are separate profiles with separate history — and nothing used to say so.
+          const who = profile && profile.name ? `as ${profile.name} · code ${profileCode()}` : "as Guest";
+          el.textContent = `☁ Synced across your devices (${who})${syncAgo()}`;
           el.classList.add("on"); el.classList.remove("off");
         } else {
           el.textContent = "▢ This device only — cloud sync off";
@@ -2574,38 +2628,169 @@
         else if (libTab === "history") renderHistoryTab();
         else renderGameLibrary();
       }
-      async function initStores() {
-        try {
-          const cloud = await cloudLoad("library");
-          if (cloud) {
-            const merged = mergeCollections(lsGet(STORE_KEY), cloud, (g) => g.id || gridKey(g.grid), (a, b) => (b.savedAt || 0) - (a.savedAt || 0));
-            lsSet(STORE_KEY, merged); cloudSave("library", merged);
-          }
-        } catch {}
-        try {
-          const cloud = await cloudLoad("stats");
-          if (cloud) {
-            const merged = mergeCollections(lsGet(STATS_KEY), cloud, (g) => String(g.startedAt) + "|" + (g.finishedAt || ""), (a, b) => (b.finishedAt || b.startedAt || 0) - (a.finishedAt || a.startedAt || 0));
-            lsSet(STATS_KEY, merged); cloudSave("stats", merged);
-          }
-        } catch {}
-        try {
-          // Sync the single in-progress game so it can be resumed on whichever device you pick up next.
-          const cloud = await cloudLoad("active");
-          if (cloud) reconcileActiveGame(cloud[0] || null);
-        } catch {}
-        // Backup layer 3: if cloud + local both came back empty, fall back to the newest local snapshot.
-        if (recoverFromBackupIfEmpty()) showExplain("Recovered your data", "Your saved games and history were restored from an automatic local backup.", "ok");
-        else snapshotData(); // keep a fresh baseline snapshot of the merged state
-        syncChecked = true; updateSyncStatus();
-        renderLibrary();
+      // ---- deletion tombstones ----
+      // The merge below is a union, which is what stops a stale device from wiping another's data — but
+      // on its own it also means a delete on one device is undone by the next sync from another, and the
+      // two devices disagree about your history forever. Every delete records `{ kind, key, at }` here;
+      // tombstones sync like any other collection and the merge drops whatever they cover.
+      const TOMBSTONE_TTL = 180 * 24 * 60 * 60 * 1000; // stop replaying a delete after ~6 months
+      function tombKey() { return "sudoku-coach:deleted" + (profile && profile.id ? ":" + profile.id : ""); }
+      const tombId = (t) => `${t.kind}|${t.key}`;
+      function loadTombs() { return lsGet(tombKey()).filter((t) => t && t.key && Date.now() - (t.at || 0) < TOMBSTONE_TTL); }
+      function recordTombstone(kind, key) {
+        if (!key) return;
+        const tombs = loadTombs().filter((t) => tombId(t) !== `${kind}|${key}`);
+        tombs.unshift({ kind, key, at: Date.now() });
+        lsSet(tombKey(), tombs); cloudSave("deleted", tombs);
       }
+      // An explicit restore/import outranks an old delete: forget the tombstones covering what the user
+      // just brought back, so another device's copy of the tombstone doesn't quietly remove it again.
+      function forgetTombstonesFor(kind, items) {
+        const keys = new Set(items.map(COLLECTION_SPEC[kind].key));
+        const tombs = loadTombs();
+        const kept = tombs.filter((t) => !(t.kind === kind && keys.has(t.key)));
+        if (kept.length === tombs.length) return;
+        lsSet(tombKey(), kept); cloudSave("deleted", kept);
+      }
+      function mergeTombstones(local, cloud) {
+        const byId = new Map();
+        for (const t of [...cloud, ...local]) {
+          if (!t || !t.key) continue;
+          const prev = byId.get(tombId(t));
+          if (!prev || (t.at || 0) > (prev.at || 0)) byId.set(tombId(t), t);
+        }
+        return [...byId.values()].filter((t) => Date.now() - (t.at || 0) < TOMBSTONE_TTL).sort((a, b) => (b.at || 0) - (a.at || 0));
+      }
+      // Drop the items a tombstone covers. A tombstone only wins while it's newer than the item, so
+      // re-importing a puzzle you deleted last month sticks instead of vanishing again.
+      function applyTombstones(items, kind, keyFn, stampFn) {
+        const at = new Map(loadTombs().filter((t) => t.kind === kind).map((t) => [t.key, t.at || 0]));
+        return at.size ? items.filter((it) => !(at.get(keyFn(it)) >= (stampFn(it) || 0))) : items;
+      }
+      // One place defining how each synced collection is keyed, stamped and ordered, so every merge —
+      // startup, background re-sync, backup restore, shared catalogue — treats an item the same way.
+      const COLLECTION_SPEC = {
+        library: {
+          key: (g) => g.id || gridKey(g.grid),
+          stamp: (g) => Math.max(g.savedAt || 0, g.updatedAt || 0),
+          sort: (a, b) => (b.savedAt || 0) - (a.savedAt || 0),
+        },
+        stats: {
+          key: (g) => String(g.startedAt) + "|" + (g.finishedAt || ""),
+          stamp: (g) => Math.max(g.finishedAt || g.startedAt || 0, g.updatedAt || 0),
+          sort: (a, b) => (b.finishedAt || b.startedAt || 0) - (a.finishedAt || a.startedAt || 0),
+        },
+      };
+      function mergeSynced(kind, local, cloud) {
+        const s = COLLECTION_SPEC[kind];
+        return applyTombstones(mergeCollections(local, cloud, s.key, s.sort, s.stamp), kind, s.key, s.stamp);
+      }
+
+      // Pull every collection, merge it into what's here, push the union back.
+      //
+      // This runs at startup *and* every time this device could have fallen behind — returning to the
+      // foreground, waking from bfcache, reconnecting, or simply being left open. It used to run only on
+      // load, so a tab you left open (or an installed app that is never really reloaded) kept showing
+      // whatever was true when it opened: play on your phone, and the website went on showing yesterday's
+      // history until you happened to reload it.
+      let syncing = false, syncRetry = 0;
+      const SYNC_EVERY_MS = 5 * 60 * 1000, SYNC_MIN_GAP_MS = 20 * 1000;
+      async function syncStores({ initial = false, retry = false } = {}) {
+        if (syncing) return;
+        // Don't stampede on rapid app-switching — but a scheduled retry is chasing a *failed* sync, so
+        // the gap since the last good one mustn't hold it back.
+        if (!initial && !retry && Date.now() - lastSyncAt < SYNC_MIN_GAP_MS) return;
+        syncing = true;
+        const before = dataSignature();
+        let reached = false;
+        try {
+          try {
+            // Deletes first, so this pass already knows about anything removed elsewhere.
+            const cloud = await cloudLoad("deleted");
+            if (cloud) {
+              reached = true;
+              const merged = mergeTombstones(loadTombs(), cloud);
+              lsSet(tombKey(), merged); cloudSave("deleted", merged);
+            }
+          } catch {}
+          try {
+            const cloud = await cloudLoad("library");
+            if (cloud) {
+              reached = true;
+              const merged = mergeSynced("library", lsGet(STORE_KEY), cloud);
+              lsSet(STORE_KEY, merged); cloudSave("library", merged);
+            }
+          } catch {}
+          try {
+            const cloud = await cloudLoad("stats");
+            if (cloud) {
+              reached = true;
+              const merged = mergeSynced("stats", lsGet(STATS_KEY), cloud);
+              lsSet(STATS_KEY, merged); cloudSave("stats", merged);
+            }
+          } catch {}
+          try {
+            // Sync the single in-progress game so it can be resumed on whichever device you pick up next.
+            // Never while a game is on the board though: a background pull must not swap the puzzle out
+            // from under someone mid-solve.
+            if (initial || !solving) {
+              const cloud = await cloudLoad("active");
+              if (cloud) { reached = true; reconcileActiveGame(cloud[0] || null); }
+            }
+          } catch {}
+        } finally {
+          syncing = false;
+        }
+        if (initial) {
+          // Backup layer 3: if cloud + local both came back empty, fall back to the newest local snapshot.
+          if (recoverFromBackupIfEmpty()) showExplain("Recovered your data", "Your saved games and history were restored from an automatic local backup.", "ok");
+          else snapshotData(); // keep a fresh baseline snapshot of the merged state
+          syncChecked = true;
+        }
+        if (reached) { lastSyncAt = Date.now(); syncRetry = 0; }
+        else if (!cloudUnconfigured) {
+          // A launch that couldn't reach the cloud used to leave sync off for the rest of the session —
+          // every game played after it stayed on that one device until the next reload. Retry instead.
+          // (A 501 means no store is connected at all, so there's nothing to come back to.)
+          syncRetry = Math.min(syncRetry + 1, 6);
+          setTimeout(() => syncStores({ retry: true }), Math.min(60000, 1000 * 2 ** syncRetry));
+        }
+        updateSyncStatus();
+        // Refresh what's on screen if the sync actually brought something in — but never pull a row out
+        // from under an open edit form. (The stats panel rebuilds itself from scratch on each open, so
+        // it picks the new data up then rather than resetting a deep-dive mid-read.)
+        if (initial || dataSignature() !== before) {
+          if (editingId === null && histEditing === null) renderLibrary();
+        }
+      }
+      const initStores = () => syncStores({ initial: true });
+      // Cheap fingerprint of the synced stores — enough to notice a sync brought something new in,
+      // without stringifying the (potentially very large) per-game move logs.
+      function dataSignature() {
+        const total = (arr, f) => arr.reduce((n, x) => n + (f(x) || 0) + (x.updatedAt || 0), 0);
+        const lib = lsGet(STORE_KEY), st = lsGet(STATS_KEY);
+        return `${lib.length}:${total(lib, (g) => g.savedAt)}|${st.length}:${total(st, (g) => g.finishedAt || g.startedAt)}`;
+      }
+      // Catch up whenever this device might have missed something. SYNC_MIN_GAP_MS keeps these
+      // overlapping triggers from turning into a burst of requests.
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) syncStores(); });
+      window.addEventListener("pageshow", (e) => { if (e.persisted) syncStores(); }); // restored from bfcache
+      window.addEventListener("focus", () => syncStores());
+      setInterval(() => { if (!document.hidden) syncStores(); }, SYNC_EVERY_MS);
+
       // Union local + cloud so neither an empty cloud nor a stale device can wipe the other's data.
       // The merged set is written back to both sides, which also re-seeds an empty cloud from a device that still has history.
-      function mergeCollections(local, cloud, keyFn, sortFn) {
+      function mergeCollections(local, cloud, keyFn, sortFn, stampFn = (x) => x.updatedAt || 0) {
         const byKey = new Map();
         for (const item of cloud) byKey.set(keyFn(item), item);
-        for (const item of local) byKey.set(keyFn(item), item); // local wins on key collision (keeps latest edits)
+        for (const item of local) {
+          // On a key collision the most recently touched copy wins. Local used to win outright, which
+          // meant re-labelling a game on your phone was silently reverted by the next sync from a device
+          // still holding the old copy. Untouched items have no `updatedAt`, so they tie and local still
+          // wins — the original behaviour.
+          const k = keyFn(item), rival = byKey.get(k);
+          if (!rival || stampFn(item) >= stampFn(rival)) byKey.set(k, item);
+        }
         const merged = [...byKey.values()];
         if (sortFn) merged.sort(sortFn);
         return merged;
@@ -2643,6 +2828,7 @@
         const g = games.find((x) => x.id === activeSavedGame.id); if (!g) return;
         g.difficulty = difficultyEl.value;
         g.source = (sourceEl.value || "Unknown").trim() || "Unknown";
+        g.updatedAt = Date.now();
         lsSet(STORE_KEY, games); cloudSave("library", games); renderLibrary();
       }
       // Manual "Save game": store the current progress in the library so it can be resumed later
@@ -2660,7 +2846,7 @@
         const key = gridKey(clueGrid);
         let g = games.find((x) => gridKey(x.grid) === key);
         if (g) {
-          g.progress = progress; g.savedAt = Date.now();
+          g.progress = progress; g.savedAt = g.updatedAt = Date.now();
           g.difficulty = session.difficulty; g.source = session.source;
         } else {
           g = { id: (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()), grid: clueGrid, difficulty: session.difficulty, source: session.source, savedAt: Date.now(), progress };
@@ -2777,6 +2963,7 @@
         const g = games.find((x) => x.id === id); if (!g) return;
         g.difficulty = difficulty;
         g.source = (source || "Unknown").trim() || "Unknown";
+        g.updatedAt = Date.now(); // stamp the edit so it wins the merge against other devices' older copies
         lsSet(STORE_KEY, games); cloudSave("library", games);
         editingId = null; renderSavedTab();
       }
@@ -2795,6 +2982,8 @@
         showReady(`${game.source} · ${game.difficulty} is loaded. Adjust difficulty or source if needed, then start the timer and play?`);
       }
       function deleteSavedGame(id) {
+        const gone = lsGet(STORE_KEY).find((g) => g.id === id);
+        if (gone) recordTombstone("library", COLLECTION_SPEC.library.key(gone)); // so the delete reaches your other devices
         const games = lsGet(STORE_KEY).filter((g) => g.id !== id); lsSet(STORE_KEY, games); cloudSave("library", games);
         renderSavedTab();
       }
@@ -2840,6 +3029,7 @@
       function deleteHistoryGame(i) {
         const games = lsGet(STATS_KEY);
         if (!games[i]) return;
+        recordTombstone("stats", COLLECTION_SPEC.stats.key(games[i])); // so the delete reaches your other devices
         games.splice(i, 1);
         lsSet(STATS_KEY, games); cloudSave("stats", games);
         histEditing = null; renderGameLibrary(); // rebuild so the History tab count stays accurate
@@ -2849,6 +3039,7 @@
         if (!games[i]) return;
         games[i].difficulty = difficulty;
         games[i].source = (source || "Unknown").trim() || "Unknown";
+        games[i].updatedAt = Date.now(); // stamp the edit so it wins the merge against other devices' older copies
         lsSet(STATS_KEY, games); cloudSave("stats", games);
         histEditing = null; renderHistoryTab();
       }
