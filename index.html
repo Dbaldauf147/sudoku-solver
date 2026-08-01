@@ -283,6 +283,12 @@
       .chart-legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 6px; font-size: 0.85rem; }
       .chart-legend .lg { display: inline-flex; align-items: center; gap: 6px; }
       .chart-legend .lgdot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+      /* On the per-move chart the legend doubles as a show/hide control for each difficulty. */
+      .chart-legend button.lg { background: none; border: 1px solid transparent; border-radius: 999px;
+        padding: 3px 9px; margin: -3px 0; font: inherit; font-size: 0.85rem; color: var(--text); }
+      .chart-legend button.lg:hover { border-color: var(--line); background: var(--panel); }
+      .chart-legend button.lg.off { color: var(--muted); text-decoration: line-through; }
+      .chart-legend button.lg.off .lgdot { opacity: 0.3; }
       .trend.up { color: var(--bad); font-weight: 600; }
       .trend.down { color: var(--ok); font-weight: 600; }
       .trend.flat { color: var(--muted); }
@@ -3124,13 +3130,35 @@
         }
         return pts;
       }
+      // Difficulties switched off on the per-move chart. Kept out of the axis scaling too, so hiding the
+      // slowest difficulty zooms in on the rest instead of leaving them squashed along the bottom.
+      let paceHidden = new Set();
+      try { paceHidden = new Set(JSON.parse(localStorage.getItem("sudoku-coach:pacehide")) || []); } catch {}
+      function togglePaceSeries(d) {
+        paceHidden.has(d) ? paceHidden.delete(d) : paceHidden.add(d);
+        try { localStorage.setItem("sudoku-coach:pacehide", JSON.stringify([...paceHidden])); } catch {}
+      }
       function movePaceChart(games, diffs) {
         const series = diffs
           .map((d) => ({ label: d, color: DIFF_COLORS[d] || "var(--accent)", pts: movePaceSeries(games, d), games: games.filter((g) => g.difficulty === d && (g.moves || []).length).length }))
           .filter((s) => s.pts.length);
         if (!series.length) return '<div class="card">Play a few games and your average time per move will chart here, by difficulty.</div>';
-        const maxX = Math.max(2, ...series.flatMap((s) => s.pts.map((p) => p.x)));
-        const maxY = Math.max(1, ...series.flatMap((s) => s.pts.map((p) => p.v)));
+        // The legend always lists every difficulty you have games for — including the hidden ones, which
+        // is the only way back once they're off.
+        const legend = series.map((s) => {
+          const off = paceHidden.has(s.label);
+          return `<button type="button" class="lg${off ? " off" : ""}" data-d="${esc(s.label)}" aria-pressed="${off ? "false" : "true"}" title="${off ? "Show" : "Hide"} ${esc(s.label)}"><span class="lgdot" style="background:${s.color}"></span>${esc(s.label)} <span class="k">(${s.games})</span></button>`;
+        }).join("");
+        const legendHTML = `<div class="chart-legend">${legend}</div>`;
+        const shown = series.filter((s) => !paceHidden.has(s.label));
+        if (!shown.length) {
+          return `<div class="card">
+            <p class="k" style="margin:6px 0 10px">Every difficulty is hidden — tap one to bring it back.</p>
+            ${legendHTML}
+          </div>`;
+        }
+        const maxX = Math.max(2, ...shown.flatMap((s) => s.pts.map((p) => p.x)));
+        const maxY = Math.max(1, ...shown.flatMap((s) => s.pts.map((p) => p.v)));
         const W = 300, H = 156, padL = 46, padR = 10, padT = 8, padB = 30;
         const plotW = W - padL - padR, plotH = H - padT - padB;
         const sx = (x) => padL + (maxX === 1 ? 0 : (x - 1) / (maxX - 1)) * plotW;
@@ -3147,15 +3175,14 @@
         }
         xaxis += `<text x="${(padL + plotW / 2).toFixed(1)}" y="${H - 4}" text-anchor="middle" font-size="9" fill="var(--muted)">move number</text>`;
         let lines = "";
-        for (const s of series) {
+        for (const s of shown) {
           const pathPts = s.pts.map((p) => `${sx(p.x).toFixed(1)},${sy(p.v).toFixed(1)}`).join(" ");
           lines += `<polyline points="${pathPts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>`;
         }
-        const legend = series.map((s) => `<span class="lg"><span class="lgdot" style="background:${s.color}"></span>${esc(s.label)} <span class="k">(${s.games})</span></span>`).join("");
         return `<div class="card">
-          <svg viewBox="0 0 ${W} ${H}" class="pace-chart" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Average time per move by difficulty">${grid}${lines}${xaxis}</svg>
-          <div class="chart-legend">${legend}</div>
-          <span class="k">Average time per move at each position — lower is quicker. Later positions average fewer games.</span>
+          <svg viewBox="0 0 ${W} ${H}" class="pace-chart" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Average time per move by difficulty — showing ${esc(shown.map((s) => s.label).join(", "))}">${grid}${lines}${xaxis}</svg>
+          ${legendHTML}
+          <span class="k">Average time per move at each position — lower is quicker. Later positions average fewer games. Tap a difficulty to hide or show it; the axes rescale to what's left.</span>
         </div>`;
       }
 
@@ -3564,9 +3591,6 @@
         }
         if (!diffTrend) diffTrend = '<div class="card">Solve a few puzzles and your times will chart here, so you can watch them drop.</div>';
 
-        // avg time per move by move position, per difficulty — the toggle-able alternate view
-        const paceHTML = movePaceChart(games, diffs);
-
         // by technique (typical time per move)
         const allMoves = games.flatMap((g) => g.moves);
         const byTech = {};
@@ -3654,12 +3678,17 @@
         // grid and solution precisely so its moves can be explained mid-game.
         wireMoveDetail(document.getElementById("thisTimeline"), thisPaneGame);
         setStatsTab(statsTab);   // apply the remembered tab
-        // Solve-time trends toggle: swap between "over time" and "avg time per move".
-        const timeCharts = { overtime: diffTrend, permove: paceHTML };
+        // Solve-time trends toggle: swap between "over time" and "avg time per move". The per-move chart
+        // is re-rendered on each paint rather than reused, since hiding a difficulty rescales it.
+        const timeCharts = { overtime: () => diffTrend, permove: () => movePaceChart(games, diffs) };
         const paintTimeChart = () => {
           const box = document.getElementById("timeChartBox");
-          if (box) box.innerHTML = timeCharts[timeChartMode] || "";
+          if (box) box.innerHTML = (timeCharts[timeChartMode] || (() => ""))();
           statsEl.querySelectorAll(".ctog").forEach((b) => b.classList.toggle("on", b.dataset.mode === timeChartMode));
+          // Legend entries on the per-move chart toggle their difficulty in and out of the plot.
+          if (box) box.querySelectorAll(".chart-legend button.lg[data-d]").forEach((b) => {
+            b.onclick = () => { togglePaceSeries(b.dataset.d); paintTimeChart(); };
+          });
         };
         statsEl.querySelectorAll(".ctog").forEach((b) => (b.onclick = () => { timeChartMode = b.dataset.mode; paintTimeChart(); }));
         paintTimeChart();
