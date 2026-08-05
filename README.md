@@ -20,6 +20,20 @@ answer.
   - **Hint** finds the next cell you can logically prove, explains it (and
     names the technique — naked/hidden single, pointing pair, box/line
     reduction, naked pair, hidden pair, X-wing), and offers to place it for you.
+  - **Step-by-step solve** replays the *whole* solve the way you'd do it on
+    paper: place, prune, place, prune, until the grid is full. Each step is one
+    deduction on a read-only board that shows every cell's candidates — a
+    technique step names itself (naked pair, X-wing, skyscraper…), explains the
+    elimination, and **strikes the candidates it removes in red where they sit**
+    before they disappear; the **Prune candidates** step that follows every
+    placement strikes the digit out of every peer it just ruled out. Digits the
+    walkthrough places are amber (your givens stay black) and the ones placed on
+    the current step are blue. Step through with ‹ ›, or jump with Start / −5 /
+    +5 / End, and tap **About this technique** for the worked example. It starts
+    from wherever your board actually stands, and never touches your game — the
+    clock auto-pauses while it's open and your entries are left alone. When a
+    puzzle needs a method beyond the ones the coach names, that step is labelled
+    **Forced placement** and says so rather than pretending a rule applies.
   - A **number pad** (1–9 plus **✕** to clear) with **Normal** and
     **Candidate** modes — Candidate mode toggles your own pencil marks;
     **Auto notes** fills every empty cell with its possible digits.
@@ -97,8 +111,8 @@ answer.
     **grouped by date** (Today, Yesterday, then by day), newest first, with
     each entry's difficulty and source — where you can **load**, **edit**, or
     **delete** any puzzle.
-  - Stats, Check entries, Reveal solution, Edit puzzle, and Start solving live
-    under a ⚙ menu in the top-right corner.
+  - Stats, Step-by-step solve, Check entries, Reveal solution, Edit puzzle, and
+    Start solving live under a ⚙ menu in the top-right corner.
 
   The coaching and saved library are entirely client-side, so they work
   **without an API key** — only the optional screenshot import calls Claude
