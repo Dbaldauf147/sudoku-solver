@@ -308,6 +308,22 @@
       .mpencil span { display: flex; align-items: center; justify-content: center; }
       .mpencil span.struck { color: var(--bad); text-decoration: line-through; }
 
+      /* ---- post-game audit: your solve beside the walkthrough's ---- */
+      .audit-phase { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 12px 10px; margin-bottom: 12px; }
+      .audit-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+      .audit-head b { font-size: 0.98rem; }
+      .audit-head .k { color: var(--muted); font-size: 0.8rem; }
+      .audit-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .audit-col > .miniboard { max-width: none; margin-bottom: 6px; }
+      .audit-who { font-weight: 700; font-size: 0.85rem; margin-bottom: 5px; }
+      .audit-who .k { font-weight: 400; color: var(--muted); }
+      .audit-cap { font-size: 0.76rem; line-height: 1.45; color: var(--muted); }
+      .audit-cap b { color: var(--text); }
+      .audit-note { margin: 8px 0 0; font-size: 0.8rem; line-height: 1.45; color: var(--muted); }
+      .audit-note.apart { color: var(--warn); }
+      .audit-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 2px 0 14px; font-size: 0.78rem; color: var(--muted); }
+      .audit-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; border: 1px solid var(--line); vertical-align: -1px; margin-right: 5px; }
+
       /* ---- settings panel ---- */
       .set-row { display: flex; align-items: center; justify-content: space-between; gap: 14px;
         background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
@@ -451,6 +467,7 @@
       <div id="techniques" class="stats" hidden></div>
       <div id="walkthrough" class="stats" hidden></div>
       <div id="settings" class="stats" hidden></div>
+      <div id="audit" class="stats" hidden></div>
 
       <div id="modal" class="overlay" hidden>
         <div class="modal">
@@ -628,6 +645,7 @@
           <p id="winMsg" class="body"></p>
           <p id="winTarget" class="win-target" hidden></p>
           <div class="actions">
+            <button id="winAudit">Audit my solve</button>
             <button id="winStats">View stats</button>
             <button id="winAgain" class="primary">Play another</button>
           </div>
@@ -648,6 +666,7 @@
       const statsEl = document.getElementById("stats");
       const walkPanel = document.getElementById("walkthrough");
       const settingsPanel = document.getElementById("settings");
+      const auditPanel = document.getElementById("audit");
       const timerEl = document.getElementById("timer");
       const errorsEl = document.getElementById("errors");
       const inputs = [], cellEls = [], pencils = [], marks = [];
@@ -1649,6 +1668,80 @@
         return steps;
       }
 
+      // ---- post-game audit: your solve against the walkthrough's ----
+      // Both solves fill the same 81 cells, so the number of cells filled is the one axis they share.
+      // Cutting that axis into phases lets each side be shown at the same point of progress: same cell
+      // count, different route. Everything here reads a finished game's own record — no replay of your
+      // input — so it works for any game that stored its clue grid, solution, and move log.
+      const AUDIT_PHASES = 6;
+      function buildAudit(g) {
+        const mine = (g.moves || []).filter((m) => m.correct);
+        if (!mine.length || !g.grid) return null;
+        // The walkthrough's placements, in its order, each carrying the technique that justified it.
+        const steps = buildWalkthrough(g.grid);
+        const solverPlays = [];
+        for (const s of steps) {
+          for (const [r, c, n] of s.placed) solverPlays.push({ r, c, n, tech: s.tech || s.title });
+          // An elimination step places nothing but is work the solver needed — bill it to the next
+          // placement's phase, so "what it had to reach for" isn't lost between the boards.
+          if (!s.placed.length && s.cut.length && s.tech) solverPlays.push({ elim: s.tech });
+        }
+        const solverCells = solverPlays.filter((p) => !p.elim);
+        const total = Math.min(mine.length, solverCells.length);
+        if (!total) return null;
+        const phases = [], n = Math.min(AUDIT_PHASES, total);
+        const bound = (i) => Math.round((total * i) / n);   // cell index each phase ends on
+        // Walk my move log once, so mistakes and time land in the phase they actually happened in.
+        let mi = 0, placedSoFar = 0;
+        const myGrid = clone(g.grid), solverGrid = clone(g.grid);
+        let si = 0, solverPlaced = 0;
+        for (let i = 1; i <= n; i++) {
+          const upTo = bound(i), mineHere = [], myTechs = {}, wrongHere = [];
+          let ms = 0, hints = 0;
+          while (placedSoFar < upTo && mi < g.moves.length) {
+            const m = g.moves[mi++];
+            ms += m.dt || 0;
+            if (m.correct) {
+              myGrid[m.r][m.c] = m.n; mineHere.push([m.r, m.c]); placedSoFar++;
+              myTechs[m.tech] = (myTechs[m.tech] || 0) + 1;
+              if (m.hinted) hints++;
+            } else wrongHere.push([m.r, m.c]);
+          }
+          const mistakes = wrongHere.length;
+          const solverHere = [], solverTechs = {}, solverElims = {};
+          while (solverPlaced < upTo && si < solverPlays.length) {
+            const p = solverPlays[si++];
+            if (p.elim) { solverElims[p.elim] = (solverElims[p.elim] || 0) + 1; continue; }
+            solverGrid[p.r][p.c] = p.n; solverHere.push([p.r, p.c]); solverPlaced++;
+            solverTechs[p.tech] = (solverTechs[p.tech] || 0) + 1;
+          }
+          // How far the two routes stand apart at this checkpoint: cells one side has filled and the
+          // other hasn't. Same count of filled cells on both sides, so this is purely about order.
+          let differ = 0;
+          for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!!myGrid[r][c] !== !!solverGrid[r][c]) differ++;
+          phases.push({
+            i, from: bound(i - 1) + 1, to: upTo, differ,
+            mine: { grid: clone(myGrid), just: mineHere.slice(), wrong: wrongHere, ms, mistakes, hints, techs: myTechs },
+            solver: { grid: clone(solverGrid), just: solverHere.slice(), techs: solverTechs, elims: solverElims },
+          });
+        }
+        // Same cell, same point in the run: the places your route and the walkthrough's agreed.
+        const sameOrder = mine.filter((m, k) => solverCells[k] && solverCells[k].r === m.r && solverCells[k].c === m.c).length;
+        return { phases, total, myMoves: (g.moves || []).length, sameOrder,
+          solverSteps: steps.length, mistakes: (g.moves || []).filter((m) => !m.correct).length,
+          hardest: hardestOf(steps.map((s) => s.tech).filter(Boolean)) };
+      }
+      function hardestOf(techs) {
+        let best = null, rank = 0;
+        for (const t of techs) { const rk = TECH_RANK[t] || 0; if (rk > rank) { rank = rk; best = t; } }
+        return best;
+      }
+      function techSummary(counts) {
+        const e = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+        if (!e.length) return "—";
+        return e.map(([t, c]) => `<span style="color:${TECH_COLORS[t] || "#94a3b8"}">●</span> ${esc(t)}${c > 1 ? ` ×${c}` : ""}`).join(" · ");
+      }
+
       // ---- UI feedback ----
       function showExplain(title, body, kind = "info", action, tech) {
         explainEl.className = "explain " + kind; explainEl.innerHTML = "";
@@ -1824,6 +1917,13 @@
         setTimeout(() => { cc.innerHTML = ""; }, strong ? 5200 : 4200);
       }
       document.getElementById("winAgain").addEventListener("click", () => { document.getElementById("winModal").hidden = true; resetToEdit(); maybeRemindBackup(); });
+      // Straight from the celebration into the audit — the moment you're most curious how you did it.
+      document.getElementById("winAudit").addEventListener("click", () => {
+        document.getElementById("winModal").hidden = true;
+        const g = lsGet(STATS_KEY)[0];
+        if (!canExplainMove(g)) return showExplain("Nothing to audit", "This game didn't record the clue grid and move log the audit needs.", "info");
+        openAudit(g);
+      });
       document.getElementById("winStats").addEventListener("click", () => { document.getElementById("winModal").hidden = true; statsTab = "this"; if (statsEl.hidden) document.getElementById("statsBtn").click(); else setStatsTab("this"); });
 
       // ---- timer + session tracking (active time only; pauses don't count) ----
@@ -1890,7 +1990,7 @@
       const pauseModal = document.getElementById("pauseModal");
       // The board is "covered" whenever an in-app panel (Stats / Saved games / History) is showing
       // over it — the game isn't visible, so it counts as swiping away from the Sudoku page.
-      function boardCovered() { return !statsEl.hidden || !libraryPanel.hidden || !walkPanel.hidden || !settingsPanel.hidden; }
+      function boardCovered() { return !statsEl.hidden || !libraryPanel.hidden || !walkPanel.hidden || !settingsPanel.hidden || !auditPanel.hidden; }
       // Auto-pause reconciler: the clock should run only while you're actually looking at the board.
       // It stops whenever the tab is hidden (backgrounded) or a panel covers the board, and resumes
       // when you come back — but never overrides a manual pause. Driven from visibilitychange and
@@ -2204,7 +2304,7 @@
           : "Targets cleared. Moves are flagged only against the rest of their own game again.", "ok");
         if (!statsEl.hidden) renderStats();
       }
-      document.getElementById("targetBtn").addEventListener("click", () => { closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); openTargets(); });
+      document.getElementById("targetBtn").addEventListener("click", () => { closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); openTargets(); });
       document.getElementById("targetSave").addEventListener("click", saveTargets);
       document.getElementById("targetClear").addEventListener("click", () => {
         targetModal.querySelectorAll(".target-in").forEach((i) => { i.value = ""; repaintPace(i); });
@@ -2360,7 +2460,7 @@
         }
       }
       function openSettings() {
-        closeStats(); closeLibrary(); closeTechniques(); closeWalkthrough();
+        closeStats(); closeLibrary(); closeTechniques(); closeWalkthrough(); closeAudit();
         settingsPanel.hidden = false; renderSettings();
         boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause();
         settingsPanel.scrollIntoView({ block: "start" });
@@ -2494,7 +2594,7 @@
       });
 
       document.getElementById("check").addEventListener("click", () => {
-        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle, then I can check your entries.", "info");
         let wrong = 0, filled = 0;
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
@@ -2507,7 +2607,7 @@
       });
 
       document.getElementById("reveal").addEventListener("click", () => {
-        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle first.", "info");
         finalizeSession(false);
         writeGrid(solution);
@@ -2551,7 +2651,7 @@
       function resetToEdit() {
         session = null; clearInterval(timerId); timerId = null; undoStack = []; redoStack = []; activeSavedGame = null;
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal"); syncModeButtons();
-        document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings();
+        document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
         pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].classList.remove("given", "wrong", "solved"); marks[r][c].clear(); }
         renderPencils();
@@ -3060,7 +3160,7 @@
         return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
       }
       function openLibrary(tab) {
-        closeStats(); closeTechniques(); closeWalkthrough(); closeSettings();
+        closeStats(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
         if (tab) libTab = tab;
         editingId = null; histEditing = null;
         libraryPanel.hidden = false; renderGameLibrary();
@@ -3293,7 +3393,7 @@
 
       // Home: close any open panel (stats or the game library) and return to the game board.
       document.getElementById("homeBtn").addEventListener("click", () => {
-        closeMenu(); closeStats(); closeLibrary(); closeTechniques(); closeWalkthrough(); closeSettings();
+        closeMenu(); closeStats(); closeLibrary(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
       });
 
       // ---- built-in catalog (shipped with the app, available to every user) ----
@@ -3721,7 +3821,7 @@
       document.getElementById("exModal").addEventListener("click", (e) => { if (e.target.id === "exModal") e.currentTarget.hidden = true; });
       function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause(); } }
       document.getElementById("statsBtn").addEventListener("click", () => {
-        if (statsEl.hidden) { closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
+        if (statsEl.hidden) { closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
         else closeStats();
       });
 
@@ -3771,7 +3871,7 @@
         if (p && !p.hidden) { p.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; }
       }
       function openTechniques() {
-        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
         renderTechniques();
         document.getElementById("techniques").hidden = false;
         boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none";
@@ -3797,6 +3897,73 @@
         if (document.getElementById("techniques").hidden) openTechniques();
         else closeTechniques();
       });
+
+      // ---- post-game audit panel ----
+      // Two filmstrips of the same game: your board and the walkthrough's, stopped at the same number
+      // of filled cells so each phase compares like with like. Opened from the win screen or from the
+      // "This game" stats tab once a game is over.
+      let auditGame = null;
+      function auditBoardHTML(container, side, mistakes) {
+        const givensMap = {}, focus = [];
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (side.grid[r][c]) givensMap[r + "," + c] = String(side.grid[r][c]);
+        for (const [r, c] of side.just) focus.push(r + "," + c);
+        renderMiniBoard(container, { givens: givensMap, focus, elim: (mistakes || []).map(([r, c]) => r + "," + c) });
+      }
+      function renderAudit() {
+        if (auditPanel.hidden) return;
+        const g = auditGame, a = g && buildAudit(g);
+        if (!a) {
+          auditPanel.innerHTML = `<button id="auBack">← Back</button><h2>Audit</h2>
+            <div class="card">This game doesn't carry enough of a record to audit — it needs its clue grid, solution, and move log, which games finished before that was stored don't have.</div>`;
+          document.getElementById("auBack").onclick = closeAudit;
+          return;
+        }
+        const pct = Math.round((a.sameOrder / a.total) * 100);
+        let html = `<button id="auBack">← Back</button><h2>Your solve vs the solver</h2>
+          <p class="hintline">The same game twice: your route on the left, the step-by-step solver's on the right, stopped at the same number of filled cells each phase. Same finish, different order.</p>
+          <div class="card"><b>${a.total} cells</b> filled over <b>${a.myMoves} move${a.myMoves === 1 ? "" : "s"}</b>${a.mistakes ? ` (${a.mistakes} wrong)` : ""} · you and the solver picked the same cell at the same point <b>${a.sameOrder}</b> time${a.sameOrder === 1 ? "" : "s"} (${pct}%).
+            ${a.hardest ? `<br /><span class="k">The solver's hardest step this game was <b style="color:${TECH_COLORS[a.hardest] || "#94a3b8"}">${esc(a.hardest)}</b>, over ${a.solverSteps} steps in all.</span>` : ""}</div>
+          <div class="audit-legend"><span><i style="background:#cfe0ff"></i>filled this phase</span><span><i style="background:#fee2e2"></i>your mistake this phase</span></div>`;
+        a.phases.forEach((p) => {
+          html += `<div class="audit-phase" data-p="${p.i}">
+            <div class="audit-head"><b>Phase ${p.i}</b><span class="k">cells ${p.from}–${p.to} of ${a.total}</span></div>
+            <div class="audit-pair">
+              <div class="audit-col">
+                <div class="audit-who">You <span class="k">· ${fmtDt(p.mine.ms)}</span></div>
+                <div id="auMine${p.i}"></div>
+                <div class="audit-cap"><b>${p.mine.just.length}</b> placed${p.mine.mistakes ? ` · <b>${p.mine.mistakes}</b> wrong` : ""}${p.mine.hints ? ` · 💡 ${p.mine.hints}` : ""}<br />${techSummary(p.mine.techs)}</div>
+              </div>
+              <div class="audit-col">
+                <div class="audit-who">Solver</div>
+                <div id="auSolver${p.i}"></div>
+                <div class="audit-cap"><b>${p.solver.just.length}</b> placed<br />${techSummary(p.solver.techs)}${Object.keys(p.solver.elims).length ? `<br />needed: ${techSummary(p.solver.elims)}` : ""}</div>
+              </div>
+            </div>
+            <p class="audit-note${p.differ ? " apart" : ""}">${p.differ
+              ? `${p.differ} cell${p.differ === 1 ? "" : "s"} sit differently at this checkpoint — same number filled, different ones.`
+              : `Identical boards — you were cell-for-cell with the solver here.`}</p>
+          </div>`;
+        });
+        auditPanel.innerHTML = html;
+        a.phases.forEach((p) => {
+          auditBoardHTML(document.getElementById(`auMine${p.i}`), p.mine, p.mine.wrong);
+          auditBoardHTML(document.getElementById(`auSolver${p.i}`), p.solver, []);
+        });
+        document.getElementById("auBack").onclick = closeAudit;
+        auditPanel.scrollIntoView({ block: "start" });
+      }
+      function closeAudit() {
+        if (!auditPanel.hidden) {
+          auditPanel.hidden = true; auditGame = null;
+          boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause();
+        }
+      }
+      function openAudit(g) {
+        closeStats(); closeLibrary(); closeTechniques(); closeWalkthrough(); closeSettings();
+        auditGame = g;
+        auditPanel.hidden = false; renderAudit();
+        boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause();
+      }
 
       // ---- step-by-step solve panel ----
       // Walks the solve one deduction at a time — place, prune, place, prune — on a read-only replay
@@ -3875,7 +4042,7 @@
         }
       }
       function openWalkthrough() {
-        closeStats(); closeLibrary(); closeTechniques(); closeSettings();
+        closeStats(); closeLibrary(); closeTechniques(); closeSettings(); closeAudit();
         if (!solving) return showExplain("Not solving yet", "Enter or load a puzzle and press Start solving — then I can walk the whole solve for you.", "info");
         // Start from where you actually are (givens plus your correct entries) so the walkthrough
         // continues your game rather than replaying what you've already worked out.
@@ -4018,8 +4185,12 @@
         // ----- move-by-move timeline (pace / deep dive for this game) -----
         const timeline = movesN ? `<h3>Move-by-move timeline</h3><div id="thisTimeline">${deepDiveHTML(g, false, true)}</div>` : "";
 
+        // The audit needs a finished game's full record; a game still in progress has no route to compare yet.
+        const auditBtn = !g.live && canExplainMove(g)
+          ? `<button id="auditOpen" style="width:100%;margin:2px 0 12px">Audit: your solve vs the solver</button>` : "";
         return `${prLine}
           <div class="card"><b>${esc(d || "—")}</b> · ${esc(g.source || "—")} · <span class="k">${status}</span></div>
+          ${auditBtn}
           ${overview}
           ${targetCard}
           ${compare}
@@ -4169,6 +4340,8 @@
         // Press-and-hold works on either — including the game in progress, which carries its own clue
         // grid and solution precisely so its moves can be explained mid-game.
         wireMoveDetail(document.getElementById("thisTimeline"), thisPaneGame);
+        const auditOpen = document.getElementById("auditOpen");
+        if (auditOpen) auditOpen.onclick = () => openAudit(thisPaneGame);
         setStatsTab(statsTab);   // apply the remembered tab
         // Solve-time trends toggle: swap between "over time" and "avg time per move". The per-move chart
         // is re-rendered on each paint rather than reused, since hiding a difficulty rescales it.

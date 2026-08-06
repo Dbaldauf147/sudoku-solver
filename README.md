@@ -38,6 +38,18 @@ answer.
     clock auto-pauses while it's open and your entries are left alone. When a
     puzzle needs a method beyond the ones the coach names, that step is labelled
     **Forced placement** and says so rather than pretending a rule applies.
+  - **Audit: your solve vs the solver.** When a game is over, one tap on the
+    celebration screen (or in Stats → *This game*) lays the same puzzle out
+    twice, **phase by phase, side by side** — your route on the left, the
+    step-by-step solver's on the right, each stopped at the *same number of
+    filled cells* so the two are always comparable. Every phase shows what each
+    side placed (tinted on the board), the time you spent, your mistakes (in
+    red) and hints, the techniques you were credited with against the ones the
+    solver used, and how many cells sit differently at that checkpoint — the
+    measure of how far your order drifted from the book solution. The header
+    totals it up: cells filled, moves taken, how often you picked the same cell
+    at the same point as the solver, and the hardest technique the solve
+    actually needed.
   - A **number pad** (1–9 plus **✕** to clear) with **Normal** and
     **Candidate** modes — Candidate mode toggles your own pencil marks;
     **Auto notes** fills every empty cell with its possible digits.
