@@ -308,6 +308,43 @@
       .mpencil span { display: flex; align-items: center; justify-content: center; }
       .mpencil span.struck { color: var(--bad); text-decoration: line-through; }
 
+      /* ---- step-by-step solve walkthrough ---- */
+      /* A read-only replay board: every empty cell shows its candidates in a 3×3 grid, the digits the
+         solver placed are amber (givens stay black), and whatever a step removes is struck in red
+         *before* it disappears, so each step shows its own reasoning rather than the result. */
+      .wboard { display: grid; grid-template-columns: repeat(9, 1fr); width: 100%; aspect-ratio: 1;
+        background: var(--thick); border: 2px solid var(--thick); gap: 1px; border-radius: 6px; overflow: hidden; }
+      .wcell { background: var(--panel); position: relative; display: flex; align-items: center; justify-content: center;
+        font-size: clamp(0.95rem, 4.6vw, 1.5rem); color: var(--num); font-weight: 700; }
+      .wcell.w-unit { background: #eef2ff; }
+      .wcell.w-focus { background: #cfe0ff; }
+      .wcell.w-now { background: #fef3c7; }
+      .wcell.w-placed { color: var(--warn); }
+      .wcell.w-new { color: var(--accent); }
+      .wcell[data-col="2"], .wcell[data-col="5"] { box-shadow: inset -2px 0 0 var(--thick); }
+      .wcell[data-row="2"], .wcell[data-row="5"] { box-shadow: inset 0 -2px 0 var(--thick); }
+      .wpencil { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(3, 1fr);
+        grid-template-rows: repeat(3, 1fr); font-size: clamp(0.42rem, 2vw, 0.68rem); color: var(--muted); font-weight: 600; }
+      .wpencil span { display: flex; align-items: center; justify-content: center; }
+      .wpencil span.cut { color: var(--bad); text-decoration: line-through; font-weight: 800; }
+      .walk-nav { display: flex; align-items: center; gap: 10px; margin: 10px 0 6px; }
+      .walk-nav button { font-size: 1.1rem; padding: 8px 14px; line-height: 1; }
+      .walk-nav .walk-meter { flex: 1 1 auto; text-align: center; }
+      .walk-nav .walk-meter .k { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 5px; }
+      .walk-bar { height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+      .walk-bar i { display: block; height: 100%; background: var(--accent); transition: width 0.15s ease; }
+      .walk-jump { display: flex; gap: 8px; margin: 10px 0 4px; }
+      .walk-jump button { flex: 1 1 0; text-align: center; font-size: 0.85rem; }
+      .walk-step { text-align: center; margin: 4px 0 10px; }
+      .walk-step h3 { margin: 0 0 4px; font-size: 1.1rem; }
+      .walk-step p { margin: 0; color: var(--muted); font-size: 0.88rem; line-height: 1.45; }
+      .walk-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px;
+        margin: 10px 0 0; font-size: 0.78rem; color: var(--muted); }
+      .walk-legend b { font-weight: 700; }
+      .walk-legend .cut { color: var(--bad); text-decoration: line-through; }
+      .walk-legend .placed { color: var(--warn); }
+      .walk-legend .new { color: var(--accent); }
+
       .profile-modal { text-align: left; }
       .profile-modal h2 { text-align: center; }
       .profile-modal #profileMsg { margin: 0 0 18px; }
@@ -354,6 +391,7 @@
           <div id="gearMenu" class="dropdown" hidden>
             <button id="start">Start solving</button>
             <button id="hint">Hint</button>
+            <button id="walkBtn" title="Watch the puzzle solve itself, one deduction at a time">Step-by-step solve</button>
             <button id="statsBtn">Stats</button>
             <button id="techBtn">Techniques</button>
             <button id="check">Check entries</button>
@@ -404,6 +442,7 @@
       <div id="stats" class="stats" hidden></div>
       <div id="gameLibrary" class="stats" hidden></div>
       <div id="techniques" class="stats" hidden></div>
+      <div id="walkthrough" class="stats" hidden></div>
 
       <div id="modal" class="overlay" hidden>
         <div class="modal">
@@ -599,6 +638,7 @@
       const boardEl = document.getElementById("board");
       const explainEl = document.getElementById("explain");
       const statsEl = document.getElementById("stats");
+      const walkPanel = document.getElementById("walkthrough");
       const timerEl = document.getElementById("timer");
       const errorsEl = document.getElementById("errors");
       const inputs = [], cellEls = [], pencils = [], marks = [];
@@ -1507,6 +1547,99 @@
         return { tier: tierForRank(res.hardestRank), hardest: res.hardest || "Naked single", solved: true };
       }
 
+      // ---- step-by-step walkthrough ----
+      // The whole logical solve, broken into the steps you'd take on paper: apply a technique, prune the
+      // candidates it (or a placement) just invalidated, look again. Each step stores the board *before*
+      // its own removals plus the list of what it removes, so the replay can strike those candidates out
+      // where they sat instead of silently dropping them — the removal is the step.
+      function batchNakedSingles(M, g) {
+        const out = [];
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++)
+          if (g[r][c] === 0 && M[r][c].size === 1) out.push({ r, c, n: [...M[r][c]][0] });
+        return out;
+      }
+      function batchHiddenSingles(M, g) {
+        const out = [], taken = new Set();
+        for (const u of UNITS) for (let n = 1; n <= 9; n++) {
+          const spots = u.cells.filter(([r, c]) => g[r][c] === 0 && M[r][c].has(n));
+          if (spots.length !== 1) continue;
+          const [r, c] = spots[0];
+          if (M[r][c].size < 2 || taken.has(r * 9 + c)) continue;   // size 1 is a naked single; one digit per cell
+          taken.add(r * 9 + c); out.push({ r, c, n, unit: u.name });
+        }
+        return out;
+      }
+      // Two placements in one batch may never disagree in a sound puzzle, but a mis-entered grid could
+      // produce a pair that clash — drop the loser rather than write an impossible board.
+      function keepCompatible(found) {
+        const out = [];
+        for (const s of found) if (!out.some((o) => o.n === s.n && (o.r === s.r || o.c === s.c || (boxIndex(o.r, o.c) === boxIndex(s.r, s.c))))) out.push(s);
+        return out;
+      }
+      function listCells(found) { return found.map((s) => `${loc(s.r, s.c)} = ${s.n}`).join(", "); }
+      function buildWalkthrough(startGrid) {
+        const g = clone(startGrid), M = candMap(g), steps = [], placedCells = new Set();
+        // A completed grid to fall back on when the named techniques run dry, so the walkthrough always
+        // reaches a solved board instead of stopping mid-puzzle.
+        let sol = solution;
+        if (!sol || !sol.every || startGrid.some((row, r) => row.some((v, c) => v && v !== sol[r][c]))) {
+          const s = clone(startGrid); sol = solve(s) ? s : null;
+        }
+        const snapMarks = () => M.map((row) => row.map((s) => [...s].sort((a, b) => a - b)));
+        const push = (o) => steps.push({ grid: clone(g), marks: snapMarks(), placed: [], cut: [], focus: [], placedCells: new Set(placedCells), ...o });
+        const applyCut = (cut) => { for (const [r, c, n] of cut) M[r][c].delete(n); };
+        const isFull = () => g.every((row) => row.every((v) => v !== 0));
+        // Place a batch of singles, then show the pruning that batch forces on every peer.
+        const placeBatch = (found, title, tech, why) => {
+          for (const s of found) { g[s.r][s.c] = s.n; M[s.r][s.c] = new Set(); placedCells.add(s.r * 9 + s.c); }
+          push({ title, tech, placed: found.map((s) => [s.r, s.c, s.n]), focus: found.map((s) => [s.r, s.c]),
+            detail: `${listCells(found)} — ${why}` });
+          const cut = [];
+          for (const s of found) for (const { r, c } of peersOf(s.r, s.c)) if (g[r][c] === 0 && M[r][c].has(s.n)) cut.push([r, c, s.n]);
+          if (cut.length) {
+            push({ title: "Prune candidates", cut, focus: found.map((s) => [s.r, s.c]),
+              detail: `A placed digit can't repeat in its own row, column, or box, so ${cut.length} candidate${cut.length === 1 ? " is" : "s are"} struck from the peers of ${found.map((s) => loc(s.r, s.c)).join(", ")}.` });
+            applyCut(cut);
+          }
+        };
+
+        push({ title: "Fill candidates", detail: "Every empty cell starts with each digit its row, column, and box still allow. From here on, a step either places digits or prunes candidates." });
+        for (let guard = 0; guard < 400 && !isFull(); guard++) {
+          const naked = keepCompatible(batchNakedSingles(M, g));
+          if (naked.length) {
+            placeBatch(naked, naked.length === 1 ? "Naked single" : "Naked singles", "Naked single",
+              `${naked.length === 1 ? "this cell has" : "each of these cells has"} exactly one candidate left, so that digit goes in.`);
+            continue;
+          }
+          const hidden = keepCompatible(batchHiddenSingles(M, g));
+          if (hidden.length) {
+            placeBatch(hidden, hidden.length === 1 ? "Hidden single" : "Hidden singles", "Hidden single",
+              `${hidden.length === 1 ? `${hidden[0].n} fits nowhere else in ${hidden[0].unit}` : "each digit fits only one cell of its row, column, or box"}, so it must go there even though the cell still shows other candidates.`);
+            continue;
+          }
+          let e = null;
+          for (const tech of ELIM_TECHS) { e = tech(M, g); if (e) break; }
+          if (e) {
+            push({ title: e.tech, tech: e.tech, cut: e.elims, focus: e.highlight,
+              detail: `${e.reason} ${e.elims.length} candidate${e.elims.length === 1 ? " is" : "s are"} struck.` });
+            applyCut(e.elims);
+            continue;
+          }
+          // Past every technique the coach can name: take the most constrained cell from the solution
+          // so the replay keeps moving, and say plainly that this one isn't a named rule.
+          if (!sol) break;
+          let best = null;
+          for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++)
+            if (g[r][c] === 0 && (!best || M[r][c].size < M[best.r][best.c].size)) best = { r, c };
+          if (!best) break;
+          placeBatch([{ r: best.r, c: best.c, n: sol[best.r][best.c] }], "Forced placement", "Forced",
+            "no technique I can name breaks the grid open here, but only this digit lets the puzzle be completed. Placing it reopens the simpler steps.");
+        }
+        push({ title: isFull() ? "Solved" : "Stuck", done: true,
+          detail: isFull() ? "Every cell is filled and every candidate accounted for — that's the whole solve." : "I ran out of steps before the grid filled. Check the entered clues: a mis-typed puzzle can be unsolvable." });
+        return steps;
+      }
+
       // ---- UI feedback ----
       function showExplain(title, body, kind = "info", action, tech) {
         explainEl.className = "explain " + kind; explainEl.innerHTML = "";
@@ -1748,7 +1881,7 @@
       const pauseModal = document.getElementById("pauseModal");
       // The board is "covered" whenever an in-app panel (Stats / Saved games / History) is showing
       // over it — the game isn't visible, so it counts as swiping away from the Sudoku page.
-      function boardCovered() { return !statsEl.hidden || !libraryPanel.hidden; }
+      function boardCovered() { return !statsEl.hidden || !libraryPanel.hidden || !walkPanel.hidden; }
       // Auto-pause reconciler: the clock should run only while you're actually looking at the board.
       // It stops whenever the tab is hidden (backgrounded) or a panel covers the board, and resumes
       // when you come back — but never overrides a manual pause. Driven from visibilitychange and
@@ -2050,7 +2183,7 @@
           : "Targets cleared. Moves are flagged only against the rest of their own game again.", "ok");
         if (!statsEl.hidden) renderStats();
       }
-      document.getElementById("targetBtn").addEventListener("click", () => { closeStats(); closeLibrary(); closeHistory(); closeTechniques(); openTargets(); });
+      document.getElementById("targetBtn").addEventListener("click", () => { closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); openTargets(); });
       document.getElementById("targetSave").addEventListener("click", saveTargets);
       document.getElementById("targetClear").addEventListener("click", () => {
         targetModal.querySelectorAll(".target-in").forEach((i) => { i.value = ""; repaintPace(i); });
@@ -2303,7 +2436,7 @@
       });
 
       document.getElementById("check").addEventListener("click", () => {
-        closeStats(); closeLibrary(); closeHistory(); closeTechniques();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle, then I can check your entries.", "info");
         let wrong = 0, filled = 0;
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
@@ -2316,7 +2449,7 @@
       });
 
       document.getElementById("reveal").addEventListener("click", () => {
-        closeStats(); closeLibrary(); closeHistory(); closeTechniques();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle first.", "info");
         finalizeSession(false);
         writeGrid(solution);
@@ -2360,7 +2493,7 @@
       function resetToEdit() {
         session = null; clearInterval(timerId); timerId = null; undoStack = []; redoStack = []; activeSavedGame = null;
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal"); syncModeButtons();
-        document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory(); closeTechniques();
+        document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough();
         pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].classList.remove("given", "wrong", "solved"); marks[r][c].clear(); }
         renderPencils();
@@ -2869,7 +3002,7 @@
         return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
       }
       function openLibrary(tab) {
-        closeStats(); closeTechniques();
+        closeStats(); closeTechniques(); closeWalkthrough();
         if (tab) libTab = tab;
         editingId = null; histEditing = null;
         libraryPanel.hidden = false; renderGameLibrary();
@@ -3102,7 +3235,7 @@
 
       // Home: close any open panel (stats or the game library) and return to the game board.
       document.getElementById("homeBtn").addEventListener("click", () => {
-        closeMenu(); closeStats(); closeLibrary();
+        closeMenu(); closeStats(); closeLibrary(); closeTechniques(); closeWalkthrough();
       });
 
       // ---- built-in catalog (shipped with the app, available to every user) ----
@@ -3530,7 +3663,7 @@
       document.getElementById("exModal").addEventListener("click", (e) => { if (e.target.id === "exModal") e.currentTarget.hidden = true; });
       function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause(); } }
       document.getElementById("statsBtn").addEventListener("click", () => {
-        if (statsEl.hidden) { closeLibrary(); closeHistory(); closeTechniques(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
+        if (statsEl.hidden) { closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
         else closeStats();
       });
 
@@ -3580,7 +3713,7 @@
         if (p && !p.hidden) { p.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; }
       }
       function openTechniques() {
-        closeStats(); closeLibrary(); closeHistory(); closeTechniques();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough();
         renderTechniques();
         document.getElementById("techniques").hidden = false;
         boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none";
@@ -3605,6 +3738,100 @@
       document.getElementById("techBtn").addEventListener("click", () => {
         if (document.getElementById("techniques").hidden) openTechniques();
         else closeTechniques();
+      });
+
+      // ---- step-by-step solve panel ----
+      // Walks the solve one deduction at a time — place, prune, place, prune — on a read-only replay
+      // board. It never touches your game: the clock auto-pauses while the panel covers the board and
+      // your entries are left exactly as they were.
+      let walkSteps = [], walkIdx = 0, walkFrom = "your board";
+      function renderWalkBoard(container, s) {
+        container.innerHTML = "";
+        const b = document.createElement("div"); b.className = "wboard";
+        const cut = new Map();
+        for (const [r, c, n] of s.cut) { const k = r * 9 + c; if (!cut.has(k)) cut.set(k, new Set()); cut.get(k).add(n); }
+        const now = new Set(s.placed.map(([r, c]) => r * 9 + c));
+        const focus = new Set((s.focus || []).map(([r, c]) => r * 9 + c));
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+          const k = r * 9 + c, cell = document.createElement("div");
+          cell.className = "wcell"; cell.dataset.row = r; cell.dataset.col = c;
+          if (now.has(k)) cell.classList.add("w-now");
+          else if (focus.has(k)) cell.classList.add("w-focus");
+          if (s.grid[r][c]) {
+            cell.textContent = s.grid[r][c];
+            if (now.has(k)) cell.classList.add("w-new");
+            else if (s.placedCells.has(k)) cell.classList.add("w-placed");
+          } else {
+            const pen = document.createElement("div"); pen.className = "wpencil";
+            const has = new Set(s.marks[r][c]), gone = cut.get(k);
+            for (let n = 1; n <= 9; n++) {
+              const span = document.createElement("span");
+              if (has.has(n)) { span.textContent = n; if (gone && gone.has(n)) span.className = "cut"; }
+              pen.appendChild(span);
+            }
+            cell.appendChild(pen);
+          }
+          b.appendChild(cell);
+        }
+        container.appendChild(b);
+      }
+      function renderWalkthrough() {
+        if (walkPanel.hidden || !walkSteps.length) return;
+        const total = walkSteps.length, s = walkSteps[walkIdx];
+        const pct = Math.round(((walkIdx + 1) / total) * 100);
+        const jump = (id, label, off) => `<button id="${id}"${off ? " disabled" : ""}>${label}</button>`;
+        walkPanel.innerHTML = `<button id="wBack">← Back</button><h2>Step-by-step solution</h2>
+          <p class="hintline">The full solve from ${esc(walkFrom)}, one deduction at a time. Your game and clock are untouched.</p>
+          <div class="walk-nav">
+            ${jump("wPrev", "‹", walkIdx === 0)}
+            <div class="walk-meter"><span class="k">Step ${walkIdx + 1} of ${total}</span><div class="walk-bar"><i style="width:${pct}%"></i></div></div>
+            ${jump("wNext", "›", walkIdx === total - 1)}
+          </div>
+          <div class="walk-step"><h3>${esc(s.title)}</h3><p>${esc(s.detail)}</p></div>
+          <div id="wBoard"></div>
+          <div class="walk-jump">
+            ${jump("wStart", "Start", walkIdx === 0)}${jump("wBack5", "−5", walkIdx === 0)}${jump("wFwd5", "+5", walkIdx === total - 1)}${jump("wEnd", "End", walkIdx === total - 1)}
+          </div>
+          ${s.tech && TECH_INFO[s.tech] ? `<button id="wTech">About this technique</button>` : ""}
+          <div class="walk-legend">
+            <span><b>7</b> given</span><span><b class="placed">7</b> placed here</span>
+            <span><b class="new">7</b> placed this step</span><span><b class="cut">7</b> removed this step</span>
+          </div>`;
+        renderWalkBoard(document.getElementById("wBoard"), s);
+        const go = (i) => { walkIdx = Math.max(0, Math.min(walkSteps.length - 1, i)); renderWalkthrough(); };
+        document.getElementById("wBack").onclick = closeWalkthrough;
+        document.getElementById("wPrev").onclick = () => go(walkIdx - 1);
+        document.getElementById("wNext").onclick = () => go(walkIdx + 1);
+        document.getElementById("wStart").onclick = () => go(0);
+        document.getElementById("wBack5").onclick = () => go(walkIdx - 5);
+        document.getElementById("wFwd5").onclick = () => go(walkIdx + 5);
+        document.getElementById("wEnd").onclick = () => go(walkSteps.length - 1);
+        const techBtn = document.getElementById("wTech");
+        if (techBtn) techBtn.onclick = () => openExample(s.tech);
+        walkPanel.scrollIntoView({ block: "start" });
+      }
+      function closeWalkthrough() {
+        if (!walkPanel.hidden) {
+          walkPanel.hidden = true; walkSteps = [];
+          boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause();
+        }
+      }
+      function openWalkthrough() {
+        closeStats(); closeLibrary(); closeTechniques();
+        if (!solving) return showExplain("Not solving yet", "Enter or load a puzzle and press Start solving — then I can walk the whole solve for you.", "info");
+        // Start from where you actually are (givens plus your correct entries) so the walkthrough
+        // continues your game rather than replaying what you've already worked out.
+        const start = progressGrid();
+        let filled = 0, given = 0;
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (start[r][c]) { filled++; if (givens[r][c]) given++; }
+        walkFrom = filled > given ? "where your board stands now" : "the starting clues";
+        if (filled === 81) return showExplain("Nothing left to walk", "The grid is already complete.", "ok");
+        walkSteps = buildWalkthrough(start); walkIdx = 0;
+        walkPanel.hidden = false; renderWalkthrough();
+        boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause();
+      }
+      document.getElementById("walkBtn").addEventListener("click", () => {
+        if (walkPanel.hidden) openWalkthrough(); else closeWalkthrough();
       });
       // Which stats tab is showing; remembered across opens. A win jumps to "this".
       let statsTab = "all";
