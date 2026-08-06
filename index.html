@@ -308,6 +308,15 @@
       .mpencil span { display: flex; align-items: center; justify-content: center; }
       .mpencil span.struck { color: var(--bad); text-decoration: line-through; }
 
+      /* ---- settings panel ---- */
+      .set-row { display: flex; align-items: center; justify-content: space-between; gap: 14px;
+        background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+      .set-row .set-text { flex: 1 1 auto; }
+      .set-row .set-name { font-weight: 600; }
+      .set-row .set-about { color: var(--muted); font-size: 0.85rem; line-height: 1.45; margin-top: 3px; }
+      .set-row .sw { flex: 0 0 auto; min-width: 62px; text-align: center; font-weight: 700; }
+      .set-row .sw.on { background: var(--sel); border-color: var(--accent); color: var(--accent); }
+
       /* ---- step-by-step solve walkthrough ---- */
       /* A read-only replay board: every empty cell shows its candidates in a 3×3 grid, the digits the
          solver placed are amber (givens stay black), and whatever a step removes is struck in red
@@ -397,9 +406,7 @@
             <button id="check">Check entries</button>
             <button id="pastePuzzle">Paste puzzle</button>
             <button id="saveGame">Save game</button>
-            <button id="hlToggle">Highlight matches: On</button>
-            <button id="errToggle">Error highlighting: On</button>
-            <button id="autoUpdToggle">Auto-update notes: Off</button>
+            <button id="settingsBtn">Settings</button>
             <button id="targetBtn">Target times</button>
             <button id="resetGame">Reset game</button>
             <button id="reveal">Reveal solution</button>
@@ -443,6 +450,7 @@
       <div id="gameLibrary" class="stats" hidden></div>
       <div id="techniques" class="stats" hidden></div>
       <div id="walkthrough" class="stats" hidden></div>
+      <div id="settings" class="stats" hidden></div>
 
       <div id="modal" class="overlay" hidden>
         <div class="modal">
@@ -639,6 +647,7 @@
       const explainEl = document.getElementById("explain");
       const statsEl = document.getElementById("stats");
       const walkPanel = document.getElementById("walkthrough");
+      const settingsPanel = document.getElementById("settings");
       const timerEl = document.getElementById("timer");
       const errorsEl = document.getElementById("errors");
       const inputs = [], cellEls = [], pencils = [], marks = [];
@@ -1881,7 +1890,7 @@
       const pauseModal = document.getElementById("pauseModal");
       // The board is "covered" whenever an in-app panel (Stats / Saved games / History) is showing
       // over it — the game isn't visible, so it counts as swiping away from the Sudoku page.
-      function boardCovered() { return !statsEl.hidden || !libraryPanel.hidden || !walkPanel.hidden; }
+      function boardCovered() { return !statsEl.hidden || !libraryPanel.hidden || !walkPanel.hidden || !settingsPanel.hidden; }
       // Auto-pause reconciler: the clock should run only while you're actually looking at the board.
       // It stops whenever the tab is hidden (backgrounded) or a panel covers the board, and resumes
       // when you come back — but never overrides a manual pause. Driven from visibilitychange and
@@ -2183,7 +2192,7 @@
           : "Targets cleared. Moves are flagged only against the rest of their own game again.", "ok");
         if (!statsEl.hidden) renderStats();
       }
-      document.getElementById("targetBtn").addEventListener("click", () => { closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); openTargets(); });
+      document.getElementById("targetBtn").addEventListener("click", () => { closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); openTargets(); });
       document.getElementById("targetSave").addEventListener("click", saveTargets);
       document.getElementById("targetClear").addEventListener("click", () => {
         targetModal.querySelectorAll(".target-in").forEach((i) => { i.value = ""; repaintPace(i); });
@@ -2262,22 +2271,21 @@
       gearMenu.addEventListener("click", () => closeMenu());
       document.addEventListener("click", (e) => { if (!gearMenu.hidden && !e.target.closest(".menu")) closeMenu(); });
 
+      // ---- settings ----
+      // The board/notes toggles live on their own Settings screen (⚙ → Settings) rather than as three
+      // lines in the dropdown, so each one can carry the sentence that says what it actually changes.
+
       // Highlight-matches setting: when on, all cells sharing the selected/entered digit are highlighted.
-      const hlToggle = document.getElementById("hlToggle");
-      function renderHlToggle() { hlToggle.textContent = `Highlight matches: ${hlMatches ? "On" : "Off"}`; }
-      renderHlToggle();
-      hlToggle.addEventListener("click", () => {
+      function toggleHlMatches() {
         hlMatches = !hlMatches;
         try { localStorage.setItem("sudoku-coach:hlmatches", hlMatches ? "on" : "off"); } catch {}
-        renderHlToggle();
         if (selected) select(selected.r, selected.c);
         else for (const row of cellEls) for (const el of row) el.classList.remove("same");
-      });
+        showExplain(hlMatches ? "Highlight matches on" : "Highlight matches off",
+          hlMatches ? "Picking a cell now tints every other cell holding the same digit." : "Only the cell you pick is highlighted.", "info");
+      }
 
       // Error-highlighting setting: when off, wrong entries aren't flagged red on the board.
-      const errToggle = document.getElementById("errToggle");
-      function renderErrToggle() { errToggle.textContent = `Error highlighting: ${errorFlags ? "On" : "Off"}`; }
-      renderErrToggle();
       // Repaint the board's red flags to match the current setting (clears them when off,
       // restores them for any wrong entries when on).
       function refreshErrorFlags() {
@@ -2289,26 +2297,64 @@
         }
         if (!errorFlags) clearConflicts();
       }
-      errToggle.addEventListener("click", () => {
+      function toggleErrorFlags() {
         errorFlags = !errorFlags;
         try { localStorage.setItem("sudoku-coach:errorflags", errorFlags ? "on" : "off"); } catch {}
-        renderErrToggle();
         refreshErrorFlags();
         showExplain(errorFlags ? "Error highlighting on" : "Error highlighting off",
           errorFlags ? "Wrong entries will flag red again, with the clashing row, column, or box." : "Mistakes won't be marked on the board. Use Check entries or Hint to verify when you want.", "info");
-      });
+      }
 
       // Auto-update notes: when on, placing a digit clears it from the pencil marks of every cell that
       // shares a row, column, or box — so candidate marks stay current without redoing them by hand.
-      const autoUpdToggle = document.getElementById("autoUpdToggle");
-      function renderAutoUpdToggle() { autoUpdToggle.textContent = `Auto-update notes: ${autoUpdateNotes ? "On" : "Off"}`; }
-      renderAutoUpdToggle();
-      autoUpdToggle.addEventListener("click", () => {
+      function toggleAutoUpdateNotes() {
         autoUpdateNotes = !autoUpdateNotes;
         try { localStorage.setItem("sudoku-coach:autonotes", autoUpdateNotes ? "on" : "off"); } catch {}
-        renderAutoUpdToggle();
         showExplain(autoUpdateNotes ? "Auto-update notes on" : "Auto-update notes off",
           autoUpdateNotes ? "Placing a digit now clears it from the notes of its row, column, and box automatically. Press Auto notes to fill them in first." : "Pencil marks stay exactly as you leave them.", "info");
+      }
+
+      // Each row: the label, how to read the current value, what to run on tap, and the sentence
+      // explaining what it changes. Adding a setting means adding a line here.
+      const SETTINGS = [
+        { name: "Highlight matches", get: () => hlMatches, toggle: toggleHlMatches,
+          about: "Tap a cell and every other cell holding the same digit is tinted too, so you can see where that digit already sits." },
+        { name: "Error highlighting", get: () => errorFlags, toggle: toggleErrorFlags,
+          about: "Flags a wrong entry in red as soon as you make it — with the clashing row, column, or box. Turn it off for an unassisted solve; Check entries and Hint still work." },
+        { name: "Auto-update notes", get: () => autoUpdateNotes, toggle: toggleAutoUpdateNotes,
+          about: "Placing a digit clears it from the pencil marks of every cell in its row, column, and box, so your notes stay current without redoing them by hand. Undo puts them back." },
+      ];
+      function renderSettings() {
+        if (settingsPanel.hidden) return;
+        settingsPanel.innerHTML = `<button id="setBack">← Back</button><h2>Settings</h2>
+          <p class="hintline">How the board behaves while you solve. Each one is remembered on this device.</p>
+          <h3>Board &amp; notes</h3>` +
+          SETTINGS.map((s, i) => {
+            const on = s.get();
+            return `<div class="set-row">
+              <div class="set-text"><div class="set-name">${esc(s.name)}</div><div class="set-about">${esc(s.about)}</div></div>
+              <button class="sw${on ? " on" : ""}" data-i="${i}" aria-pressed="${on}" title="${on ? "Turn off" : "Turn on"} ${esc(s.name)}">${on ? "On" : "Off"}</button>
+            </div>`;
+          }).join("");
+        document.getElementById("setBack").onclick = closeSettings;
+        settingsPanel.querySelectorAll(".sw").forEach((btn) => {
+          btn.onclick = () => { SETTINGS[Number(btn.dataset.i)].toggle(); renderSettings(); };
+        });
+      }
+      function closeSettings() {
+        if (!settingsPanel.hidden) {
+          settingsPanel.hidden = true;
+          boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause();
+        }
+      }
+      function openSettings() {
+        closeStats(); closeLibrary(); closeTechniques(); closeWalkthrough();
+        settingsPanel.hidden = false; renderSettings();
+        boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause();
+        settingsPanel.scrollIntoView({ block: "start" });
+      }
+      document.getElementById("settingsBtn").addEventListener("click", () => {
+        if (settingsPanel.hidden) openSettings(); else closeSettings();
       });
 
       document.getElementById("undo").addEventListener("click", undo);
@@ -2436,7 +2482,7 @@
       });
 
       document.getElementById("check").addEventListener("click", () => {
-        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle, then I can check your entries.", "info");
         let wrong = 0, filled = 0;
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
@@ -2449,7 +2495,7 @@
       });
 
       document.getElementById("reveal").addEventListener("click", () => {
-        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle first.", "info");
         finalizeSession(false);
         writeGrid(solution);
@@ -2493,7 +2539,7 @@
       function resetToEdit() {
         session = null; clearInterval(timerId); timerId = null; undoStack = []; redoStack = []; activeSavedGame = null;
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal"); syncModeButtons();
-        document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough();
+        document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings();
         pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].classList.remove("given", "wrong", "solved"); marks[r][c].clear(); }
         renderPencils();
@@ -3002,7 +3048,7 @@
         return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
       }
       function openLibrary(tab) {
-        closeStats(); closeTechniques(); closeWalkthrough();
+        closeStats(); closeTechniques(); closeWalkthrough(); closeSettings();
         if (tab) libTab = tab;
         editingId = null; histEditing = null;
         libraryPanel.hidden = false; renderGameLibrary();
@@ -3235,7 +3281,7 @@
 
       // Home: close any open panel (stats or the game library) and return to the game board.
       document.getElementById("homeBtn").addEventListener("click", () => {
-        closeMenu(); closeStats(); closeLibrary(); closeTechniques(); closeWalkthrough();
+        closeMenu(); closeStats(); closeLibrary(); closeTechniques(); closeWalkthrough(); closeSettings();
       });
 
       // ---- built-in catalog (shipped with the app, available to every user) ----
@@ -3663,7 +3709,7 @@
       document.getElementById("exModal").addEventListener("click", (e) => { if (e.target.id === "exModal") e.currentTarget.hidden = true; });
       function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause(); } }
       document.getElementById("statsBtn").addEventListener("click", () => {
-        if (statsEl.hidden) { closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
+        if (statsEl.hidden) { closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
         else closeStats();
       });
 
@@ -3713,7 +3759,7 @@
         if (p && !p.hidden) { p.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; }
       }
       function openTechniques() {
-        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings();
         renderTechniques();
         document.getElementById("techniques").hidden = false;
         boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none";
@@ -3817,7 +3863,7 @@
         }
       }
       function openWalkthrough() {
-        closeStats(); closeLibrary(); closeTechniques();
+        closeStats(); closeLibrary(); closeTechniques(); closeSettings();
         if (!solving) return showExplain("Not solving yet", "Enter or load a puzzle and press Start solving — then I can walk the whole solve for you.", "info");
         // Start from where you actually are (givens plus your correct entries) so the walkthrough
         // continues your game rather than replaying what you've already worked out.

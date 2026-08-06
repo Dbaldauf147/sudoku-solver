@@ -45,10 +45,15 @@ answer.
     Ctrl/⌘-Shift-Z) step back and forth through your entries. Once a digit is
     placed nine times its number-pad key is crossed out.
   - **Pencil marks** can be filled for every empty cell at once with **Auto
-    notes**, and an **Auto-update notes** toggle keeps them tidy — placing a
+    notes**, and an **Auto-update notes** setting keeps them tidy — placing a
     digit clears it from the notes of every cell in that row, column, and box
     automatically (and undo puts them back), so you can work advanced
     techniques without re-pencilling by hand.
+  - **Settings** (⚙ → Settings) collects the toggles that change how the board
+    behaves — **Highlight matches**, **Error highlighting**, and **Auto-update
+    notes** — on one screen, each with a line explaining what it actually does
+    instead of a bare on/off in the menu. Every setting is remembered on the
+    device.
   - **Paste puzzle** loads a game from its 81 digits (0 or `.` for blanks;
     spaces and line breaks are ignored) — handy for puzzles you find as a
     string rather than a screenshot. It's checked for conflicts and
@@ -111,8 +116,8 @@ answer.
     **grouped by date** (Today, Yesterday, then by day), newest first, with
     each entry's difficulty and source — where you can **load**, **edit**, or
     **delete** any puzzle.
-  - Stats, Step-by-step solve, Check entries, Reveal solution, Edit puzzle, and
-    Start solving live under a ⚙ menu in the top-right corner.
+  - Stats, Step-by-step solve, Settings, Check entries, Reveal solution, Edit
+    puzzle, and Start solving live under a ⚙ menu in the top-right corner.
 
   The coaching and saved library are entirely client-side, so they work
   **without an API key** — only the optional screenshot import calls Claude
