@@ -21,7 +21,11 @@ answer.
     names the technique — naked/hidden single, pointing pair, box/line
     reduction, naked pair, hidden pair, X-wing), and offers to place it for you.
   - **Step-by-step solve** replays the *whole* solve the way you'd do it on
-    paper: place, prune, place, prune, until the grid is full. Each step is one
+    paper: place, prune, place, prune, until the grid is full. It works
+    **easiest-first and one placement per step** — every naked single before any
+    hidden single, every single before any technique — and a step that *isn't* a
+    single opens by saying no naked or hidden single was available, so you can
+    see it didn't skip something simpler. Each step is one
     deduction on a read-only board that shows every cell's candidates — a
     technique step names itself (naked pair, X-wing, skyscraper…), explains the
     elimination, and **strikes the candidates it removes in red where they sit**
@@ -65,8 +69,13 @@ answer.
     faster/slower badge so you can see whether you're improving. It also has a
     "where you spend time" breakdown of typical (median) time **per technique**
     so you can see what trips you up, and a per-game timeline that bars out the
-    gap before each move and flags the slow ones. **Tap any technique** for a
-    pop-up with a visual example of how it works. Stats has two tabs: **All
+    gap before each move and flags the slow ones. That breakdown also carries a
+    **Hints** column — how many hints you asked for that each technique answered
+    — and the timeline heads with the same per-technique tally and marks every
+    move you placed straight from a hint with 💡, so "I needed help here" is
+    visible move by move rather than as one lump total. (Hints you read but
+    solved yourself still count in the tally; they just have no 💡 to mark.)
+    **Tap any technique** for a pop-up with a visual example of how it works. Stats has two tabs: **All
     games** for these lifetime totals and trends, and **This game** — which
     mirrors the same breakdown for the current (or most recent) game alone:
     its time, accuracy, errors, and hints, how it stacks up against your best

@@ -652,7 +652,7 @@
       const errorsEl = document.getElementById("errors");
       const inputs = [], cellEls = [], pencils = [], marks = [];
       let solving = false, solution = null, givens = blank(false), lastHint = null;
-      let selected = null, entryMode = "normal", pendingTech = null;
+      let selected = null, entryMode = "normal", pendingTech = null, pendingHint = false;
       // Read once, defensively: on iOS Safari with storage blocked, localStorage access can throw,
       // and an unguarded read here would halt the whole script (dead buttons). Default to on.
       let hlMatches = true;
@@ -847,13 +847,16 @@
       // Move records are never edited after they're logged, so sharing their references is safe.
       function sessionSnap() {
         if (!session) return null;
-        return { moves: [...(session.moves || [])], errors: session.errors || 0, missed: { ...(session.missed || {}) }, lastT: session.lastT || 0 };
+        return { moves: [...(session.moves || [])], errors: session.errors || 0, missed: { ...(session.missed || {}) },
+          hints: session.hints || 0, hintsBy: { ...(session.hintsBy || {}) }, lastT: session.lastT || 0 };
       }
       function restoreSession(snap) {
         if (!session || !snap) return;
         session.moves = [...snap.moves];
         session.errors = snap.errors;
         session.missed = { ...snap.missed };
+        session.hints = snap.hints;
+        session.hintsBy = { ...snap.hintsBy };
         session.lastT = snap.lastT;
         errorsEl.textContent = session.errors;
       }
@@ -1578,13 +1581,6 @@
         }
         return out;
       }
-      // Two placements in one batch may never disagree in a sound puzzle, but a mis-entered grid could
-      // produce a pair that clash — drop the loser rather than write an impossible board.
-      function keepCompatible(found) {
-        const out = [];
-        for (const s of found) if (!out.some((o) => o.n === s.n && (o.r === s.r || o.c === s.c || (boxIndex(o.r, o.c) === boxIndex(s.r, s.c))))) out.push(s);
-        return out;
-      }
       function listCells(found) { return found.map((s) => `${loc(s.r, s.c)} = ${s.n}`).join(", "); }
       function buildWalkthrough(startGrid) {
         const g = clone(startGrid), M = candMap(g), steps = [], placedCells = new Set();
@@ -1612,25 +1608,29 @@
           }
         };
 
-        push({ title: "Fill candidates", detail: "Every empty cell starts with each digit its row, column, and box still allow. From here on, a step either places digits or prunes candidates." });
-        for (let guard = 0; guard < 400 && !isFull(); guard++) {
-          const naked = keepCompatible(batchNakedSingles(M, g));
-          if (naked.length) {
-            placeBatch(naked, naked.length === 1 ? "Naked single" : "Naked singles", "Naked single",
-              `${naked.length === 1 ? "this cell has" : "each of these cells has"} exactly one candidate left, so that digit goes in.`);
+        push({ title: "Fill candidates", detail: "Every empty cell starts with each digit its row, column, and box still allow. From here on, a step either places one digit or prunes candidates." });
+        // Easiest first, one placement per step: every naked single is taken before any hidden single,
+        // every single before any elimination technique, and a technique only when no single is left. A
+        // step that isn't a single says so, so it's clear the walkthrough didn't skip something simpler.
+        const NO_SINGLE = "No naked or hidden single is available here, so the next move needs a technique.";
+        for (let guard = 0; guard < 500 && !isFull(); guard++) {
+          const naked = batchNakedSingles(M, g)[0];
+          if (naked) {
+            placeBatch([naked], "Naked single", "Naked single",
+              `this cell has exactly one candidate left, so that digit goes in. It's the simplest move on the board, so it goes first.`);
             continue;
           }
-          const hidden = keepCompatible(batchHiddenSingles(M, g));
-          if (hidden.length) {
-            placeBatch(hidden, hidden.length === 1 ? "Hidden single" : "Hidden singles", "Hidden single",
-              `${hidden.length === 1 ? `${hidden[0].n} fits nowhere else in ${hidden[0].unit}` : "each digit fits only one cell of its row, column, or box"}, so it must go there even though the cell still shows other candidates.`);
+          const hidden = batchHiddenSingles(M, g)[0];
+          if (hidden) {
+            placeBatch([hidden], "Hidden single", "Hidden single",
+              `${hidden.n} fits nowhere else in ${hidden.unit}, so it must go here even though the cell still shows other candidates. No naked single was left, and this is the next-simplest move.`);
             continue;
           }
           let e = null;
           for (const tech of ELIM_TECHS) { e = tech(M, g); if (e) break; }
           if (e) {
             push({ title: e.tech, tech: e.tech, cut: e.elims, focus: e.highlight,
-              detail: `${e.reason} ${e.elims.length} candidate${e.elims.length === 1 ? " is" : "s are"} struck.` });
+              detail: `${NO_SINGLE} ${e.reason} ${e.elims.length} candidate${e.elims.length === 1 ? " is" : "s are"} struck — that's what reopens the easy moves.` });
             applyCut(e.elims);
             continue;
           }
@@ -1642,7 +1642,7 @@
             if (g[r][c] === 0 && (!best || M[r][c].size < M[best.r][best.c].size)) best = { r, c };
           if (!best) break;
           placeBatch([{ r: best.r, c: best.c, n: sol[best.r][best.c] }], "Forced placement", "Forced",
-            "no technique I can name breaks the grid open here, but only this digit lets the puzzle be completed. Placing it reopens the simpler steps.");
+            "no single is available and no technique I can name breaks the grid open here, but only this digit lets the puzzle be completed. Placing it reopens the simpler steps.");
         }
         push({ title: isFull() ? "Solved" : "Stuck", done: true,
           detail: isFull() ? "Every cell is filled and every candidate accounted for — that's the whole solve." : "I ran out of steps before the grid filled. Check the entered clues: a mis-typed puzzle can be unsolvable." });
@@ -1726,7 +1726,7 @@
       function handleMove(r, c) {
         inputs[r][c].classList.remove("wrong");
         const raw = inputs[r][c].value;
-        if (!raw) { pendingTech = null; return; }
+        if (!raw) { pendingTech = null; pendingHint = false; return; }
         const n = Number(raw), grid = progressGrid(); grid[r][c] = 0;
         const correct = n === solution[r][c];
         const M = candMap(grid);
@@ -1761,7 +1761,7 @@
         }
         recordMove(r, c, n, correct, tech);
         saveActiveGame();   // persist the updated error count and move log now (renderPencils saved before this ran)
-        pendingTech = null;
+        pendingTech = null; pendingHint = false;
         if (correct) checkComplete();
       }
       function checkComplete() {
@@ -1914,7 +1914,19 @@
       function recordMove(r, c, n, correct, tech) {
         if (!session) return;
         const t = activeElapsed(), dt = t - session.lastT; session.lastT = t;
-        session.moves.push({ t, dt, r, c, n, correct, tech });
+        // `hinted` marks the moves you placed straight from a hint, so the timeline can show which
+        // ones you didn't find yourself. Only set when true, to keep old and new records comparable.
+        const m = { t, dt, r, c, n, correct, tech };
+        if (pendingHint) m.hinted = true;
+        session.moves.push(m);
+      }
+      // Count a hint against the technique it revealed, separately from `missed` (which also absorbs
+      // the easier step you skipped on a mistake) — so stats can show hints you actually asked for.
+      function noteHint(tech) {
+        if (!session || !tech) return;
+        session.hints = (session.hints || 0) + 1;
+        session.hintsBy ||= {};
+        session.hintsBy[tech] = (session.hintsBy[tech] || 0) + 1;
       }
       // Log a named technique the player couldn't spot on their own — a hint they took, or the simpler
       // step that was available when they slipped. Feeds the "techniques to practice" stats.
@@ -1978,7 +1990,7 @@
         document.body.classList.add("solving");
         clearHighlights(); renderPencils();
         undoStack = []; redoStack = []; errorsEl.textContent = "0";
-        session = { difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, moves: [], missed: {} };
+        session = { difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, hintsBy: {}, moves: [], missed: {} };
         startTimer();
         const first = (() => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) return [r, c]; return [0, 0]; })();
         select(first[0], first[1]);
@@ -2457,7 +2469,7 @@
         const place = chain.place;
         renderHintHighlights(place);
         lastHint = place; select(place.r, place.c);
-        const placeAction = { label: `Place ${place.n} in ${loc(place.r, place.c)}`, onClick: () => { pendingTech = place.tech; setValue(place.r, place.c, place.n); } };
+        const placeAction = { label: `Place ${place.n} in ${loc(place.r, place.c)}`, onClick: () => { pendingTech = place.tech; pendingHint = true; setValue(place.r, place.c, place.n); } };
         // Direct single (no eliminations): concise view, with an optional detailed breakdown.
         if (!chain.steps.length) {
           // "Forced" isn't a named technique — show no tech label and skip the step-by-step breakdown.
@@ -2477,7 +2489,7 @@
         if (retime.active) return retimeHint();       // during a re-time, hint at the move being re-solved
         const chain = hintChain(progressGrid());
         if (!chain.place) return showExplain("Nothing left to place", "The grid is complete.", "ok");
-        if (session) { session.hints = (session.hints || 0) + 1; noteMiss(chain.steps.length ? chain.steps[0].tech : chain.place.tech); saveActiveGame(); }
+        if (session) { const t = chain.steps.length ? chain.steps[0].tech : chain.place.tech; noteHint(t); noteMiss(t); saveActiveGame(); }
         showHint(chain, false);
       });
 
@@ -2528,7 +2540,7 @@
         // Fresh session: timer restarts from zero, errors and move log wiped.
         clearInterval(timerId); timerId = null;
         undoStack = []; redoStack = []; lastHint = null;
-        session = { difficulty: session.difficulty, source: session.source, startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, moves: [], missed: {} };
+        session = { difficulty: session.difficulty, source: session.source, startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, hintsBy: {}, moves: [], missed: {} };
         errorsEl.textContent = "0"; pauseModal.hidden = true;
         clearHighlights(); setMode("normal"); startTimer(); renderPencils();
         syncAutoPause();   // if a panel happens to be covering the board, keep the fresh timer paused
@@ -2664,7 +2676,7 @@
           solution,
           elapsed: activeElapsed(),
           manualPaused: !!(session.pauseStart && session.manualPaused),
-          session: { difficulty: session.difficulty, source: session.source, errors: session.errors || 0, hints: session.hints || 0, lastT: session.lastT || 0, moves: session.moves || [], missed: session.missed || {} },
+          session: { difficulty: session.difficulty, source: session.source, errors: session.errors || 0, hints: session.hints || 0, hintsBy: session.hintsBy || {}, lastT: session.lastT || 0, moves: session.moves || [], missed: session.missed || {} },
           savedAt: Date.now(),
         };
       }
@@ -2687,7 +2699,7 @@
         }
         // Time away from the app doesn't count: rebase so active time resumes from where it stood.
         const elapsed = Math.max(0, st.elapsed || 0), now = Date.now();
-        session = { difficulty: st.session.difficulty, source: st.session.source, startedAt: now - elapsed, pausedMs: 0, pauseStart: null, manualPaused: false, errors: st.session.errors || 0, hints: st.session.hints || 0, lastT: st.session.lastT || 0, moves: st.session.moves || [], missed: st.session.missed || {} };
+        session = { difficulty: st.session.difficulty, source: st.session.source, startedAt: now - elapsed, pausedMs: 0, pauseStart: null, manualPaused: false, errors: st.session.errors || 0, hints: st.session.hints || 0, hintsBy: st.session.hintsBy || {}, lastT: st.session.lastT || 0, moves: st.session.moves || [], missed: st.session.missed || {} };
         solving = true; setMode("normal"); syncModeButtons(); document.body.classList.add("solving");
         difficultyEl.value = session.difficulty; sourceEl.value = session.source;
         errorsEl.textContent = session.errors;
@@ -3889,6 +3901,21 @@
         if (t) t.hidden = tab !== "this";
         if (a) a.hidden = tab !== "all";
       }
+      // The "where you spend time" table, shared by both stats tabs. `hintsBy` counts the hints you
+      // asked for that each technique answered — a technique can carry hints without carrying moves
+      // (a hint you read but placed yourself), so those rows are listed too rather than dropped.
+      function techTableHTML(techRows, mistakes, hintsBy) {
+        const rows = techRows.slice();
+        for (const t of Object.keys(hintsBy || {})) if (t !== "Mistake" && !rows.some((r) => r.t === t)) rows.push({ t, count: 0, med: 0, medOnly: false });
+        let html = `<table class="grid"><tr><th>Technique</th><th>Moves</th><th>Hints</th><th>Typical time</th></tr>`;
+        for (const row of rows) {
+          const h = (hintsBy || {})[row.t] || 0;
+          html += `<tr class="trow" data-tech="${esc(row.t)}"><td><span style="color:${TECH_COLORS[row.t] || "#94a3b8"}">●</span> ${esc(row.t)}</td>` +
+            `<td>${row.count}</td><td>${h ? `💡 ${h}` : "—"}</td><td>${row.count ? fmtDt(row.med) : "—"}</td></tr>`;
+        }
+        if (mistakes) html += `<tr class="trow" data-tech="Mistake"><td><span style="color:${TECH_COLORS.Mistake}">●</span> Mistake</td><td>${mistakes}</td><td>—</td><td>—</td></tr>`;
+        return html + `</table>`;
+      }
       // Techniques the player needed help with (hints taken + easier steps missed on a slip), most first.
       // Reused by both stats tabs; taps open the same technique refresher pop-up.
       function missedSection(missed, title) {
@@ -3905,7 +3932,7 @@
       // Mirrors every section of the "All games" tab, scoped to this single game.
       function thisGamePane(games) {
         const g = session
-          ? { difficulty: session.difficulty, source: session.source, totalMs: activeElapsed(), errors: session.errors || 0, hints: session.hints || 0, moves: session.moves || [], missed: session.missed || {}, live: true,
+          ? { difficulty: session.difficulty, source: session.source, totalMs: activeElapsed(), errors: session.errors || 0, hints: session.hints || 0, hintsBy: session.hintsBy || {}, moves: session.moves || [], missed: session.missed || {}, live: true,
               cells: givens.flat().filter((x) => !x).length,   // cells still to fill when this game began
               grid: clueGridNow(), solution: solution ? clone(solution) : null }   // lets a move in progress be explained
           : games[0];
@@ -3967,12 +3994,11 @@
           .map(([t, dts]) => ({ t, count: dts.length, med: median(dts) }))
           .sort((a, b) => b.med - a.med);
         const mistakes = (byTech["Mistake"] || []).length;
+        const hintsBy = g.hintsBy || {};
         let techTable = "";
         if (techRows.length || mistakes) {
-          techTable = `<h3>Where you spent time</h3><table class="grid"><tr><th>Technique</th><th>Moves</th><th>Typical time</th></tr>`;
-          for (const row of techRows) techTable += `<tr class="trow" data-tech="${esc(row.t)}"><td><span style="color:${TECH_COLORS[row.t] || "#94a3b8"}">●</span> ${esc(row.t)}</td><td>${row.count}</td><td>${fmtDt(row.med)}</td></tr>`;
-          if (mistakes) techTable += `<tr class="trow" data-tech="Mistake"><td><span style="color:${TECH_COLORS.Mistake}">●</span> Mistake</td><td>${mistakes}</td><td>—</td></tr>`;
-          techTable += `</table><p class="hintline">Tap a technique to see a visual example of how it works.</p>`;
+          techTable = `<h3>Where you spent time</h3>${techTableHTML(techRows, mistakes, hintsBy)}
+            <p class="hintline">Hints = the times you asked for a hint that this technique answered. Tap a technique to see a visual example of how it works.</p>`;
         }
 
         // ----- takeaway (slowest technique this game) -----
@@ -4063,10 +4089,12 @@
           .map(([t, dts]) => ({ t, count: dts.length, med: median(dts) }))
           .sort((a, b) => b.med - a.med);
         const mistakes = (byTech["Mistake"] || []).length;
-        let techTable = `<table class="grid"><tr><th>Technique</th><th>Moves</th><th>Typical time</th></tr>`;
-        for (const row of techRows) techTable += `<tr class="trow" data-tech="${esc(row.t)}"><td><span style="color:${TECH_COLORS[row.t] || "#94a3b8"}">●</span> ${esc(row.t)}</td><td>${row.count}</td><td>${fmtDt(row.med)}</td></tr>`;
-        if (mistakes) techTable += `<tr class="trow" data-tech="Mistake"><td><span style="color:${TECH_COLORS.Mistake}">●</span> Mistake</td><td>${mistakes}</td><td>—</td></tr>`;
-        techTable += `</table><p class="hintline">Tap a technique to see a visual example and the games where it was logged.</p>`;
+        // Hints per technique, summed across every game. Games recorded before hints were tracked
+        // per technique simply contribute nothing here rather than guessing a split.
+        const hintsByAll = {};
+        for (const g of games) for (const [t, c] of Object.entries(g.hintsBy || {})) hintsByAll[t] = (hintsByAll[t] || 0) + c;
+        let techTable = techTableHTML(techRows, mistakes, hintsByAll)
+          + `<p class="hintline">Hints = the times you asked for a hint that this technique answered, across every game. Tap a technique to see a visual example and the games where it was logged.</p>`;
         const focus = techRows.filter((r) => r.count >= 3 && r.t !== "Other" && r.t !== "Advanced" && r.t !== "Forced")[0];
 
         // techniques to practice — hints taken + easier steps missed, summed across every game
@@ -4169,6 +4197,14 @@
         const statusWord = g.live ? "in progress" : (g.solved ? "solved" : "revealed");
         const canSel = selectable && canRetime(g);
         let html = includeSummary ? `<div class="card">${moves.length} moves · ${fmtTime(g.totalMs)} total · ${errorsIn(g)} error${errorsIn(g) === 1 ? "" : "s"} · ${statusWord}</div>` : "";
+        // Which techniques you asked for help with, and how many of those hints you then placed. A hint
+        // you read but solved yourself has no move to mark, so the totals here can outrun the 💡 rows.
+        const hintEntries = Object.entries(g.hintsBy || {}).filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1]);
+        if (hintEntries.length) {
+          const total = hintEntries.reduce((s, [, c]) => s + c, 0), placed = moves.filter((m) => m.hinted).length;
+          html += `<div class="card">💡 <b>${total} hint${total === 1 ? "" : "s"}</b> — ${hintEntries.map(([t, c]) => `<span style="color:${TECH_COLORS[t] || "#94a3b8"}">●</span> ${esc(t)} ×${c}`).join(" · ")}
+            <br /><span class="k">${placed ? `${placed} of them ${placed === 1 ? "was" : "were"} placed straight from the hint — marked 💡 below.` : "None of them were placed straight from the hint — you found the digits yourself."}</span></div>`;
+        }
         if (pace) {
           html += `<div class="card">🎯 <b>${esc(g.difficulty)}</b> target ${fmtTime(targetFor(g.difficulty))} over ${puzzleCells(g)} cells — <b>${fmtDt(pace)} a move</b>.
             ${overIdx.length ? `<span class="over">${overIdx.length} move${overIdx.length === 1 ? "" : "s"} over that pace</span>, flagged ⏱ below.` : `Every move kept the pace. 🎯`}</div>`;
@@ -4204,13 +4240,14 @@
             <span class="meta">${canSel ? `<input type="checkbox" class="rt-check" data-i="${i}"${preSel.has(i) ? " checked" : ""} aria-label="Select move ${i + 1}">` : ""}${i + 1}</span>
             <span class="cellref">${m.correct ? "" : "✗"}${loc(m.r, m.c)}=${m.n}</span>
             <span><span class="bar" style="width:${w}%;background:${color}"></span></span>
-            <span class="meta" title="${isOver ? `over your ${fmtDt(pace)} target pace` : ""}">${fmtDt(m.dt)} · ${esc(m.tech)}${isOver ? " ⏱" : ""}${isSlow ? " ⏳" : ""}</span>
+            <span class="meta" title="${m.hinted ? `placed from a hint (${esc(m.tech)})` : isOver ? `over your ${fmtDt(pace)} target pace` : ""}">${fmtDt(m.dt)} · ${esc(m.tech)}${m.hinted ? " 💡" : ""}${isOver ? " ⏱" : ""}${isSlow ? " ⏳" : ""}</span>
           </div>`;
         });
         html += `</div>`;
         const hold = `Press and hold a move to see the board as it stood and why it counts as its technique.`;
-        if (pace) html += `<p class="rt-note">⏱ over your target pace · ⏳ slowest of this game. ${hold}</p>`;
-        else if (moves.length) html += `<p class="rt-note">⏳ slowest of this game. ${hold} Set a <b>Target time</b> in the ⚙ menu to flag moves against a pace you choose too.</p>`;
+        const hinted = moves.some((m) => m.hinted) ? "💡 placed from a hint · " : "";
+        if (pace) html += `<p class="rt-note">${hinted}⏱ over your target pace · ⏳ slowest of this game. ${hold}</p>`;
+        else if (moves.length) html += `<p class="rt-note">${hinted}⏳ slowest of this game. ${hold} Set a <b>Target time</b> in the ⚙ menu to flag moves against a pace you choose too.</p>`;
         return html;
       }
       function renderDeepDive(g) {
