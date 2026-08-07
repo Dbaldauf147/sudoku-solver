@@ -232,6 +232,26 @@ echo "ANTHROPIC_API_KEY=sk-ant-…" > .env.local
 
 Then open the URL printed by `vercel dev` and import a Sudoku screenshot.
 
+## When devices don't agree
+
+⚙ → **Settings → Sync** (or tap the sync line at the foot of the ⚙ menu) reports
+what sync is actually doing on that device, because "it isn't syncing" is nearly
+always one of three things and none of them used to be visible:
+
+- **No store connected** — the API replies `501`, so every device keeps its own
+  data and nothing can cross between them. The app can't fix this itself: connect
+  a Redis store in Vercel (**Storage → Create / Connect Database → Upstash
+  Redis**) and redeploy.
+- **Different profiles** — data is namespaced per profile, so the panel shows the
+  profile **code** this device is reading. Two devices must show the *same* code;
+  the same name with a different passphrase is a different namespace, and Guest
+  is its own.
+- **Reaching the store but not landing** — any status other than 200 is reported
+  as-is (a 5xx usually means the store's credentials are set but wrong).
+
+It also shows how many games the cloud holds against how many this device holds,
+so a one-way sync is obvious, with **Sync now** and **Re-check** buttons.
+
 ## Staying on the current version
 
 There's no service worker, deliberately: `index.html` is served
