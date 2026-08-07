@@ -308,6 +308,16 @@
       .mpencil span { display: flex; align-items: center; justify-content: center; }
       .mpencil span.struck { color: var(--bad); text-decoration: line-through; }
 
+      /* ---- "a new version is live" bar ---- */
+      .update-bar { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 60; display: flex; align-items: center; gap: 10px;
+        background: var(--text); color: #fff; border-radius: 10px; padding: 10px 12px; font-size: 0.88rem; line-height: 1.35;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28); animation: upslide 0.25s ease-out both; }
+      .update-bar[hidden] { display: none; }
+      .update-bar span { flex: 1 1 auto; }
+      .update-bar button { background: #fff; color: var(--text); border: none; border-radius: 8px; padding: 7px 12px; font: inherit; font-weight: 700; }
+      .update-bar button.ghost { background: transparent; color: #cbd5e1; font-weight: 400; padding: 7px 4px; }
+      @keyframes upslide { from { transform: translateY(120%); opacity: 0; } to { transform: none; opacity: 1; } }
+
       /* ---- post-game audit: your solve beside the walkthrough's ---- */
       .audit-phase { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 12px 10px; margin-bottom: 12px; }
       .audit-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
@@ -468,6 +478,11 @@
       <div id="walkthrough" class="stats" hidden></div>
       <div id="settings" class="stats" hidden></div>
       <div id="audit" class="stats" hidden></div>
+      <div id="updateBar" class="update-bar" hidden>
+        <span>A newer version of the app is live.</span>
+        <button id="updateNow">Reload</button>
+        <button id="updateLater" class="ghost">Later</button>
+      </div>
 
       <div id="modal" class="overlay" hidden>
         <div class="modal">
@@ -3064,10 +3079,86 @@
       }
       // Catch up whenever this device might have missed something. SYNC_MIN_GAP_MS keeps these
       // overlapping triggers from turning into a burst of requests.
-      document.addEventListener("visibilitychange", () => { if (!document.hidden) syncStores(); });
-      window.addEventListener("pageshow", (e) => { if (e.persisted) syncStores(); }); // restored from bfcache
-      window.addEventListener("focus", () => syncStores());
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) { markAwake(); syncStores(); } });
+      window.addEventListener("pageshow", (e) => { if (e.persisted) { markAwake(); syncStores(); } }); // restored from bfcache
+      window.addEventListener("focus", () => { markAwake(); syncStores(); });
+      window.addEventListener("online", markAwake);
       setInterval(() => { if (!document.hidden) syncStores(); }, SYNC_EVERY_MS);
+
+      // ---- keeping a second device in step ----
+      // The full sync is a four-key read, so it stays on its five-minute beat. What you actually want
+      // live when you pick up your phone is the game in progress, which is one key — so that one is
+      // polled on its own, fast for the first couple of minutes after the app wakes and then easing
+      // off. An idle tab left open all day therefore costs a request a minute, not four every ten
+      // seconds. It never pulls while you're solving: the existing rule that a background fetch must
+      // not swap the puzzle out from under you still holds, so two devices mid-game don't converge.
+      const AWAKE_FAST_MS = 10 * 1000, AWAKE_SLOW_MS = 60 * 1000, AWAKE_WINDOW_MS = 2 * 60 * 1000;
+      let lastWakeAt = Date.now(), activePollTimer = null;
+      function markAwake() { lastWakeAt = Date.now(); scheduleActivePoll(0); }
+      function scheduleActivePoll(delay) {
+        clearTimeout(activePollTimer);
+        const wait = delay != null ? delay : (Date.now() - lastWakeAt < AWAKE_WINDOW_MS ? AWAKE_FAST_MS : AWAKE_SLOW_MS);
+        activePollTimer = setTimeout(pollActiveGame, wait);
+      }
+      async function pollActiveGame() {
+        try {
+          if (document.hidden || solving || syncing || cloudUnconfigured || !syncChecked) return;
+          const cloud = await cloudLoad("active");
+          if (!cloud) return;
+          const stamp = () => { try { return localStorage.getItem(ACTIVE_KEY) || ""; } catch { return ""; } };
+          const before = stamp();
+          reconcileActiveGame(cloud[0] || null);
+          // Something moved on another device — the rest of its data has probably moved too, so pull
+          // the full set once rather than waiting out the five-minute beat.
+          if (stamp() !== before) syncStores();
+        } catch {} finally { scheduleActivePoll(); }
+      }
+      scheduleActivePoll();
+
+      // ---- staying on the deployed version ----
+      // With no service worker, a reload always fetches the current build (index.html is served
+      // must-revalidate) — but a tab or installed app that never reloads keeps running the build it
+      // opened with, which is why a phone can sit on last week's version while the website is current.
+      // So: fingerprint index.html from whichever validator the host sends, re-check it on the same
+      // wake events the sync uses, and act when it changes. Backgrounded and idle, it reloads itself;
+      // mid-game it asks first, since your entries are saved but your place on screen isn't.
+      let buildTag = null, buildStale = false, buildChecks = 0;
+      const updateBar = document.getElementById("updateBar");
+      async function readBuildTag() {
+        try {
+          const r = await fetch("index.html", { method: "HEAD", cache: "no-store" });
+          if (!r.ok) return null;
+          return r.headers.get("etag") || r.headers.get("last-modified") || r.headers.get("content-length");
+        } catch { return null; }
+      }
+      async function checkForUpdate() {
+        if (buildStale || !navigator.onLine) return;
+        const tag = await readBuildTag();
+        // No validator at all (a host that sends none) — stop checking rather than poll for nothing.
+        if (!tag) { if (++buildChecks >= 2 && !buildTag) clearInterval(buildTimer); return; }
+        if (!buildTag) { buildTag = tag; return; }
+        if (tag === buildTag) return;
+        buildStale = true;
+        // Backgrounded, swap builds on the way back in; otherwise only when nothing would be lost.
+        if (document.hidden) { window.addEventListener("visibilitychange", reloadIfStale); return; }
+        if (safeToReload()) return location.reload();
+        updateBar.hidden = false;
+      }
+      // A reload is free only when there's nothing on screen to lose: no game in progress, no panel or
+      // dialog open, and no clues part-typed into an unstarted board.
+      function safeToReload() {
+        if (solving || boardCovered()) return false;
+        if (document.querySelector(".overlay:not([hidden])")) return false;
+        for (const row of inputs) for (const i of row) if (i.value) return false;
+        return true;
+      }
+      function reloadIfStale() { if (buildStale && !document.hidden) { if (safeToReload()) location.reload(); else updateBar.hidden = false; } }
+      document.getElementById("updateNow").addEventListener("click", () => { if (solving && session) saveActiveGame(); location.reload(); });
+      document.getElementById("updateLater").addEventListener("click", () => { updateBar.hidden = true; });
+      const buildTimer = setInterval(() => { if (!document.hidden) checkForUpdate(); }, AWAKE_SLOW_MS);
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) checkForUpdate(); });
+      window.addEventListener("focus", checkForUpdate);
+      checkForUpdate();
 
       // Union local + cloud so neither an empty cloud nor a stale device can wipe the other's data.
       // The merged set is written back to both sides, which also re-seeds an empty cloud from a device that still has history.

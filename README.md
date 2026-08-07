@@ -157,7 +157,18 @@ answer.
   has been left open a while, so a tab (or an installed app you never actually
   reload) doesn't keep showing the history it had when it opened. A launch that
   couldn't reach the store retries with backoff instead of staying device-only for
-  the rest of the session. Merges are a union, so no device can wipe another's
+  the rest of the session.
+
+  The **game in progress keeps its own fast lane**, because that's the one thing
+  you want live when you switch devices: it's a single key, so it's polled on its
+  own — every 10 seconds for the first couple of minutes after the app wakes, then
+  easing to a minute — while the full four-key sync stays on its five-minute beat.
+  Pick your phone up and the puzzle you left on the website is there within
+  seconds, without an idle tab costing a request every few seconds all day. It
+  still never pulls **while you're solving**: a background fetch must not swap the
+  puzzle out from under you, so two devices mid-game deliberately don't converge.
+
+  Merges are a union, so no device can wipe another's
   data — with two refinements that keep them from disagreeing forever: **deletes
   are recorded as tombstones** and replayed on your other devices instead of being
   undone by them, and on a collision the **most recently edited copy wins**, so
@@ -220,6 +231,26 @@ echo "ANTHROPIC_API_KEY=sk-ant-…" > .env.local
 ```
 
 Then open the URL printed by `vercel dev` and import a Sudoku screenshot.
+
+## Staying on the current version
+
+There's no service worker, deliberately: `index.html` is served
+`must-revalidate`, so a reload always lands on the newest deploy and there's no
+cache layer to go stale. The gap that leaves is a tab — or an installed app on a
+phone — that simply never reloads, and so keeps running the build it opened with
+while the website has moved on.
+
+So the page fingerprints `index.html` (its `ETag`, else `Last-Modified`, else
+`Content-Length`) and re-checks it every minute while visible, plus whenever the
+app is brought back to the foreground, refocused, or reconnects. When the
+fingerprint changes it acts by what it would cost you:
+
+- **backgrounded** — it reloads onto the new build as you come back to it;
+- **idle** (no game in progress, nothing open, no clues part-typed) — it reloads
+  straight away;
+- **mid-solve or with something open** — it shows a "newer version is live" bar
+  with **Reload** and **Later**, since your entries are saved but your place on
+  screen isn't.
 
 ## Deploy
 
