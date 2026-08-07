@@ -60,6 +60,10 @@
       p.sub { color: var(--muted); margin: 0 0 16px; line-height: 1.5; }
       .row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; align-items: center; }
       .row.solving { display: none; }
+      /* Five controls have to share a phone's width without wrapping onto a second line, so they
+         share it evenly and trade padding for room rather than dropping below the board. */
+      .row.solving button { flex: 1 1 auto; padding-left: 6px; padding-right: 6px; white-space: nowrap;
+        font-size: clamp(0.78rem, 3.4vw, 0.95rem); }
       body.solving .setup-extra { display: none; }
       body.solving .row.solving { display: flex; }
       button, label.file, select, input#modalSource {
@@ -457,6 +461,7 @@
         <button id="redo">Redo</button>
         <button id="autonotes">Auto notes</button>
         <button id="pause">Pause</button>
+        <button id="restart" title="Back to the starting clues with a fresh clock">Restart</button>
       </div>
 
       <div id="board" class="board"></div>
@@ -2688,10 +2693,14 @@
       // Reset the *current* game back to its starting clues (keeps the puzzle; wipes your progress).
       // Gated behind a confirmation so it can't be triggered by accident.
       const resetModal = document.getElementById("resetModal");
-      document.getElementById("resetGame").addEventListener("click", () => {
+      // Reached from the ⚙ menu and from Restart in the toolbar — same confirmation either way, since
+      // it throws away the solve in progress.
+      function promptResetGame() {
         if (!solving || !session) return showExplain("No game to reset", "Start a puzzle first — reset brings an in-progress game back to its clues.", "info");
-        resetModal.hidden = false;
-      });
+        closeMenu(); resetModal.hidden = false;
+      }
+      document.getElementById("resetGame").addEventListener("click", promptResetGame);
+      document.getElementById("restart").addEventListener("click", promptResetGame);
       document.getElementById("resetCancel").addEventListener("click", () => { resetModal.hidden = true; });
       resetModal.addEventListener("click", (e) => { if (e.target === resetModal) resetModal.hidden = true; });
       document.getElementById("resetConfirm").addEventListener("click", () => { resetModal.hidden = true; resetGame(); });

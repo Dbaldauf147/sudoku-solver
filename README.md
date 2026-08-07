@@ -59,7 +59,9 @@ answer.
     away** from the tab (and there's a manual **Pause**), so idle time doesn't
     skew your stats. **Undo** (Ctrl/⌘-Z) and **Redo** (Ctrl/⌘-Y or
     Ctrl/⌘-Shift-Z) step back and forth through your entries. Once a digit is
-    placed nine times its number-pad key is crossed out.
+    placed nine times its number-pad key is crossed out. **Restart** sits beside
+    Pause above the board — one confirmation and the puzzle is back to its
+    starting clues with a fresh clock, the same reset that lives in the ⚙ menu.
   - **Pencil marks** can be filled for every empty cell at once with **Auto
     notes**, and an **Auto-update notes** setting keeps them tidy — placing a
     digit clears it from the notes of every cell in that row, column, and box
