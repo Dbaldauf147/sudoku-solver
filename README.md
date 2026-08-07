@@ -164,9 +164,23 @@ answer.
   own — every 10 seconds for the first couple of minutes after the app wakes, then
   easing to a minute — while the full four-key sync stays on its five-minute beat.
   Pick your phone up and the puzzle you left on the website is there within
-  seconds, without an idle tab costing a request every few seconds all day. It
-  still never pulls **while you're solving**: a background fetch must not swap the
-  puzzle out from under you, so two devices mid-game deliberately don't converge.
+  seconds, without an idle tab costing a request every few seconds all day.
+
+  That includes **while you're solving**, which is the case that matters when two
+  devices are both sitting on a board — but a background fetch replacing the grid
+  mid-move would be worse than being out of step, so what lands depends on what's
+  arriving:
+
+  - **the same puzzle, further along** (your own progress from the other device)
+    is adopted quietly — and only once your hands have been off the board for a
+    few seconds, so it can't land between two keystrokes;
+  - **a different puzzle** asks first, with a **Switch** / **Stay** bar. Declining
+    silences *that puzzle*, not that moment, so the other device carrying on
+    playing doesn't re-ask every few seconds;
+  - **a game cleared or finished elsewhere** never touches a board you're playing.
+
+  Whichever device is actually being played holds the newest stamp, so it stays
+  the source and the idle one follows.
 
   Merges are a union, so no device can wipe another's
   data — with two refinements that keep them from disagreeing forever: **deletes
@@ -231,6 +245,26 @@ echo "ANTHROPIC_API_KEY=sk-ant-…" > .env.local
 ```
 
 Then open the URL printed by `vercel dev` and import a Sudoku screenshot.
+
+## When devices don't agree
+
+⚙ → **Settings → Sync** (or tap the sync line at the foot of the ⚙ menu) reports
+what sync is actually doing on that device, because "it isn't syncing" is nearly
+always one of three things and none of them used to be visible:
+
+- **No store connected** — the API replies `501`, so every device keeps its own
+  data and nothing can cross between them. The app can't fix this itself: connect
+  a Redis store in Vercel (**Storage → Create / Connect Database → Upstash
+  Redis**) and redeploy.
+- **Different profiles** — data is namespaced per profile, so the panel shows the
+  profile **code** this device is reading. Two devices must show the *same* code;
+  the same name with a different passphrase is a different namespace, and Guest
+  is its own.
+- **Reaching the store but not landing** — any status other than 200 is reported
+  as-is (a 5xx usually means the store's credentials are set but wrong).
+
+It also shows how many games the cloud holds against how many this device holds,
+so a one-way sync is obvious, with **Sync now** and **Re-check** buttons.
 
 ## Staying on the current version
 

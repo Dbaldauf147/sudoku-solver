@@ -93,6 +93,8 @@
       .dropdown button { border: none; border-radius: 0; text-align: left; background: transparent; padding: 12px 14px; font-weight: 500; }
       .dropdown button:hover { background: var(--panel); }
       .syncline { padding: 10px 14px; font-size: 0.78rem; color: var(--muted); border-top: 1px solid var(--line); line-height: 1.3; }
+      /* It's a button now (tap for sync details), so keep the divider `.dropdown button` would strip. */
+      .dropdown button.syncline { border-top: 1px solid var(--line); font-weight: 400; }
       .syncline.on { color: var(--ok); }
       .inprog { color: var(--accent); font-weight: 600; font-size: 0.8rem; }
       .syncline.off { color: var(--muted); }
@@ -342,6 +344,10 @@
       .set-row .set-about { color: var(--muted); font-size: 0.85rem; line-height: 1.45; margin-top: 3px; }
       .set-row .sw { flex: 0 0 auto; min-width: 62px; text-align: center; font-weight: 700; }
       .set-row .sw.on { background: var(--sel); border-color: var(--accent); color: var(--accent); }
+      .sync-actions { display: flex; gap: 8px; }
+      .sync-actions button { flex: 1 1 0; text-align: center; }
+      #syncDiag { line-height: 1.5; }
+      #syncDiag code { font-size: 0.85em; }
 
       /* ---- step-by-step solve walkthrough ---- */
       /* A read-only replay board: every empty cell shows its candidates in a 3×3 grid, the digits the
@@ -441,7 +447,7 @@
             <button id="profileBtn">Profile</button>
             <button id="shareBtn">Share catalogue</button>
             <button id="backupBtn">Backup &amp; restore</button>
-            <div id="syncStatus" class="syncline" title="Where your saved games and history are stored">Checking sync…</div>
+            <button id="syncStatus" class="syncline" title="Where your saved games and history are stored — tap for details">Checking sync…</button>
           </div>
         </div>
       </div>
@@ -478,6 +484,11 @@
       <div id="walkthrough" class="stats" hidden></div>
       <div id="settings" class="stats" hidden></div>
       <div id="audit" class="stats" hidden></div>
+      <div id="swapBar" class="update-bar" hidden>
+        <span id="swapMsg">Your other device is on a different puzzle.</span>
+        <button id="swapNow">Switch</button>
+        <button id="swapStay" class="ghost">Stay</button>
+      </div>
       <div id="updateBar" class="update-bar" hidden>
         <span>A newer version of the app is live.</span>
         <button id="updateNow">Reload</button>
@@ -897,6 +908,7 @@
       // Record the pre-change state of one or more cells so it can be undone. A fresh action clears redo.
       function pushUndo(cells) {
         if (!solving) return;
+        lastLocalEditAt = Date.now();   // hands on the board: a remote game must wait for a gap
         undoStack.push({ cells: snapCells(Array.isArray(cells) ? cells : [cells]), session: sessionSnap() });
         if (undoStack.length > 300) undoStack.shift();
         redoStack = [];
@@ -2462,11 +2474,48 @@
               <div class="set-text"><div class="set-name">${esc(s.name)}</div><div class="set-about">${esc(s.about)}</div></div>
               <button class="sw${on ? " on" : ""}" data-i="${i}" aria-pressed="${on}" title="${on ? "Turn off" : "Turn on"} ${esc(s.name)}">${on ? "On" : "Off"}</button>
             </div>`;
-          }).join("");
+          }).join("") +
+          `<h3>Sync</h3><div id="syncDiag" class="card">Checking…</div>
+           <div class="sync-actions"><button id="syncNowBtn">Sync now</button><button id="syncRecheck">Re-check</button></div>`;
         document.getElementById("setBack").onclick = closeSettings;
         settingsPanel.querySelectorAll(".sw").forEach((btn) => {
           btn.onclick = () => { SETTINGS[Number(btn.dataset.i)].toggle(); renderSettings(); };
         });
+        document.getElementById("syncNowBtn").onclick = async () => { await syncStores({ retry: true }); renderSyncDiag(); };
+        document.getElementById("syncRecheck").onclick = renderSyncDiag;
+        renderSyncDiag();
+      }
+      // What sync is actually doing on this device, in the terms that decide it: is a store connected
+      // at all, which profile namespace is this device reading, and do the local and cloud copies
+      // agree? "It isn't syncing" is nearly always one of those three, and none of them were visible.
+      async function probeCollection(c) {
+        try {
+          const r = await fetch(`/api/games?collection=${c}${profileParam()}`, { cache: "no-store" });
+          if (!r.ok) return { status: r.status };
+          const j = await r.json();
+          return { status: r.status, n: ((j && j.games) || []).length };
+        } catch (e) { return { status: 0, err: e && e.message }; }
+      }
+      async function renderSyncDiag() {
+        const box = document.getElementById("syncDiag");
+        if (!box) return;
+        box.textContent = "Checking…";
+        const [lib, st, act] = await Promise.all([probeCollection("library"), probeCollection("stats"), probeCollection("active")]);
+        const who = profile && profile.name ? `${esc(profile.name)} · code <b>${esc(profileCode())}</b>` : "Guest (not signed in)";
+        const rows = [];
+        if (lib.status === 501) {
+          rows.push(`<b>No store is connected to this deployment.</b>`);
+          rows.push(`<span class="k">The API replies 501, so every device keeps its own data and nothing can cross between them — this is not something the app can fix from here. In Vercel: <b>Storage → Create / Connect Database → Upstash Redis</b>, connect it to this project, then redeploy.</span>`);
+        } else if (lib.status === 200) {
+          rows.push(`<b>☁ Store connected.</b> <span class="k">Reading as ${who}.</span>`);
+          rows.push(`<span class="k">Cloud holds <b>${lib.n}</b> saved · <b>${st.n}</b> played · <b>${act.n}</b> in progress. This device has <b>${lsGet(STORE_KEY).length}</b> saved · <b>${lsGet(STATS_KEY).length}</b> played.</span>`);
+          rows.push(`<span class="k">Both devices must show the <b>same code</b> above — signing in under the same name with a different passphrase is a different namespace, and Guest is its own. Last sync${syncAgo() || ": not yet this session"}.</span>`);
+        } else if (lib.status === 0) {
+          rows.push(`<b>Couldn't reach the sync API.</b> <span class="k">${esc(lib.err || "network error")} — the device may be offline, or the deployment may not be serving <code>/api/games</code>.</span>`);
+        } else {
+          rows.push(`<b>The sync API answered ${lib.status}.</b> <span class="k">Anything other than 200 means reads and writes aren't landing; a 500 usually means the store's credentials are set but wrong.</span>`);
+        }
+        box.innerHTML = rows.join("<br />");
       }
       function closeSettings() {
         if (!settingsPanel.hidden) {
@@ -2483,6 +2532,8 @@
       document.getElementById("settingsBtn").addEventListener("click", () => {
         if (settingsPanel.hidden) openSettings(); else closeSettings();
       });
+      // The sync line is where you look when devices disagree, so make it the way in to the details.
+      document.getElementById("syncStatus").addEventListener("click", () => { if (settingsPanel.hidden) openSettings(); });
 
       document.getElementById("undo").addEventListener("click", undo);
       document.getElementById("redo").addEventListener("click", redo);
@@ -2840,11 +2891,39 @@
       // Reconcile this device's in-progress game with the copy synced from the cloud. Whichever was
       // touched most recently wins, so a puzzle started on the website can be finished in the installed
       // app (and vice-versa) without losing your place. Called once on load, after cloud sync is confirmed.
-      function reconcileActiveGame(cloudEntry) {
+      // Two devices are only ever "in step" on the game you're actually playing if that game can cross
+      // while you're playing it — which is the case this used to refuse outright, since a background
+      // fetch replacing the board mid-move is worse than being out of step. So while solving it decides
+      // by what the incoming game *is*: your own progress on the same puzzle is adopted (but only once
+      // your hands are still, so it can't land between two keystrokes), while a different puzzle asks
+      // first. The device actively being played always holds the newer stamp, so it stays the source.
+      const REMOTE_IDLE_MS = 5000;
+      let lastLocalEditAt = 0, declinedRemoteId = "", pendingRemote = null;
+      const swapBar = document.getElementById("swapBar");
+      function puzzleIdentity(st) { return ((st && st.solution) || []).flat().join(""); }
+      function adoptRemoteGame(st, note) {
+        applyGameState(st);
+        saveActiveGame();
+        showExplain("Picked up from your other device", note, "info");
+      }
+      function reconcileActiveGame(cloudEntry, { live = false } = {}) {
         let local = null; try { local = JSON.parse(localStorage.getItem(ACTIVE_KEY)); } catch {}
         const hasLocal = !!(local && local.values && local.solution && local.session);
         const localTs = hasLocal ? (local.savedAt || 0) : -1;
         const cloudTs = activeStamp(cloudEntry);
+        // Mid-solve: same puzzle catches up quietly, a different one waits to be invited.
+        if (live && solving && cloudEntry && !cloudEntry.cleared && cloudEntry.values && cloudTs > localTs) {
+          if (puzzleIdentity(cloudEntry) === puzzleIdentity(currentGameState())) {
+            if (Date.now() - lastLocalEditAt < REMOTE_IDLE_MS) return;   // you're mid-move — try again next poll
+            adoptRemoteGame(cloudEntry, "Same puzzle, further along on your other device — the board is caught up.");
+          } else if (puzzleIdentity(cloudEntry) !== declinedRemoteId) {
+            pendingRemote = cloudEntry;
+            document.getElementById("swapMsg").textContent = `Your other device is on a different puzzle (${cloudEntry.session && cloudEntry.session.difficulty || "puzzle"}).`;
+            swapBar.hidden = false;
+          }
+          return;
+        }
+        if (live && solving) return;   // cleared elsewhere, or older — never touch a board being played
         if (cloudEntry && !cloudEntry.cleared && cloudEntry.values && cloudTs > localTs) {
           // A newer in-progress game is waiting on another device — bring it onto this board.
           applyGameState(cloudEntry);
@@ -3102,12 +3181,12 @@
       }
       async function pollActiveGame() {
         try {
-          if (document.hidden || solving || syncing || cloudUnconfigured || !syncChecked) return;
+          if (document.hidden || syncing || cloudUnconfigured || !syncChecked) return;
           const cloud = await cloudLoad("active");
           if (!cloud) return;
           const stamp = () => { try { return localStorage.getItem(ACTIVE_KEY) || ""; } catch { return ""; } };
           const before = stamp();
-          reconcileActiveGame(cloud[0] || null);
+          reconcileActiveGame(cloud[0] || null, { live: true });
           // Something moved on another device — the rest of its data has probably moved too, so pull
           // the full set once rather than waiting out the five-minute beat.
           if (stamp() !== before) syncStores();
@@ -3153,6 +3232,17 @@
         return true;
       }
       function reloadIfStale() { if (buildStale && !document.hidden) { if (safeToReload()) location.reload(); else updateBar.hidden = false; } }
+      document.getElementById("swapNow").addEventListener("click", () => {
+        swapBar.hidden = true;
+        if (pendingRemote) adoptRemoteGame(pendingRemote, "Switched to the puzzle you had going on your other device.");
+        pendingRemote = null;
+      });
+      // Declining pins the *puzzle*, not the moment: the other device keeps playing and would otherwise
+      // re-offer the same game every few seconds. A genuinely different puzzle still asks.
+      document.getElementById("swapStay").addEventListener("click", () => {
+        swapBar.hidden = true;
+        declinedRemoteId = puzzleIdentity(pendingRemote); pendingRemote = null;
+      });
       document.getElementById("updateNow").addEventListener("click", () => { if (solving && session) saveActiveGame(); location.reload(); });
       document.getElementById("updateLater").addEventListener("click", () => { updateBar.hidden = true; });
       const buildTimer = setInterval(() => { if (!document.hidden) checkForUpdate(); }, AWAKE_SLOW_MS);
