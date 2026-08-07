@@ -164,9 +164,23 @@ answer.
   own — every 10 seconds for the first couple of minutes after the app wakes, then
   easing to a minute — while the full four-key sync stays on its five-minute beat.
   Pick your phone up and the puzzle you left on the website is there within
-  seconds, without an idle tab costing a request every few seconds all day. It
-  still never pulls **while you're solving**: a background fetch must not swap the
-  puzzle out from under you, so two devices mid-game deliberately don't converge.
+  seconds, without an idle tab costing a request every few seconds all day.
+
+  That includes **while you're solving**, which is the case that matters when two
+  devices are both sitting on a board — but a background fetch replacing the grid
+  mid-move would be worse than being out of step, so what lands depends on what's
+  arriving:
+
+  - **the same puzzle, further along** (your own progress from the other device)
+    is adopted quietly — and only once your hands have been off the board for a
+    few seconds, so it can't land between two keystrokes;
+  - **a different puzzle** asks first, with a **Switch** / **Stay** bar. Declining
+    silences *that puzzle*, not that moment, so the other device carrying on
+    playing doesn't re-ask every few seconds;
+  - **a game cleared or finished elsewhere** never touches a board you're playing.
+
+  Whichever device is actually being played holds the newest stamp, so it stays
+  the source and the idle one follows.
 
   Merges are a union, so no device can wipe another's
   data — with two refinements that keep them from disagreeing forever: **deletes
