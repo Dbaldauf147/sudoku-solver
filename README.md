@@ -89,6 +89,16 @@ answer.
     move you placed straight from a hint with 💡, so "I needed help here" is
     visible move by move rather than as one lump total. (Hints you read but
     solved yourself still count in the tally; they just have no 💡 to mark.)
+    **Over your target pace** is its own section, scoped to nothing but the moves
+    that ran past the per-move pace your target implies. *This game* lists those
+    moves **slowest first** — cell, technique, what it took, how far over — then
+    rolls them up by technique. *All games* ranks the techniques by the **total
+    time** those moves cost (most to least, with typical and worst alongside),
+    then trails it **game by game**: each game's pace, how many moves went over,
+    and which techniques they were with what each cost there — so a technique
+    that keeps landing in this section is visible across games rather than only
+    within one. Games whose difficulty has no target set sit out (there's no pace
+    to miss) instead of being counted as clean.
     **Tap any technique** for a pop-up with a visual example of how it works. Stats has two tabs: **All
     games** for these lifetime totals and trends, and **This game** — which
     mirrors the same breakdown for the current (or most recent) game alone:
