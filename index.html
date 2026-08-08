@@ -3097,7 +3097,7 @@
       // load, so a tab you left open (or an installed app that is never really reloaded) kept showing
       // whatever was true when it opened: play on your phone, and the website went on showing yesterday's
       // history until you happened to reload it.
-      let syncing = false, syncRetry = 0;
+      let syncing = false, syncRetry = 0, viewOpenedAt = 0;
       const SYNC_EVERY_MS = 5 * 60 * 1000, SYNC_MIN_GAP_MS = 20 * 1000;
       async function syncStores({ initial = false, retry = false } = {}) {
         if (syncing) return;
@@ -3165,6 +3165,10 @@
         // it picks the new data up then rather than resetting a deep-dive mid-read.)
         if (initial || dataSignature() !== before) {
           if (editingId === null && histEditing === null) renderLibrary();
+          // Stats normally rebuilds only when reopened, so a background sync can't reset a deep-dive
+          // mid-read. But a sync landing right after *you opened it* is the answer to the question you
+          // just asked, so that one repaints — the window keeps it from disturbing a longer read.
+          if (!statsEl.hidden && Date.now() - viewOpenedAt < 15000) renderStats();
         }
       }
       const initStores = () => syncStores({ initial: true });
@@ -3191,7 +3195,7 @@
       // seconds. It never pulls while you're solving: the existing rule that a background fetch must
       // not swap the puzzle out from under you still holds, so two devices mid-game don't converge.
       const AWAKE_FAST_MS = 10 * 1000, AWAKE_SLOW_MS = 60 * 1000, AWAKE_WINDOW_MS = 2 * 60 * 1000;
-      let lastWakeAt = Date.now(), activePollTimer = null;
+      let lastWakeAt = Date.now(), activePollTimer = null, lastEndSeen = null;
       function markAwake() { lastWakeAt = Date.now(); scheduleActivePoll(0); }
       function scheduleActivePoll(delay) {
         clearTimeout(activePollTimer);
@@ -3203,11 +3207,20 @@
           if (document.hidden || syncing || cloudUnconfigured || !syncChecked) return;
           const cloud = await cloudLoad("active");
           if (!cloud) return;
+          const remote = cloud[0] || null;
+          // A game *ending* elsewhere — finished, revealed, or reset — is the moment the other device's
+          // history gains an entry, so it's the moment to pull the full set rather than wait out the
+          // five-minute beat. This used to trigger off *this* device's storage changing instead, which
+          // meant the one case that matters never fired: you're mid-game here, so the incoming state is
+          // deliberately not applied, nothing local changes, and the finished game sat in the cloud
+          // unseen. Keyed on the tombstone's own stamp so one ending pulls once, not every poll.
+          if (remote && remote.cleared && activeStamp(remote) !== lastEndSeen) {
+            lastEndSeen = activeStamp(remote);
+            syncStores({ retry: true });   // bypass the 20s stampede gap: this is a known change, not a guess
+          }
           const stamp = () => { try { return localStorage.getItem(ACTIVE_KEY) || ""; } catch { return ""; } };
           const before = stamp();
-          reconcileActiveGame(cloud[0] || null, { live: true });
-          // Something moved on another device — the rest of its data has probably moved too, so pull
-          // the full set once rather than waiting out the five-minute beat.
+          reconcileActiveGame(remote, { live: true });
           if (stamp() !== before) syncStores();
         } catch {} finally { scheduleActivePoll(); }
       }
@@ -3361,6 +3374,7 @@
       }
       function openLibrary(tab) {
         closeStats(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
+        viewOpenedAt = Date.now(); syncStores();   // opening it is the ask — go and check for anything new
         if (tab) libTab = tab;
         editingId = null; histEditing = null;
         libraryPanel.hidden = false; renderGameLibrary();
@@ -4021,7 +4035,7 @@
       document.getElementById("exModal").addEventListener("click", (e) => { if (e.target.id === "exModal") e.currentTarget.hidden = true; });
       function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause(); } }
       document.getElementById("statsBtn").addEventListener("click", () => {
-        if (statsEl.hidden) { closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
+        if (statsEl.hidden) { closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); viewOpenedAt = Date.now(); syncStores(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
         else closeStats();
       });
 

@@ -194,6 +194,13 @@ answer.
   Whichever device is actually being played holds the newest stamp, so it stays
   the source and the idle one follows.
 
+  A game **ending** elsewhere — finished, revealed, or reset — pulls the full set
+  straight away rather than waiting out the five-minute beat, since that's the
+  moment the other device's history gains an entry. And **opening Stats or the
+  Game library asks the cloud first**: that's the moment you're asking to see
+  this data, so it's checked then rather than on whatever the last background
+  beat happened to catch.
+
   Merges are a union, so no device can wipe another's
   data — with two refinements that keep them from disagreeing forever: **deletes
   are recorded as tombstones** and replayed on your other devices instead of being
