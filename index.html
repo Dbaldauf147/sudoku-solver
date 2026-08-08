@@ -60,6 +60,10 @@
       p.sub { color: var(--muted); margin: 0 0 16px; line-height: 1.5; }
       .row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; align-items: center; }
       .row.solving { display: none; }
+      /* Five controls have to share a phone's width without wrapping onto a second line, so they
+         share it evenly and trade padding for room rather than dropping below the board. */
+      .row.solving button { flex: 1 1 auto; padding-left: 6px; padding-right: 6px; white-space: nowrap;
+        font-size: clamp(0.78rem, 3.4vw, 0.95rem); }
       body.solving .setup-extra { display: none; }
       body.solving .row.solving { display: flex; }
       button, label.file, select, input#modalSource {
@@ -208,6 +212,16 @@
       .targetpace { color: var(--muted); font-size: 0.8rem; margin: -6px 0 12px; }
       .targetpace.set { color: var(--accent); }
       .target-card .over { color: var(--warn); font-weight: 700; }
+      /* the over-target section: its own tables, plus the per-game trail */
+      .over-sub { font-size: 0.92rem; margin: 16px 0 8px; }
+      .over-sub .k { color: var(--muted); font-weight: 400; }
+      table.grid td.over { color: var(--warn); font-weight: 600; white-space: nowrap; }
+      .over-game { padding: 10px 12px; }
+      .over-game-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+      .over-game-head .k { color: var(--muted); font-size: 0.82rem; }
+      .over-game-head .over { margin-left: auto; color: var(--warn); font-weight: 700; font-size: 0.85rem; white-space: nowrap; }
+      .over-game-techs { margin-top: 6px; font-size: 0.84rem; line-height: 1.6; color: var(--muted); }
+      .over-game-techs b { color: var(--text); }
       .target-card .under { color: var(--ok); font-weight: 700; }
       .win-target { font-weight: 700; margin: 0 0 16px; }
       .win-target.beat { color: var(--ok); }
@@ -457,6 +471,7 @@
         <button id="redo">Redo</button>
         <button id="autonotes">Auto notes</button>
         <button id="pause">Pause</button>
+        <button id="restart" title="Back to the starting clues with a fresh clock">Restart</button>
       </div>
 
       <div id="board" class="board"></div>
@@ -2688,10 +2703,14 @@
       // Reset the *current* game back to its starting clues (keeps the puzzle; wipes your progress).
       // Gated behind a confirmation so it can't be triggered by accident.
       const resetModal = document.getElementById("resetModal");
-      document.getElementById("resetGame").addEventListener("click", () => {
+      // Reached from the ⚙ menu and from Restart in the toolbar — same confirmation either way, since
+      // it throws away the solve in progress.
+      function promptResetGame() {
         if (!solving || !session) return showExplain("No game to reset", "Start a puzzle first — reset brings an in-progress game back to its clues.", "info");
-        resetModal.hidden = false;
-      });
+        closeMenu(); resetModal.hidden = false;
+      }
+      document.getElementById("resetGame").addEventListener("click", promptResetGame);
+      document.getElementById("restart").addEventListener("click", promptResetGame);
       document.getElementById("resetCancel").addEventListener("click", () => { resetModal.hidden = true; });
       resetModal.addEventListener("click", (e) => { if (e.target === resetModal) resetModal.hidden = true; });
       document.getElementById("resetConfirm").addEventListener("click", () => { resetModal.hidden = true; resetGame(); });
@@ -4249,6 +4268,81 @@
         if (t) t.hidden = tab !== "this";
         if (a) a.hidden = tab !== "all";
       }
+      // ---- the moves that ran past your target pace ----
+      // A target is a whole-game goal; spread over the cells the puzzle asks you to fill it becomes a
+      // per-move pace, and the moves that blow through it are where a game is actually lost. This
+      // section looks at nothing else: which techniques those moves were, what they cost, and how that
+      // shifts game to game. A game whose difficulty carries no target has no pace to miss, so it sits
+      // out rather than being counted as clean.
+      function overTargetMoves(g) {
+        const pace = paceFor(g);
+        if (!pace) return [];
+        const out = [];
+        (g.moves || []).forEach((m, i) => { if (m.dt > pace) out.push({ m, i, over: m.dt - pace }); });
+        return out;
+      }
+      // Roll a set of over-target moves up by technique, worst total first — "most time to least".
+      function overTargetByTech(entries) {
+        const by = {};
+        for (const e of entries) {
+          const t = e.m.tech || "Other";
+          (by[t] ||= { t, n: 0, total: 0, over: 0, worst: 0, times: [] });
+          const row = by[t];
+          row.n++; row.total += e.m.dt; row.over += e.over; row.times.push(e.m.dt);
+          if (e.m.dt > row.worst) row.worst = e.m.dt;
+        }
+        return Object.values(by).sort((a, b) => b.total - a.total);
+      }
+      function techDot(t) { return `<span style="color:${TECH_COLORS[t] || "#94a3b8"}">●</span>`; }
+      function overTechTable(rows, { showWorst = true } = {}) {
+        let html = `<table class="grid"><tr><th>Technique</th><th>Moves</th><th>Total</th><th>Typical</th>${showWorst ? "<th>Worst</th>" : ""}</tr>`;
+        for (const r of rows) html += `<tr class="trow" data-tech="${esc(r.t)}"><td>${techDot(r.t)} ${esc(r.t)}</td><td>${r.n}</td>` +
+          `<td><b>${fmtDt(r.total)}</b></td><td>${fmtDt(median(r.times))}</td>${showWorst ? `<td>${fmtDt(r.worst)}</td>` : ""}</tr>`;
+        return html + `</table>`;
+      }
+      // "This game" — the over-target moves themselves, slowest first, then the same set by technique.
+      function overTargetThisHTML(g) {
+        const head = `<h3>Over your target pace</h3>`;
+        const pace = paceFor(g);
+        if (!pace) return `${head}<div class="card">No target set for <b>${esc(g.difficulty || "—")}</b>. Set one in ⚙ → <b>Target times</b> and every move slower than the pace it implies is collected here.</div>`;
+        const list = overTargetMoves(g), total = (g.moves || []).length;
+        if (!list.length) return `${head}<div class="card">Nothing went over pace — all ${total} move${total === 1 ? "" : "s"} came in under ${fmtDt(pace)}. 🎯</div>`;
+        const lost = list.reduce((n, e) => n + e.over, 0), spent = list.reduce((n, e) => n + e.m.dt, 0);
+        const ranked = [...list].sort((a, b) => b.m.dt - a.m.dt);
+        let rows = `<table class="grid"><tr><th>Move</th><th>Technique</th><th>Took</th><th>Over</th></tr>`;
+        for (const e of ranked) rows += `<tr class="trow" data-tech="${esc(e.m.tech)}"><td>#${e.i + 1} <span class="k">${loc(e.m.r, e.m.c)}=${e.m.n}</span></td>` +
+          `<td>${techDot(e.m.tech)} ${esc(e.m.tech)}</td><td><b>${fmtDt(e.m.dt)}</b></td><td class="over">+${fmtDt(e.over)}</td></tr>`;
+        rows += `</table>`;
+        return `${head}<div class="card"><b>${list.length}</b> of ${total} moves ran past your ${fmtDt(pace)} pace — <b>${fmtTime(spent)}</b> spent on them, <b>${fmtTime(lost)}</b> of it over pace.</div>
+          ${rows}<p class="hintline">Slowest first. Tap a row for a refresher on its technique.</p>
+          <h4 class="over-sub">By technique</h4>${overTechTable(overTargetByTech(list))}`;
+      }
+      // "All games" — the same cut across every game with a target, plus the per-game trail so you can
+      // see which techniques keep landing here and what they cost each time.
+      function overTargetAllHTML(games) {
+        const head = `<h3>Over your target pace</h3>`;
+        const scored = games.map((g) => ({ g, list: overTargetMoves(g), pace: paceFor(g) })).filter((x) => x.pace);
+        if (!scored.length) return `${head}<div class="card">No game yet has a target set for its difficulty. Set one in ⚙ → <b>Target times</b> and this fills in from the games you play after.</div>`;
+        const all = scored.flatMap((x) => x.list);
+        if (!all.length) return `${head}<div class="card">Across ${scored.length} game${scored.length === 1 ? "" : "s"} with a target, no move went over pace. 🎯</div>`;
+        const lost = all.reduce((n, e) => n + e.over, 0), spent = all.reduce((n, e) => n + e.m.dt, 0);
+        const byTech = overTargetByTech(all);
+        // Per-game trail, newest first: what went over in each, and what each technique cost there.
+        let trail = "";
+        for (const { g, list, pace } of scored) {
+          if (!list.length) continue;
+          const rows = overTargetByTech(list);
+          const when = new Date(g.finishedAt || g.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+          const spentG = list.reduce((n, e) => n + e.m.dt, 0);
+          trail += `<div class="card over-game"><div class="over-game-head"><b>${esc(when)}</b> <span class="k">${esc(g.difficulty || "—")} · ${esc(g.source || "—")} · pace ${fmtDt(pace)}</span>
+              <span class="over">${list.length} over · ${fmtTime(spentG)}</span></div>
+            <div class="over-game-techs">${rows.map((r) => `${techDot(r.t)} ${esc(r.t)}${r.n > 1 ? ` ×${r.n}` : ""} <b>${fmtDt(r.total)}</b>`).join(" · ")}</div></div>`;
+        }
+        return `${head}<div class="card"><b>${all.length}</b> move${all.length === 1 ? "" : "s"} over pace across ${scored.length} game${scored.length === 1 ? "" : "s"} with a target — <b>${fmtTime(spent)}</b> spent on them, <b>${fmtTime(lost)}</b> of it over.</div>
+          ${overTechTable(byTech)}<p class="hintline">Ranked by the total time those moves took, most to least. Tap a row for a refresher.</p>
+          <h4 class="over-sub">Game by game <span class="k">(newest first)</span></h4>${trail}`;
+      }
+
       // The "where you spend time" table, shared by both stats tabs. `hintsBy` counts the hints you
       // asked for that each technique answered — a technique can carry hints without carrying moves
       // (a hint you read but placed yourself), so those rows are listed too rather than dropped.
@@ -4377,6 +4471,7 @@
           ${compare}
           ${takeaway}
           ${techTable}
+          ${overTargetThisHTML(g)}
           ${practice}
           ${timeline}`;
       }
@@ -4495,6 +4590,7 @@
           <div id="timeChartBox"></div>
           <h3>Where you spend time</h3>${techTable}
           <p class="sub" style="margin:8px 0 0">Typical = median time between your choices, so a long pause stands out without one outlier skewing it.</p>
+          ${overTargetAllHTML(games)}
           ${practicePane}
           <h3>Technique time over time</h3>${techTrend}
           <h3>Deep dive — a single game</h3>
