@@ -3,6 +3,9 @@
   "functions": {
     "api/parse-sudoku-image.js": {
       "maxDuration": 30
+    },
+    "api/coach.js": {
+      "maxDuration": 60
     }
   },
   "headers": [

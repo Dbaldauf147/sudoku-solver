@@ -334,6 +334,22 @@
       .update-bar button.ghost { background: transparent; color: #cbd5e1; font-weight: 400; padding: 7px 4px; }
       @keyframes upslide { from { transform: translateY(120%); opacity: 0; } to { transform: none; opacity: 1; } }
 
+      /* ---- AI coach ---- */
+      .coach-card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+      .coach-head { border-left: 4px solid var(--accent); }
+      .coach-head b { display: block; font-size: 1.02rem; line-height: 1.4; margin-bottom: 6px; }
+      .coach-card h4 { margin: 0 0 6px; font-size: 0.95rem; }
+      .coach-card ul { margin: 0; padding-left: 18px; }
+      .coach-card li { margin-bottom: 6px; line-height: 1.5; }
+      .coach-card li:last-child { margin-bottom: 0; }
+      .coach-focus .k { color: var(--muted); display: block; margin-top: 3px; line-height: 1.5; }
+      .coach-focus .drill { display: block; margin-top: 4px; }
+      .coach-actions { display: flex; gap: 8px; margin: 4px 0 12px; }
+      .coach-actions button { flex: 1 1 0; text-align: center; }
+      .coach-sent { font-size: 0.8rem; color: var(--muted); line-height: 1.5; }
+      .coach-sent pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+        padding: 10px; overflow-x: auto; font-size: 0.72rem; max-height: 220px; }
+
       /* ---- post-game audit: your solve beside the walkthrough's ---- */
       .audit-phase { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 12px 10px; margin-bottom: 12px; }
       .audit-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
@@ -448,6 +464,7 @@
             <button id="hint">Hint</button>
             <button id="walkBtn" title="Watch the puzzle solve itself, one deduction at a time">Step-by-step solve</button>
             <button id="statsBtn">Stats</button>
+            <button id="coachBtn" title="Have the AI coach read your stats and tell you what to work on">AI coach</button>
             <button id="techBtn">Techniques</button>
             <button id="check">Check entries</button>
             <button id="pastePuzzle">Paste puzzle</button>
@@ -499,6 +516,7 @@
       <div id="walkthrough" class="stats" hidden></div>
       <div id="settings" class="stats" hidden></div>
       <div id="audit" class="stats" hidden></div>
+      <div id="coach" class="stats" hidden></div>
       <div id="swapBar" class="update-bar" hidden>
         <span id="swapMsg">Your other device is on a different puzzle.</span>
         <button id="swapNow">Switch</button>
@@ -708,6 +726,7 @@
       const walkPanel = document.getElementById("walkthrough");
       const settingsPanel = document.getElementById("settings");
       const auditPanel = document.getElementById("audit");
+      const coachPanel = document.getElementById("coach");
       const timerEl = document.getElementById("timer");
       const errorsEl = document.getElementById("errors");
       const inputs = [], cellEls = [], pencils = [], marks = [];
@@ -2032,7 +2051,7 @@
       const pauseModal = document.getElementById("pauseModal");
       // The board is "covered" whenever an in-app panel (Stats / Saved games / History) is showing
       // over it — the game isn't visible, so it counts as swiping away from the Sudoku page.
-      function boardCovered() { return !statsEl.hidden || !libraryPanel.hidden || !walkPanel.hidden || !settingsPanel.hidden || !auditPanel.hidden; }
+      function boardCovered() { return !statsEl.hidden || !libraryPanel.hidden || !walkPanel.hidden || !settingsPanel.hidden || !auditPanel.hidden || !coachPanel.hidden; }
       // Auto-pause reconciler: the clock should run only while you're actually looking at the board.
       // It stops whenever the tab is hidden (backgrounded) or a panel covers the board, and resumes
       // when you come back — but never overrides a manual pause. Driven from visibilitychange and
@@ -2346,7 +2365,7 @@
           : "Targets cleared. Moves are flagged only against the rest of their own game again.", "ok");
         if (!statsEl.hidden) renderStats();
       }
-      document.getElementById("targetBtn").addEventListener("click", () => { closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); openTargets(); });
+      document.getElementById("targetBtn").addEventListener("click", () => { closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); closeCoach(); openTargets(); });
       document.getElementById("targetSave").addEventListener("click", saveTargets);
       document.getElementById("targetClear").addEventListener("click", () => {
         targetModal.querySelectorAll(".target-in").forEach((i) => { i.value = ""; repaintPace(i); });
@@ -2559,7 +2578,7 @@
         }
       }
       function openSettings() {
-        closeStats(); closeLibrary(); closeTechniques(); closeWalkthrough(); closeAudit();
+        closeStats(); closeLibrary(); closeTechniques(); closeWalkthrough(); closeAudit(); closeCoach();
         settingsPanel.hidden = false; renderSettings();
         boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause();
         settingsPanel.scrollIntoView({ block: "start" });
@@ -2695,7 +2714,7 @@
       });
 
       document.getElementById("check").addEventListener("click", () => {
-        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); closeCoach();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle, then I can check your entries.", "info");
         let wrong = 0, filled = 0;
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
@@ -2708,7 +2727,7 @@
       });
 
       document.getElementById("reveal").addEventListener("click", () => {
-        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); closeCoach();
         if (!solving) return showExplain("Not solving yet", "Start a puzzle first.", "info");
         finalizeSession(false);
         writeGrid(solution);
@@ -2756,7 +2775,7 @@
       function resetToEdit() {
         session = null; clearInterval(timerId); timerId = null; undoStack = []; redoStack = []; activeSavedGame = null;
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal"); syncModeButtons();
-        document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
+        document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); closeCoach();
         pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].classList.remove("given", "wrong", "solved"); marks[r][c].clear(); }
         renderPencils();
@@ -3413,7 +3432,7 @@
         return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
       }
       function openLibrary(tab) {
-        closeStats(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
+        closeStats(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); closeCoach();
         viewOpenedAt = Date.now(); syncStores();   // opening it is the ask — go and check for anything new
         if (tab) libTab = tab;
         editingId = null; histEditing = null;
@@ -3647,7 +3666,7 @@
 
       // Home: close any open panel (stats or the game library) and return to the game board.
       document.getElementById("homeBtn").addEventListener("click", () => {
-        closeMenu(); closeStats(); closeLibrary(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
+        closeMenu(); closeStats(); closeLibrary(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); closeCoach();
       });
 
       // ---- built-in catalog (shipped with the app, available to every user) ----
@@ -4075,7 +4094,7 @@
       document.getElementById("exModal").addEventListener("click", (e) => { if (e.target.id === "exModal") e.currentTarget.hidden = true; });
       function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause(); } }
       document.getElementById("statsBtn").addEventListener("click", () => {
-        if (statsEl.hidden) { closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); viewOpenedAt = Date.now(); syncStores(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
+        if (statsEl.hidden) { closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); closeCoach(); viewOpenedAt = Date.now(); syncStores(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
         else closeStats();
       });
 
@@ -4125,7 +4144,7 @@
         if (p && !p.hidden) { p.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; }
       }
       function openTechniques() {
-        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); closeCoach();
         renderTechniques();
         document.getElementById("techniques").hidden = false;
         boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none";
@@ -4150,6 +4169,121 @@
       document.getElementById("techBtn").addEventListener("click", () => {
         if (document.getElementById("techniques").hidden) openTechniques();
         else closeTechniques();
+      });
+
+      // ---- AI coach ----
+      // Everything the coach reads is already on this device; the digest is the same numbers the
+      // Stats panel draws, aggregated. No move logs, no grids, no identifiers — and the panel shows
+      // the player the exact payload before it's sent, because it does leave the device.
+      let coachResult = null, coachBusy = false, coachError = "";
+      function buildCoachDigest() {
+        const games = lsGet(STATS_KEY);
+        if (!games.length) return null;
+        const round = (ms) => Math.round(ms / 100) / 10;   // seconds, 1dp
+        const byDiff = {};
+        for (const g of games) {
+          const d = g.difficulty || "—";
+          (byDiff[d] ||= { games: 0, solved: 0, times: [], errors: 0, hints: 0 });
+          const row = byDiff[d];
+          row.games++; if (g.solved) { row.solved++; row.times.push(g.totalMs || 0); }
+          row.errors += errorsIn(g); row.hints += g.hints || 0;
+        }
+        const moves = games.flatMap((g) => g.moves || []);
+        const byTech = {};
+        for (const m of moves) (byTech[m.tech] ||= []).push(m.dt);
+        const hintsBy = {}, missed = {};
+        for (const g of games) {
+          for (const [t, c] of Object.entries(g.hintsBy || {})) hintsBy[t] = (hintsBy[t] || 0) + c;
+          for (const [t, c] of Object.entries(g.missed || {})) missed[t] = (missed[t] || 0) + c;
+        }
+        const over = games.map((g) => ({ g, list: overTargetMoves(g) })).filter((x) => x.list.length);
+        const overTech = overTargetByTech(over.flatMap((x) => x.list));
+        return {
+          games: games.length,
+          targetsSet: Object.fromEntries(Object.entries(targets || {}).filter(([, v]) => v > 0).map(([k, v]) => [k, round(v)])),
+          byDifficulty: Object.fromEntries(Object.entries(byDiff).map(([d, r]) => [d, {
+            games: r.games, solved: r.solved,
+            medianSolveSec: r.times.length ? round(median(r.times)) : null,
+            avgErrors: Math.round((r.errors / r.games) * 10) / 10,
+            avgHints: Math.round((r.hints / r.games) * 10) / 10,
+          }])),
+          techniques: Object.entries(byTech).filter(([t]) => t !== "Mistake")
+            .map(([t, dts]) => ({ technique: t, moves: dts.length, typicalSec: round(median(dts)), hints: hintsBy[t] || 0, needsHelp: missed[t] || 0 }))
+            .sort((a, b) => b.moves - a.moves).slice(0, 20),
+          mistakes: (byTech["Mistake"] || []).length,
+          overTarget: {
+            gamesWithTarget: games.filter((g) => paceFor(g)).length,
+            moves: overTech.reduce((n, r) => n + r.n, 0),
+            byTechnique: overTech.slice(0, 8).map((r) => ({ technique: r.t, moves: r.n, totalSec: round(r.total), worstSec: round(r.worst) })),
+          },
+          recent: games.slice(0, 10).map((g) => ({
+            difficulty: g.difficulty || "—", solved: !!g.solved,
+            solveSec: round(g.totalMs || 0), errors: errorsIn(g), hints: g.hints || 0,
+          })),
+        };
+      }
+      async function askCoach() {
+        const digest = buildCoachDigest();
+        if (!digest) return;
+        coachBusy = true; coachError = ""; renderCoach();
+        try {
+          const r = await fetch("/api/coach", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ digest }),
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(data.error || `The coach endpoint answered ${r.status}`);
+          coachResult = data.coaching;
+        } catch (e) {
+          coachError = (e && e.message) || "Couldn't reach the coach";
+        } finally {
+          coachBusy = false; renderCoach();
+        }
+      }
+      function renderCoach() {
+        if (coachPanel.hidden) return;
+        const digest = buildCoachDigest();
+        let html = `<button id="coBack">← Back</button><h2>AI coach</h2>`;
+        if (!digest) {
+          html += `<div class="card">No finished games yet. Play a puzzle or two and the coach will have something to read.</div>`;
+          coachPanel.innerHTML = html;
+          document.getElementById("coBack").onclick = closeCoach;
+          return;
+        }
+        html += `<p class="hintline">Reads the same numbers as your Stats page — ${digest.games} game${digest.games === 1 ? "" : "s"}, your technique times, hints, and the moves that ran past your target — and says what to work on.</p>
+          <div class="coach-actions"><button id="coAsk" class="primary"${coachBusy ? " disabled" : ""}>${coachBusy ? "Reading your stats…" : coachResult ? "Ask again" : "Ask the coach"}</button></div>`;
+        if (coachError) html += `<div class="card"><b>Couldn't get coaching.</b><br /><span class="k">${esc(coachError)}</span><br /><span class="k">This is the one feature that calls the Claude API, so it needs <b>ANTHROPIC_API_KEY</b> set on the deployment — everything else in the app works without it.</span></div>`;
+        const c = coachResult;
+        if (c) {
+          if (c.headline || c.assessment) html += `<div class="coach-card coach-head">${c.headline ? `<b>${esc(c.headline)}</b>` : ""}${esc(c.assessment)}</div>`;
+          if (c.strengths.length) html += `<div class="coach-card"><h4>What's working</h4><ul>${c.strengths.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>`;
+          if (c.focus.length) html += `<div class="coach-card coach-focus"><h4>Work on</h4><ul>${c.focus.map((f, i) => `<li><b>${esc(f.technique)}</b>${f.why ? `<span class="k">${esc(f.why)}</span>` : ""}${f.drill ? `<span class="drill">${esc(f.drill)}</span>` : ""}${TRAINER_TECHS.includes(f.technique) ? `<span class="drill"><button class="coach-drill" data-t="${esc(f.technique)}">Drill ${esc(f.technique)}</button></span>` : ""}</li>`).join("")}</ul></div>`;
+          if (c.habits.length) html += `<div class="coach-card"><h4>Habits to change</h4><ul>${c.habits.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>`;
+          if (c.nextSession) html += `<div class="coach-card coach-head"><b>Next game</b>${esc(c.nextSession)}</div>`;
+        }
+        html += `<details class="coach-sent"><summary>What gets sent</summary>
+          <p>Only these aggregates leave your device — no move logs, no puzzles, nothing identifying. They go to this deployment's own Claude API key.</p>
+          <pre>${esc(JSON.stringify(digest, null, 1))}</pre></details>`;
+        coachPanel.innerHTML = html;
+        document.getElementById("coBack").onclick = closeCoach;
+        const ask = document.getElementById("coAsk");
+        if (ask) ask.onclick = () => { if (!coachBusy) askCoach(); };
+        coachPanel.querySelectorAll(".coach-drill").forEach((b) => (b.onclick = () => loadDrill(b.dataset.t)));
+      }
+      function closeCoach() {
+        if (!coachPanel.hidden) {
+          coachPanel.hidden = true;
+          boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause();
+        }
+      }
+      function openCoach() {
+        closeStats(); closeLibrary(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
+        coachPanel.hidden = false; renderCoach();
+        boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause();
+        coachPanel.scrollIntoView({ block: "start" });
+      }
+      document.getElementById("coachBtn").addEventListener("click", () => {
+        if (coachPanel.hidden) openCoach(); else closeCoach();
       });
 
       // ---- post-game audit panel ----
@@ -4296,7 +4430,7 @@
         }
       }
       function openWalkthrough() {
-        closeStats(); closeLibrary(); closeTechniques(); closeSettings(); closeAudit();
+        closeStats(); closeLibrary(); closeTechniques(); closeSettings(); closeAudit(); closeCoach();
         if (!solving) return showExplain("Not solving yet", "Enter or load a puzzle and press Start solving — then I can walk the whole solve for you.", "info");
         // Start from where you actually are (givens plus your correct entries) so the walkthrough
         // continues your game rather than replaying what you've already worked out.

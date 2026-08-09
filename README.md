@@ -67,6 +67,18 @@ answer.
     digit clears it from the notes of every cell in that row, column, and box
     automatically (and undo puts them back), so you can work advanced
     techniques without re-pencilling by hand.
+  - **AI coach** (⚙ → AI coach) reads your stats and tells you what to work on.
+    It sends an **aggregate digest** — the same numbers the Stats page draws:
+    games per difficulty, median solve times, per-technique typical times, hints
+    per technique, the moves that ran past your target, and your last ten games
+    — and gets back a headline, what's working, techniques to work on with a
+    drill for each, habits to change, and one goal for the next game. Any
+    technique the trainer covers gets a **Drill it** button right in the advice.
+    No move logs, no puzzles, nothing identifying leaves the device, and the
+    panel shows you the exact payload (**What gets sent**) before you press the
+    button. This is the only feature besides screenshot import that calls the
+    Claude API, so it needs `ANTHROPIC_API_KEY` on the deployment — it says so
+    plainly if the key is missing, and everything else keeps working without it.
   - **Settings** (⚙ → Settings) collects the toggles that change how the board
     behaves — **Highlight matches**, **Error highlighting**, and **Auto-update
     notes** — on one screen, each with a line explaining what it actually does
@@ -244,10 +256,19 @@ space can't quietly split a profile in two.)
   the screenshot to Claude Vision and returns the parsed grid as a `9×9` array
   of numbers (`0` = empty).
 
+- **`api/coach.js`** — a Vercel serverless function that takes an aggregate
+  digest of your own solve statistics and returns coaching as structured JSON
+  (headline, strengths, techniques to work on, habits, next-session goal). The
+  digest is built client-side and carries no move logs, grids, or identifiers.
+
 ```
 Browser ──(base64 image)──▶ /api/parse-sudoku-image ──▶ Claude Vision
    ▲                                                          │
    └──────────────── { grid: number[9][9] } ◀────────────────┘
+
+Browser ──(stats digest)──▶ /api/coach ──▶ Claude
+   ▲                                        │
+   └──────── { coaching: {...} } ◀─────────┘
 ```
 
 ## Local development
