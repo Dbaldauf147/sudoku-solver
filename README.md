@@ -281,9 +281,19 @@ always one of three things and none of them used to be visible:
   is its own.
 - **Reaching the store but not landing** — any status other than 200 is reported
   as-is (a 5xx usually means the store's credentials are set but wrong).
+- **Uploads failing** — reads and writes fail independently, and a device whose
+  writes keep failing used to look perfectly healthy: writes retry forever in
+  silence and the status line only ever reflected reads. A failing upload now
+  turns that line into a warning and is named here with its status and payload
+  size, because "my last game never reached my other device" is what it looks
+  like from the outside.
 
-It also shows how many games the cloud holds against how many this device holds,
-so a one-way sync is obvious, with **Sync now** and **Re-check** buttons.
+It also names the **newest game on this device against the newest in the store**,
+which is the fork when a game goes missing: if this device's newest isn't in the
+store the upload is at fault, and if the store's newest isn't here the download
+is. **Upload this device** re-queues and pushes this device's copies — the repair
+for a push that never landed, and safe to press at any time, since every merge is
+a union and it can only add. **Sync now** and **Re-check** sit beside it.
 
 ## Staying on the current version
 
