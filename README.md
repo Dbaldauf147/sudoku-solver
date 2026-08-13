@@ -17,9 +17,23 @@ answer.
     names the harder technique that unlocks it (pointing pair, box/line
     reduction, naked/hidden pair, X-wing), so those moves are categorized in
     your stats instead of lumped together as "Other".
+  - **Two kinds of hidden single, told apart.** A digit pinned to one cell of a
+    **box** is the one you see at a glance; a digit pinned to one cell of a
+    **row or column** *while its box still allows it elsewhere* only turns up if
+    you scan the whole line. Those are different skills, so they're separate
+    labels — **Hidden single (box)** and **Hidden single (row/column)** — with
+    their own colours, worked examples, and counts everywhere techniques are
+    named: move explanations, hints, the step-by-step solve, and stats. The
+    explanation for a row/column one says outright that a box scan wouldn't have
+    found it, and the hint shades **just the unit that proves it** — the box for
+    a box single, the line for a row/column one. Box singles are always offered
+    first, since they're the easier spot. Both stay in the Easy band, so no
+    puzzle's difficulty rating changes; games logged before the split keep their
+    old "Hidden single" label and still show up in stats.
   - **Hint** finds the next cell you can logically prove, explains it (and
-    names the technique — naked/hidden single, pointing pair, box/line
-    reduction, naked pair, hidden pair, X-wing), and offers to place it for you.
+    names the technique — naked single, hidden single in a box or a
+    row/column, pointing pair, box/line reduction, naked pair, hidden pair,
+    X-wing), and offers to place it for you.
   - **Step-by-step solve** replays the *whole* solve the way you'd do it on
     paper: place, prune, place, prune, until the grid is full. It works
     **easiest-first and one placement per step** — every naked single before any

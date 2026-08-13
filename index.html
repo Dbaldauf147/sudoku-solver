@@ -1110,11 +1110,42 @@
         }
         return null;
       }
+      // A hidden single can be pinned by more than one unit at once — the same cell is often the last
+      // spot for its digit in both its box and its row. The box is the one you spot at a glance (nine
+      // cells in view), so it takes the label; "row/column" therefore means the box does *not* pin it
+      // and only scanning the whole line finds the cell. Those are different skills, so the coach
+      // names, colours, and counts them separately.
+      const HS_BOX = "Hidden single (box)", HS_LINE = "Hidden single (row/column)";
+      // Boxes first, so a hidden single that any box pins is always found (and labelled) as one.
+      const HS_UNITS = UNITS.filter((u) => u.kind === "box").concat(UNITS.filter((u) => u.kind !== "box"));
+      // Every unit that pins n to (r,c), box first when a box is among them.
+      function hiddenUnitsFor(M, grid, r, c, n) {
+        const out = [];
+        for (const u of HS_UNITS) {
+          if (!u.cells.some(([rr, cc]) => rr === r && cc === c)) continue;
+          if (u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && M[rr][cc].has(n)).length === 1) out.push(u);
+        }
+        return out;
+      }
+      function hiddenSingleTech(units) { return units.length && units[0].kind === "box" ? HS_BOX : HS_LINE; }
+      // The extra sentence a row/column hidden single earns: why the quick box scan misses it.
+      function hiddenSingleAside(units, n) {
+        const u = units[0];
+        if (!u || u.kind === "box") return "";
+        const others = units.filter((x) => x.kind !== "box").map((x) => x.name);
+        return ` Its box still has room for ${n} elsewhere, so only the ${others.join(" / ")} scan pins it — not a box scan.`;
+      }
+      function hiddenSingleReason(units, n, r, c) {
+        return `Within ${units[0].name}, ${n} can only go in ${loc(r, c)} — every other empty cell there is blocked from being ${n}.${hiddenSingleAside(units, n)}`;
+      }
       function findHiddenSingle(M, grid) {
-        for (const u of UNITS) for (let n = 1; n <= 9; n++) {
+        for (const u of HS_UNITS) for (let n = 1; n <= 9; n++) {
           const spots = u.cells.filter(([r, c]) => grid[r][c] === 0 && M[r][c].has(n));
           if (spots.length === 1) { const [r, c] = spots[0];
-            if (M[r][c].size > 1) return { r, c, n, tech: "Hidden single", reason: `Within ${u.name}, ${n} can only go in ${loc(r, c)} — every other empty cell there is blocked from being ${n}.` };
+            if (M[r][c].size > 1) {
+              const units = hiddenUnitsFor(M, grid, r, c, n);
+              return { r, c, n, tech: hiddenSingleTech(units), unit: units[0], reason: hiddenSingleReason(units, n, r, c) };
+            }
           }
         }
         return null;
@@ -1585,12 +1616,19 @@
 
       // ---- technique-based difficulty grading ----
       // A puzzle's grade is the hardest technique its logical solution needs — clue count doesn't factor in.
-      const TECH_RANK = { "Full house": 1, "Naked single": 1, "Hidden single": 2, "Pointing pair": 3, "Pointing triple": 3, "Locked candidate": 3,
+      // A row/column-only hidden single is the harder of the two to spot, so it outranks the box one and
+      // wins the "hardest step" label when a solve needs both. It stays inside the Easy band (see
+      // tierForRank) — the split renames and re-orders, it doesn't re-grade: a board that graded Easy
+      // before still grades Easy.
+      const TECH_RANK = { "Full house": 1, "Naked single": 1, "Hidden single (box)": 2, "Hidden single (row/column)": 2.5, "Hidden single": 2,
+        "Pointing pair": 3, "Pointing triple": 3, "Locked candidate": 3,
         "Naked pair": 4, "Hidden pair": 4, "Naked triple": 5, "Hidden triple": 5, "Naked quad": 5, "Hidden quad": 5,
         "X-wing": 6, "XY-wing": 6, "Skyscraper": 6, "Two-string kite": 6,
         "Swordfish": 7, "XYZ-wing": 7, "Jellyfish": 7, "W-wing": 7, "Simple colouring": 7, "Remote pairs": 7, "XY-chain": 8,
         "Advanced": 9, "Forced": 9 };
-      function tierForRank(rank) { return rank <= 2 ? "Easy" : rank <= 5 ? "Medium" : "Hard"; }
+      // Both hidden singles (ranks 2 and 2.5) sit in the Easy band; every other rank is a whole number,
+      // so the 2.5 cut leaves every previously graded puzzle in the tier it already had.
+      function tierForRank(rank) { return rank <= 2.5 ? "Easy" : rank <= 5 ? "Medium" : "Hard"; }
       // Solve using only the techniques we can name, keeping a persistent candidate map so elimination
       // techniques stack, and record the hardest technique the solution required.
       function logicalSolve(grid) {
@@ -1606,7 +1644,7 @@
         for (let guard = 0; guard < 600; guard++) {
           if (isFull()) return { solved: true, hardest, hardestRank };
           const ns = findNakedSingle(M, g); if (ns) { bump("Naked single"); place(ns.r, ns.c, ns.n); continue; }
-          const hs = findHiddenSingle(M, g); if (hs) { bump("Hidden single"); place(hs.r, hs.c, hs.n); continue; }
+          const hs = findHiddenSingle(M, g); if (hs) { bump(hs.tech); place(hs.r, hs.c, hs.n); continue; }
           let moved = false;
           for (const tech of ELIM_TECHS) { const e = tech(M, g); if (e) { bump(e.tech); for (const [r, c, n] of e.elims) M[r][c].delete(n); moved = true; break; } }
           if (!moved) return { solved: false, hardest, hardestRank };   // needs a technique beyond ours
@@ -1633,12 +1671,14 @@
       }
       function batchHiddenSingles(M, g) {
         const out = [], taken = new Set();
-        for (const u of UNITS) for (let n = 1; n <= 9; n++) {
+        for (const u of HS_UNITS) for (let n = 1; n <= 9; n++) {   // boxes first: the easiest ones come out first
           const spots = u.cells.filter(([r, c]) => g[r][c] === 0 && M[r][c].has(n));
           if (spots.length !== 1) continue;
           const [r, c] = spots[0];
           if (M[r][c].size < 2 || taken.has(r * 9 + c)) continue;   // size 1 is a naked single; one digit per cell
-          taken.add(r * 9 + c); out.push({ r, c, n, unit: u.name });
+          const units = hiddenUnitsFor(M, g, r, c, n);
+          taken.add(r * 9 + c);
+          out.push({ r, c, n, unit: units[0].name, tech: hiddenSingleTech(units), aside: hiddenSingleAside(units, n) });
         }
         return out;
       }
@@ -1683,8 +1723,8 @@
           }
           const hidden = batchHiddenSingles(M, g)[0];
           if (hidden) {
-            placeBatch([hidden], "Hidden single", "Hidden single",
-              `${hidden.n} fits nowhere else in ${hidden.unit}, so it must go here even though the cell still shows other candidates. No naked single was left, and this is the next-simplest move.`);
+            placeBatch([hidden], hidden.tech, hidden.tech,
+              `${hidden.n} fits nowhere else in ${hidden.unit}, so it must go here even though the cell still shows other candidates.${hidden.aside} No naked single was left, and this is the next-simplest move.`);
             continue;
           }
           let e = null;
@@ -1834,10 +1874,9 @@
         for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c) && u.cells.every(([rr, cc]) => (rr === r && cc === c) || grid[rr][cc] !== 0))
           return { tech: "Full house", body: `${loc(r, c)} was the last empty cell in ${u.name}, so it takes the only digit missing there.` };
         if (M[r][c].size === 1) return { tech: "Naked single", body: `the other eight digits all already appear in ${loc(r, c)}'s row, column, or box, leaving ${n}.` };
-        for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
-          const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && M[rr][cc].has(n));
-          if (spots.length === 1) return { tech: "Hidden single", body: `${n} can't go in any other empty cell of ${u.name}, so it must be here.` };
-        }
+        const hUnits = hiddenUnitsFor(M, grid, r, c, n);
+        if (hUnits.length) return { tech: hiddenSingleTech(hUnits),
+          body: `${n} can't go in any other empty cell of ${hUnits[0].name}, so it must be here.${hiddenSingleAside(hUnits, n)}` };
         // No single-cell proof yet. Apply elimination techniques one at a time, accumulating their
         // deductions, until this cell is pinned — then credit the technique that finally unlocked it.
         // Iterating (rather than trying a single round) means moves that need several chained
@@ -2587,6 +2626,9 @@
       // Tint the whole row/column/box a technique operates on, so the reasoning is visible on the board.
       // Units shared by 2+ of the technique's cells are shown; a lone target cell shows its three units.
       function highlightHintUnits(hint) {
+        // A hidden single carries the unit that proves it, so shade exactly that unit — the box for a
+        // box single, the line for a row/column one. That's the difference between the two, on the board.
+        if (hint.unit) { for (const [r, c] of hint.unit.cells) cellEls[r][c].classList.add("hint-unit"); return; }
         const cells = hint.highlight || [], rc = {}, cc = {}, bc = {};
         for (const [r, c] of cells) { rc[r] = (rc[r] || 0) + 1; cc[c] = (cc[c] || 0) + 1; const b = boxIndex(r, c) - 1; bc[b] = (bc[b] || 0) + 1; }
         const rows = new Set(), cols = new Set(), boxes = new Set();
@@ -2623,12 +2665,13 @@
           for (let d = 1; d <= 9; d++) { if (d === n) continue; const w = blockerFor(r, c, d); lines.push(`  ${d} — ${w ? "already in " + w : "—"}`); }
           return `Ruling out each digit for ${loc(r, c)}:\n${lines.join("\n")}\nEvery digit but ${n} is taken, so ${loc(r, c)} = ${n} (a naked single).`;
         }
-        for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
+        for (const u of HS_UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
           const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && candidates(grid, rr, cc).includes(n));
           if (spots.length === 1 && spots[0][0] === r && spots[0][1] === c) {
             const others = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && !(rr === r && cc === c));
             const lines = others.map(([rr, cc]) => { const w = blockerFor(rr, cc, n); return `  ${loc(rr, cc)} — ${w ? "no (" + n + " in " + w + ")" : "open"}`; });
-            return `Where can ${n} go in ${u.name}?\n${lines.join("\n")}\nOnly ${loc(r, c)} is left, so ${n} goes there (a hidden single).`;
+            const kind = u.kind === "box" ? "a hidden single in the box" : `a hidden single in the ${u.kind} only — the box still leaves ${n} room elsewhere`;
+            return `Where can ${n} go in ${u.name}?\n${lines.join("\n")}\nOnly ${loc(r, c)} is left, so ${n} goes there (${kind}).`;
           }
         }
         return `${hint.reason}\n\nThat elimination is what frees ${loc(r, c)} — apply it to your notes and ${loc(r, c)} = ${n} becomes forced.`;
@@ -2637,7 +2680,7 @@
       // available elimination, else the Advanced fallback (which just reveals the solution digit).
       function hintStepFrom(M, grid) {
         const s = findNakedSingle(M, grid) || findHiddenSingle(M, grid);
-        if (s) return { kind: "place", r: s.r, c: s.c, n: s.n, tech: s.tech, highlight: [[s.r, s.c]], reason: `${s.tech}: ${s.reason}` };
+        if (s) return { kind: "place", r: s.r, c: s.c, n: s.n, tech: s.tech, unit: s.unit, highlight: [[s.r, s.c]], reason: `${s.tech}: ${s.reason}` };
         for (const tech of ELIM_TECHS) { const e = tech(M, grid); if (e) return { kind: "eliminate", tech: e.tech, highlight: e.highlight, reason: `${e.tech}: ${e.reason}`, elims: e.elims }; }
         // Named techniques stalled — rather than a generic "Advanced", give a concrete forced move:
         // pick the most-constrained cell and prove its digit by showing the other candidates dead-end.
@@ -3728,7 +3771,7 @@
       };
       const TRAINER_BLURB = {
         "Naked single": "A cell where eight digits are already blocked, leaving one. The bread-and-butter scan.",
-        "Hidden single": "A digit that fits only one cell of a row, column, or box — even if that cell has other candidates.",
+        "Hidden single": "A digit that fits only one cell of a row, column, or box — even if that cell has other candidates. Mixes the box ones you see at a glance with the row/column-only ones you have to scan a whole line for.",
         "Pointing pair": "A digit confined to one row/column within a box, letting you clear it from the rest of that line.",
         "Pointing triple": "Three cells of a box on one line pin a digit there, clearing it from the line outside the box.",
         "Naked pair": "Two cells sharing the same two candidates — those digits leave every other cell in the unit.",
@@ -3742,6 +3785,8 @@
       };
       // Techniques we can drill, easiest → hardest (bank insertion order), skipping empty buckets.
       const TRAINER_TECHS = Object.keys(TRAINER_BANK).filter((t) => (TRAINER_BANK[t] || []).length);
+      // Both hidden-single labels drill from the one hidden-single bank — its puzzles throw up both kinds.
+      function drillKey(tech) { return tech && tech.startsWith("Hidden single") ? "Hidden single" : tech; }
       function loadDrill(tech) {
         const bank = TRAINER_BANK[tech]; if (!bank || !bank.length) return;
         closeLibrary(); document.getElementById("exModal").hidden = true;
@@ -3758,11 +3803,11 @@
       function recommendedDrills(games) {
         const drillable = new Set(TRAINER_TECHS);
         const missed = {};
-        for (const g of games) for (const [t, c] of Object.entries(g.missed || {})) if (drillable.has(t)) missed[t] = (missed[t] || 0) + c;
+        for (const g of games) for (const [t, c] of Object.entries(g.missed || {})) { const k = drillKey(t); if (drillable.has(k)) missed[k] = (missed[k] || 0) + c; }
         const correct = games.flatMap((g) => (g.moves || []).filter((m) => m.correct));
         const overall = median(correct.map((m) => m.dt));
         const byTech = {};
-        for (const m of correct) if (drillable.has(m.tech)) (byTech[m.tech] ||= []).push(m.dt);
+        for (const m of correct) { const k = drillKey(m.tech); if (drillable.has(k)) (byTech[k] ||= []).push(m.dt); }
         const recs = [];
         for (const t of drillable) {
           const miss = missed[t] || 0;
@@ -3797,7 +3842,10 @@
       }
 
       // ---- stats / deep dive ----
-      const TECH_COLORS = { "Full house": "#86efac", "Naked single": "#4ade80", "Hidden single": "#6ea8fe", "Pointing pair": "#f59e0b",
+      // "Hidden single" (unqualified) is the pre-split label — kept so games logged before the box vs
+      // row/column distinction still colour and render.
+      const TECH_COLORS = { "Full house": "#86efac", "Naked single": "#4ade80",
+        "Hidden single (box)": "#6ea8fe", "Hidden single (row/column)": "#818cf8", "Hidden single": "#6ea8fe", "Pointing pair": "#f59e0b",
         "Pointing triple": "#f59e0b", "Locked candidate": "#f59e0b", "Box/line reduction": "#f59e0b",
         "Naked pair": "#a78bfa", "Hidden pair": "#a78bfa", "Naked triple": "#7c3aed", "Hidden triple": "#7c3aed",
         "Naked quad": "#6d28d9", "Hidden quad": "#6d28d9",
@@ -3927,9 +3975,12 @@
         "Naked single": { givens: { "0,4": 4, "1,4": 5, "2,4": 6, "3,3": 7, "3,5": 8, "4,0": 1, "4,1": 2, "4,2": 3 },
           target: ["4,4"], marks: { "4,4": [9] },
           caption: "1–8 all already appear in this cell's row, column, or 3×3 box, so 9 is the only digit left. That's a naked single." },
-        "Hidden single": { givens: { "1,6": 7, "2,7": 7, "4,1": 7, "5,2": 7 },
+        "Hidden single (box)": { givens: { "1,6": 7, "2,7": 7, "4,1": 7, "5,2": 7 },
           target: ["0,0"], focus: ["0,1", "0,2", "1,0", "1,1", "1,2", "2,0", "2,1", "2,2"], marks: { "0,0": [7] },
-          caption: "Inside the highlighted box, 7 is blocked from every cell except the top-left one (each other cell's row or column already has a 7). So 7 hides there — a hidden single." },
+          caption: "Inside the highlighted box, 7 is blocked from every cell except the top-left one (each other cell's row or column already has a 7). So 7 hides there — a hidden single you can spot from the box alone." },
+        "Hidden single (row/column)": { givens: { "0,3": 1, "0,4": 2, "0,5": 3, "0,6": 4, "0,7": 5, "0,8": 6, "4,1": 7, "7,2": 7 },
+          target: ["0,0"], focus: ["0,1", "0,2", "0,3", "0,4", "0,5", "0,6", "0,7", "0,8"], marks: { "0,0": [7] },
+          caption: "Along the highlighted row, 7 has nowhere else to go: six cells are filled, and the 7s in columns 2 and 3 block the two beside the target. The box alone would never show it — 7 still fits in the two cells directly under the target, so a box scan finds nothing. Only running the row catches this one." },
         "Pointing pair": { givens: { "0,0": 5, "1,0": 6, "1,1": 7, "1,2": 8, "2,0": 9, "2,1": 1, "2,2": 2 },
           focus: ["0,1", "0,2"], elim: ["0,6", "0,7"], marks: { "0,1": [3, 4], "0,2": [3, 4], "0,6": [3], "0,7": [3] }, struck: { "0,6": [3], "0,7": [3] },
           caption: "In this box, 3 can only go in the two highlighted cells — both in the top row. So 3 is removed from the rest of that row (crossed out)." },
@@ -4043,9 +4094,9 @@
         renderTechGames(tech);
         const drillBtn = document.getElementById("exDrill");
         if (drillBtn) {
-          const canDrill = !!(TRAINER_BANK[tech] && TRAINER_BANK[tech].length);
+          const key = drillKey(tech), canDrill = !!(TRAINER_BANK[key] && TRAINER_BANK[key].length);
           drillBtn.hidden = !canDrill;
-          drillBtn.onclick = canDrill ? () => loadDrill(tech) : null;
+          drillBtn.onclick = canDrill ? () => loadDrill(key) : null;
         }
         document.getElementById("exModal").hidden = false;
       }
@@ -4083,7 +4134,7 @@
       // Grouped roughly by difficulty; each name matches the labels recorded in stats so the
       // colours and the tap-through example line up with what gets tracked while you play.
       const TECH_CATALOG = [
-        ["Basics", ["Full house", "Naked single", "Hidden single"]],
+        ["Basics", ["Full house", "Naked single", "Hidden single (box)", "Hidden single (row/column)", "Hidden single"]],
         ["Intersections", ["Pointing pair", "Pointing triple", "Locked candidate"]],
         ["Naked subsets", ["Naked pair", "Naked triple", "Naked quad"]],
         ["Hidden subsets", ["Hidden pair", "Hidden triple", "Hidden quad"]],
@@ -4096,7 +4147,9 @@
       const TECH_INFO = {
         "Full house": "The last empty cell in a row, column, or box — only one digit can go there.",
         "Naked single": "A cell left with just one candidate once its row, column, and box are accounted for.",
-        "Hidden single": "A digit that fits only one cell of a unit, even if that cell still shows other candidates.",
+        "Hidden single (box)": "A digit that fits only one cell of a box, even if that cell still shows other candidates. The easy one — nine cells in view.",
+        "Hidden single (row/column)": "A digit that fits only one cell of a row or column, while its box still allows it elsewhere. Only a full line scan finds it.",
+        "Hidden single": "The pre-split label, kept for games logged before box and row/column hidden singles were counted separately.",
         "Pointing pair": "A digit confined to one row or column within a box, removing it from that line outside the box.",
         "Pointing triple": "The three-cell version of a pointing pair.",
         "Locked candidate": "A digit confined to one box within a row or column, removing it elsewhere in that box (claiming).",
@@ -4130,6 +4183,8 @@
         document.getElementById("techniques").hidden = false;
         boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none";
       }
+      // Labels the coach no longer produces; listed only when a stored game still carries them.
+      const LEGACY_TECHS = new Set(["Hidden single"]);
       function renderTechniques() {
         const counts = {};
         for (const g of lsGet(STATS_KEY)) for (const m of (g.moves || [])) counts[m.tech] = (counts[m.tech] || 0) + 1;
@@ -4138,6 +4193,7 @@
           html += `<h3>${esc(group)}</h3><table class="grid">`;
           for (const t of items) {
             const c = counts[t] || 0, color = TECH_COLORS[t] || "#94a3b8";
+            if (LEGACY_TECHS.has(t) && !c) continue;   // retired label: only worth a row if old games used it
             html += `<tr class="trow" data-tech="${esc(t)}"><td><span style="color:${color}">●</span> <b>${esc(t)}</b><div class="k" style="margin-top:3px">${esc(TECH_INFO[t] || "")}</div></td><td style="white-space:nowrap;text-align:right">${c ? "×" + c : "—"}</td></tr>`;
           }
           html += `</table>`;
@@ -4771,10 +4827,13 @@
         for (const u of UNITS) {
           if (!u.cells.some(([rr, cc]) => rr === r && cc === c)) continue;
           if (tech === "Full house" && u.cells.every(([rr, cc]) => (rr === r && cc === c) || grid[rr][cc] !== 0)) return u.cells;
-          if (tech === "Hidden single") {
-            const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && M[rr][cc].has(n));
-            if (spots.length === 1) return u.cells;
-          }
+        }
+        // Show the unit the label claims: the box for a box single, the line for a row/column one
+        // (older games logged both as plain "Hidden single" — those fall back to whichever pins it).
+        if (tech === HS_BOX || tech === HS_LINE || tech === "Hidden single") {
+          const units = hiddenUnitsFor(M, grid, r, c, n);
+          const want = tech === HS_LINE ? units.find((u) => u.kind !== "box") : units[0];
+          if (want) return want.cells;
         }
         const peers = () => peersOf(r, c).filter((p) => !(p.r === r && p.c === c)).map((p) => [p.r, p.c]);
         if (tech === "Naked single") return peers();
@@ -5003,12 +5062,9 @@
           const n = [...M[tr][tc]][0];
           return { n, tech: "Naked single", reason: `${loc(tr, tc)} can only be ${n}: every other digit already appears in its row, column, or 3×3 box.` };
         }
-        for (const u of UNITS) {
-          if (!u.cells.some(([r, c]) => r === tr && c === tc)) continue;
-          for (const n of M[tr][tc]) {
-            const spots = u.cells.filter(([r, c]) => grid[r][c] === 0 && M[r][c].has(n));
-            if (spots.length === 1) return { n, tech: "Hidden single", reason: `Within ${u.name}, ${n} can only go in ${loc(tr, tc)} — every other empty cell there is blocked from being ${n}.` };
-          }
+        for (const n of M[tr][tc]) {
+          const units = hiddenUnitsFor(M, grid, tr, tc, n);
+          if (units.length) return { n, tech: hiddenSingleTech(units), unit: units[0], reason: hiddenSingleReason(units, n, tr, tc) };
         }
         return null;
       }
@@ -5030,7 +5086,7 @@
         const steps = [];
         while (steps.length <= RETIME_MAX_STEPS) {
           const s = singleAt(M, grid, tr, tc);
-          if (s) return { steps, place: { kind: "place", r: tr, c: tc, n: s.n, tech: s.tech, highlight: [[tr, tc]], reason: `${s.tech}: ${s.reason}` } };
+          if (s) return { steps, place: { kind: "place", r: tr, c: tc, n: s.n, tech: s.tech, unit: s.unit, highlight: [[tr, tc]], reason: `${s.tech}: ${s.reason}` } };
           if (steps.length === RETIME_MAX_STEPS) break;
           // Collect what fires now, then take a step that bears on the target if one is on offer.
           const fired = [];
