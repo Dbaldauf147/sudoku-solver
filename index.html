@@ -4419,13 +4419,23 @@
         if (!list.length) return `${head}<div class="card">Nothing went over pace — all ${total} move${total === 1 ? "" : "s"} came in under ${fmtDt(pace)}. 🎯</div>`;
         const lost = list.reduce((n, e) => n + e.over, 0), spent = list.reduce((n, e) => n + e.m.dt, 0);
         const ranked = [...list].sort((a, b) => b.m.dt - a.m.dt);
+        // These rows are moves, not techniques: tapping one opens *that* move — the board as it stood
+        // and the proof behind this very digit — rather than the technique's generic worked example.
+        // A game stored without its clue grid can't be rebuilt, so those rows fall back to the example
+        // (openMoveDetail does the falling back) and the caption promises only what's on offer.
+        const canProve = canExplainMove(g);
         let rows = `<table class="grid"><tr><th>Move</th><th>Technique</th><th>Took</th><th>Over</th></tr>`;
-        for (const e of ranked) rows += `<tr class="trow" data-tech="${esc(e.m.tech)}"><td>#${e.i + 1} <span class="k">${loc(e.m.r, e.m.c)}=${e.m.n}</span></td>` +
+        for (const e of ranked) rows += `<tr class="trow" data-move="${e.i}" data-tech="${esc(e.m.tech)}"` +
+          ` title="${canProve ? esc(`See ${loc(e.m.r, e.m.c)} = ${e.m.n} on the board as it stood`) : "See this technique's example"}">` +
+          `<td>#${e.i + 1} <span class="k">${loc(e.m.r, e.m.c)}=${e.m.n}</span></td>` +
           `<td>${techDot(e.m.tech)} ${esc(e.m.tech)}</td><td><b>${fmtDt(e.m.dt)}</b></td><td class="over">+${fmtDt(e.over)}</td></tr>`;
         rows += `</table>`;
+        const tapNote = canProve
+          ? `Slowest first. Tap a move to replay the board as it stood and see why that digit was provable — its technique's refresher is one tap further in.`
+          : `Slowest first. This game was saved without its clue grid, so its moves can't be rebuilt — tap a row for a refresher on its technique.`;
         return `${head}<div class="card"><b>${list.length}</b> of ${total} moves ran past your ${fmtDt(pace)} pace — <b>${fmtTime(spent)}</b> spent on them, <b>${fmtTime(lost)}</b> of it over pace.</div>
-          ${rows}<p class="hintline">Slowest first. Tap a row for a refresher on its technique.</p>
-          <h4 class="over-sub">By technique</h4>${overTechTable(overTargetByTech(list))}`;
+          ${rows}<p class="hintline">${tapNote}</p>
+          <h4 class="over-sub">By technique</h4>${overTechTable(overTargetByTech(list))}<p class="hintline">Tap a technique for its worked example.</p>`;
       }
       // "All games" — the same cut across every game with a target, plus the per-game trail so you can
       // see which techniques keep landing here and what they cost each time.
@@ -4717,7 +4727,13 @@
           <div id="tabAll" class="tabpane">${allPane}</div>`;
         document.getElementById("sb").onclick = () => document.getElementById("statsBtn").click();
         statsEl.querySelectorAll(".stab").forEach((btn) => { btn.onclick = () => setStatsTab(btn.dataset.tab); });
-        statsEl.querySelectorAll(".trow").forEach((row) => { row.onclick = () => openExample(row.dataset.tech); });
+        // A row carrying data-move is one specific move (the over-pace list) — open that move's own
+        // proof; every other row is a technique row and opens the worked example.
+        const paneGame = thisPaneGame;   // the game those rows were rendered from
+        statsEl.querySelectorAll(".trow").forEach((row) => {
+          const k = row.dataset.move;
+          row.onclick = k === undefined ? () => openExample(row.dataset.tech) : () => openMoveDetail(paneGame, Number(k));
+        });
         statsEl.querySelectorAll(".drill-learn").forEach((b) => (b.onclick = () => openExample(b.dataset.t)));
         statsEl.querySelectorAll(".drill-play").forEach((b) => (b.onclick = () => loadDrill(b.dataset.t)));
         const pick = document.getElementById("gamePick");
