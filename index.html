@@ -204,6 +204,7 @@
       .mv-why .tech { color: var(--accent); font-weight: 700; }
       .mv-why .tech.bad { color: var(--bad); }
       .mv-note { color: var(--muted); font-size: 0.82rem; margin: 10px 0 0; text-align: left; }
+      .mv-struck { color: var(--bad); text-decoration: line-through; }
       /* Over your target pace (amber) and slowest-of-this-game (red) are separate flags; a move can
          trip both, and the sharper red wins the colour by coming last. */
       .move.over .meta { color: var(--warn); font-weight: 600; }
@@ -323,6 +324,8 @@
         grid-template-rows: repeat(3, 1fr); font-size: clamp(0.34rem, 1.4vw, 0.5rem); color: var(--num); font-weight: 700; }
       .mpencil span { display: flex; align-items: center; justify-content: center; }
       .mpencil span.struck { color: var(--bad); text-decoration: line-through; }
+      /* The digit a proof lands on, so it reads at a glance among the candidates struck around it. */
+      .mpencil span.picked { color: #065f46; font-size: 1.5em; }
 
       /* ---- "a new version is live" bar ---- */
       .update-bar { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 60; display: flex; align-items: center; gap: 10px;
@@ -619,6 +622,7 @@
           <h2 id="moveTitle">Move</h2>
           <p id="moveMeta" class="mv-meta"></p>
           <div id="moveBoard"></div>
+          <p id="moveStrikes" class="mv-note" hidden></p>
           <p id="moveWhy" class="body mv-why"></p>
           <p id="moveNote" class="mv-note" hidden></p>
           <div class="actions">
@@ -1870,13 +1874,25 @@
         saveActiveGame();
       }
 
+      // What a proof rules out, as [row, col, digit] triples. The move detail draws these struck through
+      // in red where they sit, so the deduction is shown as well as described: a single rules out digits
+      // (the eight blocked in its own cell, or the digit in every other cell of the unit that can't take
+      // it), while an elimination technique rules out exactly the candidates it removes.
+      function blockedDigits(r, c, n) { const out = []; for (let d = 1; d <= 9; d++) if (d !== n) out.push([r, c, d]); return out; }
+      function unitStrikes(u, grid, r, c, n) {
+        return u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && !(rr === r && cc === c)).map(([rr, cc]) => [rr, cc, n]);
+      }
       function describeCorrect(M, grid, r, c, n) {
         for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c) && u.cells.every(([rr, cc]) => (rr === r && cc === c) || grid[rr][cc] !== 0))
-          return { tech: "Full house", body: `${loc(r, c)} was the last empty cell in ${u.name}, so it takes the only digit missing there.` };
-        if (M[r][c].size === 1) return { tech: "Naked single", body: `the other eight digits all already appear in ${loc(r, c)}'s row, column, or box, leaving ${n}.` };
+          return { tech: "Full house", body: `${loc(r, c)} was the last empty cell in ${u.name}, so it takes the only digit missing there.`,
+            strikes: blockedDigits(r, c, n), strikeNote: `every digit but ${n} is already placed in ${u.name}.` };
+        if (M[r][c].size === 1) return { tech: "Naked single", body: `the other eight digits all already appear in ${loc(r, c)}'s row, column, or box, leaving ${n}.`,
+          strikes: blockedDigits(r, c, n), strikeNote: `each one already appears in ${loc(r, c)}'s row, column, or box, leaving ${n} standing.` };
         const hUnits = hiddenUnitsFor(M, grid, r, c, n);
         if (hUnits.length) return { tech: hiddenSingleTech(hUnits),
-          body: `${n} can't go in any other empty cell of ${hUnits[0].name}, so it must be here.${hiddenSingleAside(hUnits, n)}` };
+          body: `${n} can't go in any other empty cell of ${hUnits[0].name}, so it must be here.${hiddenSingleAside(hUnits, n)}`,
+          strikes: unitStrikes(hUnits[0], grid, r, c, n),
+          strikeNote: `${n} is blocked in every other empty cell of ${hUnits[0].name}, so ${loc(r, c)} is the only one left to take it.` };
         // No single-cell proof yet. Apply elimination techniques one at a time, accumulating their
         // deductions, until this cell is pinned — then credit the technique that finally unlocked it.
         // Iterating (rather than trying a single round) means moves that need several chained
@@ -1888,14 +1904,16 @@
           if (!e) break;                       // nothing more to deduce with the techniques we name
           cur = applyElims(cur, e.elims);
           if (cur[r][c].size === 1 && [...cur[r][c]][0] === n)
-            return { tech: e.tech, body: `${e.reason} That leaves ${n} as the only candidate for ${loc(r, c)}.` };
+            return { tech: e.tech, body: `${e.reason} That leaves ${n} as the only candidate for ${loc(r, c)}.`,
+              strikes: e.elims, strikeNote: `the ${e.tech} removes ${e.elims.length === 1 ? "it" : "them"}, and that's what leaves ${loc(r, c)} holding only ${n}.` };
           for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
             const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && cur[rr][cc].has(n));
             if (spots.length === 1 && spots[0][0] === r && spots[0][1] === c)
-              return { tech: e.tech, body: `${e.reason} That leaves ${loc(r, c)} as the only spot for ${n} in ${u.name}.` };
+              return { tech: e.tech, body: `${e.reason} That leaves ${loc(r, c)} as the only spot for ${n} in ${u.name}.`,
+                strikes: e.elims, strikeNote: `the ${e.tech} removes ${e.elims.length === 1 ? "it" : "them"}, and that's what leaves ${loc(r, c)} as the only spot for ${n} in ${u.name}.` };
           }
         }
-        return { tech: "Forced", body: `${n} is correct — it's the only digit that lets the rest of the grid be completed from ${loc(r, c)}.` };
+        return { tech: "Forced", body: `${n} is correct — it's the only digit that lets the rest of the grid be completed from ${loc(r, c)}.`, strikes: [] };
       }
       function handleMove(r, c) {
         inputs[r][c].classList.remove("wrong");
@@ -4051,7 +4069,10 @@
       };
       function renderMiniBoard(container, ex) {
         container.innerHTML = "";
-        const givens = ex.givens || {}, focus = new Set(ex.focus || []), target = new Set(ex.target || []), elim = new Set(ex.elim || []), marks = ex.marks || {}, struck = ex.struck || {};
+        // `pick` names the digit a cell resolves to, drawn larger and in green among the candidates
+        // struck around it — the answer the proof arrives at, told apart from the ones it ruled out.
+        const givens = ex.givens || {}, focus = new Set(ex.focus || []), target = new Set(ex.target || []), elim = new Set(ex.elim || []),
+          marks = ex.marks || {}, struck = ex.struck || {}, pick = ex.pick || {};
         const b = document.createElement("div"); b.className = "miniboard";
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
           const key = r + "," + c, cell = document.createElement("div");
@@ -4063,7 +4084,9 @@
           else if (marks[key]) {
             const pen = document.createElement("div"); pen.className = "mpencil";
             const st = struck[key] || [];
-            for (let n = 1; n <= 9; n++) { const s = document.createElement("span"); if (marks[key].includes(n)) { s.textContent = n; if (st.includes(n)) s.className = "struck"; } pen.appendChild(s); }
+            for (let n = 1; n <= 9; n++) { const s = document.createElement("span");
+              if (marks[key].includes(n)) { s.textContent = n; if (st.includes(n)) s.className = "struck"; else if (pick[key] === n) s.className = "picked"; }
+              pen.appendChild(s); }
             cell.appendChild(pen);
           }
           b.appendChild(cell);
@@ -4874,11 +4897,12 @@
           const body = conf.cells.length
             ? `${n} was already in this ${listUnits(conf.units)} — at ${listUnits(conf.cells.map((x) => loc(x.r, x.c)))}. A ${listUnits(conf.units)} can't hold two ${n}s, so this entry broke a rule outright.`
             : `${n} broke no rule on the board yet, but it isn't what ${loc(r, c)} resolves to — it would have made the puzzle impossible to finish. ${loc(r, c)} is ${g.solution[r][c]}.`;
-          return { grid, tech: "Mistake", body, focus: conf.cells.map((x) => [x.r, x.c]), logged: m.tech };
+          return { grid, tech: "Mistake", body, focus: conf.cells.map((x) => [x.r, x.c]), strikes: [], logged: m.tech };
         }
         const M = candMap(grid);
         const d = describeCorrect(M, grid, r, c, n);
-        return { grid, tech: d.tech, body: d.body, focus: proofCells(M, grid, r, c, n, d.tech), logged: m.tech };
+        return { grid, tech: d.tech, body: d.body, focus: proofCells(M, grid, r, c, n, d.tech),
+          strikes: d.strikes || [], strikeNote: d.strikeNote, logged: m.tech };
       }
 
       const moveModal = document.getElementById("moveModal");
@@ -4890,21 +4914,42 @@
         const p = moveProof(g, k);
         const focus = new Set(p.focus.map(([r, c]) => r + "," + c));
         focus.delete(m.r + "," + m.c);
+        // The candidates the proof rules out, drawn where they sat. A struck digit has to be pencilled
+        // in to be crossed out, so each one is added to its cell's marks if the board doesn't still
+        // offer it — for a single that's the digits already blocked, which is exactly the proof.
+        const struck = {}, strikeCells = new Set();
+        for (const [r, c] of p.strikes || []) strikeCells.add(r + "," + c);
         // Pencil in the candidates on the cells that carry the proof, so it reads off the board.
         const givensMap = {}, marks = {};
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
           const key = r + "," + c;
           if (p.grid[r][c]) givensMap[key] = String(p.grid[r][c]);
-          else if (focus.has(key) || (r === m.r && c === m.c)) marks[key] = candidates(p.grid, r, c);
+          else if (focus.has(key) || strikeCells.has(key) || (r === m.r && c === m.c)) marks[key] = candidates(p.grid, r, c);
         }
+        for (const [r, c, d] of p.strikes || []) {
+          const key = r + "," + c;
+          if (p.grid[r][c]) continue;                        // the cell got filled in later — nothing to strike
+          (struck[key] ||= []).push(d);
+          if (!marks[key]) marks[key] = candidates(p.grid, r, c);
+          if (!marks[key].includes(d)) marks[key] = [...marks[key], d].sort((a, b) => a - b);
+        }
+        // Cells that only appear because something was struck there — an elimination technique's
+        // victims — get the same red wash the worked examples use.
+        const elim = [...strikeCells].filter((key) => !focus.has(key) && key !== m.r + "," + m.c);
         document.getElementById("moveTitle").textContent = `Move ${k + 1}: ${loc(m.r, m.c)} = ${m.n}`;
         const pace = paceFor(g);
         document.getElementById("moveMeta").innerHTML = `${fmtDt(m.dt)}${pace && m.dt > pace ? ` · <span style="color:var(--warn);font-weight:600">over your ${fmtDt(pace)} pace ⏱</span>` : ""}${m.correct ? "" : ` · <span style="color:var(--bad);font-weight:600">mistake</span>`}`;
         renderMiniBoard(document.getElementById("moveBoard"), {
-          givens: givensMap, marks,
+          givens: givensMap, marks, struck, elim,
           target: [m.r + "," + m.c],
           focus: [...focus],
+          pick: m.correct ? { [m.r + "," + m.c]: m.n } : {},
         });
+        // Say what the red means, in the terms this particular proof used.
+        const legend = document.getElementById("moveStrikes");
+        const nStruck = Object.values(struck).reduce((n, ds) => n + ds.length, 0);
+        legend.hidden = !nStruck;
+        if (nStruck) legend.innerHTML = `<b class="mv-struck">${nStruck} candidate${nStruck === 1 ? "" : "s"} struck in red</b> — ${esc(p.strikeNote || "the deductions this move rests on.")}`;
         const why = document.getElementById("moveWhy");
         why.innerHTML = "";
         const tag = document.createElement("span"); tag.className = "tech" + (m.correct ? "" : " bad"); tag.textContent = p.tech + " — ";
