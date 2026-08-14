@@ -460,6 +460,7 @@
             <button id="techBtn">Techniques</button>
             <button id="check">Check entries</button>
             <button id="pastePuzzle">Paste puzzle</button>
+            <button id="nytPuzzle" title="Load today's New York Times daily Sudoku">Today's NYT puzzle</button>
             <button id="saveGame">Save game</button>
             <button id="settingsBtn">Settings</button>
             <button id="targetBtn">Target times</button>
@@ -550,6 +551,22 @@
           <div class="actions">
             <button id="pasteCancel">Cancel</button>
             <button id="pasteLoad" class="primary">Load puzzle</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="nytModal" class="overlay" hidden>
+        <div class="modal">
+          <h2>Today's NYT puzzle</h2>
+          <p>Pick a difficulty and today's New York Times daily Sudoku is fetched and loaded, with its difficulty and date filled in for you.</p>
+          <div class="actions" style="justify-content:flex-start;flex-wrap:wrap">
+            <button class="nyt-diff" data-difficulty="easy">Easy</button>
+            <button class="nyt-diff" data-difficulty="medium">Medium</button>
+            <button class="nyt-diff" data-difficulty="hard">Hard</button>
+          </div>
+          <p id="nytMsg" class="body" style="min-height:1.2em;margin:8px 0 0"></p>
+          <div class="actions">
+            <button id="nytCancel">Cancel</button>
           </div>
         </div>
       </div>
@@ -820,6 +837,8 @@
         if (ex && !ex.hidden) { if (e.key === "Enter" || e.key === "Escape") document.getElementById("exClose").click(); return; }
         const paste = document.getElementById("pasteModal");
         if (paste && !paste.hidden) { if (e.key === "Escape") document.getElementById("pasteCancel").click(); return; } // let the textarea receive digits
+        const nyt = document.getElementById("nytModal");
+        if (nyt && !nyt.hidden) { if (e.key === "Escape") document.getElementById("nytCancel").click(); return; }
         const prof = document.getElementById("profileModal");
         if (prof && !prof.hidden) {
           if (e.key === "Escape") prof.hidden = true;
@@ -5343,6 +5362,63 @@
         const added = autoSaveImport(readGrid());
         showReady(`Puzzle pasted and ${added ? "saved to your library" : "matched to one already saved"}${syncNote()}. Set the difficulty and source below, then start the timer.`);
       });
+
+      // ---- today's NYT puzzle ----
+      // The grid is fetched by /api/nyt-sudoku (the NYT page can't be read from the browser —
+      // it's cross-origin with no CORS headers), then loaded through the same path as a pasted
+      // puzzle. It's an unofficial route into a page nobody here controls, so a failure is
+      // reported for what it is and always leaves the manual imports as a way through.
+      const nytModal = document.getElementById("nytModal"), nytMsg = document.getElementById("nytMsg");
+      const nytButtons = Array.from(document.querySelectorAll(".nyt-diff"));
+      function openNyt() {
+        if (solving) return showExplain("Already solving", "Press Edit puzzle first, then load today's NYT puzzle.", "info");
+        closeLibrary(); closeHistory(); closeStats();
+        nytMsg.textContent = ""; nytModal.hidden = false;
+      }
+      function closeNyt() { nytModal.hidden = true; }
+      document.getElementById("nytPuzzle").addEventListener("click", openNyt);
+      document.getElementById("nytCancel").addEventListener("click", closeNyt);
+      nytModal.addEventListener("click", (e) => { if (e.target.id === "nytModal") closeNyt(); });
+
+      // What went wrong, in terms of what the player can do about it. `reason` comes from the
+      // endpoint; a fetch that never landed (offline, endpoint not deployed) has none.
+      function nytError(reason, error) {
+        if (reason === "blocked") return "The New York Times turned down the request from this app's server — that's their block on the deployment, not something a retry fixes. Import a screenshot instead.";
+        if (reason === "markup-changed") return "The puzzle wasn't where it usually sits on the NYT page — they've most likely changed their layout, so this needs a code fix. Import a screenshot instead.";
+        if (reason === "timeout" || reason === "network") return "Couldn't reach the New York Times just now. Try again in a moment, or import a screenshot.";
+        return `${error || "Unknown error"} — you can still paste the puzzle or import a screenshot.`;
+      }
+
+      nytButtons.forEach((btn) => btn.addEventListener("click", async () => {
+        const difficulty = btn.dataset.difficulty;
+        const tier = difficulty.charAt(0).toUpperCase() + difficulty.slice(1);   // easy -> Easy, to match the app's own labels
+        nytButtons.forEach((b) => { b.disabled = true; });
+        nytMsg.textContent = `Fetching today's ${difficulty} puzzle…`;
+        try {
+          const r = await fetch(`/api/nyt-sudoku?difficulty=${difficulty}`, { cache: "no-store" });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(nytError(data.reason, data.error));
+
+          const grid = parsePuzzle(String(data.puzzle || ""));
+          // The endpoint validates the digits; these check the puzzle itself, exactly as a
+          // pasted grid is checked, so a mangled response can't become an unsolvable board.
+          if (hasConflict(grid)) throw new Error("The puzzle NYT returned has a repeated digit in a row, column, or box.");
+          if (!solve(clone(grid))) throw new Error("The puzzle NYT returned has no valid solution.");
+
+          closeNyt();
+          writeGrid(grid); renderPencils();
+          // Set these before auto-saving: a newly added library entry takes its difficulty
+          // and source from the popup fields.
+          difficultyEl.value = tier;
+          sourceEl.value = data.date ? `NYT ${data.date}` : "NYT";
+          const added = autoSaveImport(readGrid());
+          showReady(`Today's NYT ${difficulty} puzzle${data.date ? ` (${data.date})` : ""} is loaded and ${added ? "saved to your library" : "matched to one already saved"}${syncNote()}. Start the timer when you're ready.`);
+        } catch (err) {
+          nytMsg.textContent = err.message || "Couldn't load today's puzzle.";
+        } finally {
+          nytButtons.forEach((b) => { b.disabled = false; });
+        }
+      }));
 
       // ---- init ----
       select(0, 0);

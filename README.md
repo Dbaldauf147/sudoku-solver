@@ -90,6 +90,25 @@ answer.
     spaces and line breaks are ignored) — handy for puzzles you find as a
     string rather than a screenshot. It's checked for conflicts and
     solvability, then saved to your library like any import.
+  - **Today's NYT puzzle** fetches the New York Times daily Sudoku — pick Easy,
+    Medium, or Hard and it loads with the difficulty and puzzle date already
+    filled in, then saves to your library like any other import. The grid goes
+    through the same conflict and solvability checks as a pasted one.
+
+    The fetch happens server-side, in `/api/nyt-sudoku`: the NYT puzzle pages
+    embed the grid in the HTML as a `window.gameData` blob (free — no
+    subscription or login), but the page is cross-origin with no CORS headers,
+    so the browser can't read it directly. Two things worth knowing:
+
+    - **It's unofficial.** There is no public NYT sudoku API, so this depends
+      on the shape of a page nobody here controls. If they change it the
+      endpoint says so in as many words, and the screenshot and paste imports
+      still work. NYT may also refuse the request from a deployment's
+      datacenter IP; that failure is reported as their block rather than
+      retried.
+    - **Don't republish what you pull.** Personal use is one thing;
+      **Share catalogue** would turn auto-imported NYT puzzles into
+      redistributed NYT content, so keep them out of catalogues you share.
   - **Stats** opens a deep-dive: solve times and accuracy **per difficulty**,
     plus **over-time trends** that chart how your numbers move from game to
     game — a **solve time over time** sparkline per difficulty and a
@@ -371,3 +390,32 @@ a function under `api/`.
 ```
 
 Errors come back as `{ "error": "<message>" }` with a 4xx/5xx status.
+
+`GET /api/nyt-sudoku?difficulty=easy|medium|hard`
+
+```jsonc
+// response
+{
+  "difficulty": "hard",
+  "date": "2026-08-14",                        // NYT's print date, when the page carries one
+  "puzzle": "003000100900400 ...",             // 81 chars, 0 = empty cell
+  "grid": [[0,0,3, ...], ... 9 rows ...]
+}
+```
+
+Errors come back as `{ "error": "<message>", "reason": "<code>" }` with a
+4xx/5xx status. `reason` distinguishes the failures that need different
+responses from the caller:
+
+| `reason` | Status | Meaning |
+| --- | --- | --- |
+| `bad-request` | 400 | `difficulty` wasn't one of the three |
+| `blocked` | 502 | NYT refused this server (403/401) — usually the deployment's IP |
+| `upstream` | 502 | NYT returned some other non-2xx |
+| `network` | 502 | NYT couldn't be reached |
+| `timeout` | 504 | NYT didn't respond within 10s |
+| `markup-changed` | 502 | The page loaded but the puzzle wasn't in it — needs a code fix |
+| `malformed` | 502 | The puzzle data wasn't 81 cells of 0-9 |
+
+Successful responses are edge-cached (`s-maxage=1800`) since the puzzle changes
+once a day; failures are `no-store`.
