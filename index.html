@@ -3333,10 +3333,19 @@
       }
       scheduleActivePoll();
 
+      // ---- offline ----
+      // The coach is self-contained — solving, hints, the walkthrough, stats and the move proofs are all
+      // client-side over localStorage — so caching the shell is enough to make it open and play with no
+      // network. sw.js keeps index.html network-first precisely so the version check below still reads
+      // the server's build, and leaves /api/ alone so sync and image import fail the way they always did.
+      if ("serviceWorker" in navigator && location.protocol.startsWith("http"))
+        window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js").catch(() => {}); });
+
       // ---- staying on the deployed version ----
-      // With no service worker, a reload always fetches the current build (index.html is served
-      // must-revalidate) — but a tab or installed app that never reloads keeps running the build it
-      // opened with, which is why a phone can sit on last week's version while the website is current.
+      // A reload always fetches the current build (index.html is served must-revalidate, and the service
+      // worker goes to the network for it first) — but a tab or installed app that never reloads keeps
+      // running the build it opened with, which is why a phone can sit on last week's version while the
+      // website is current.
       // So: fingerprint index.html from whichever validator the host sends, re-check it on the same
       // wake events the sync uses, and act when it changes. Backgrounded and idle, it reloads itself;
       // mid-game it asks first, since your entries are saved but your place on screen isn't.
