@@ -309,13 +309,30 @@ is. **Upload this device** re-queues and pushes this device's copies — the rep
 for a push that never landed, and safe to press at any time, since every merge is
 a union and it can only add. **Sync now** and **Re-check** sit beside it.
 
+## Offline
+
+The coach is self-contained — solving, hints, the step-by-step walkthrough,
+stats, and the per-move proofs are all client-side JavaScript over
+`localStorage` — so the only thing that ever needed the network was fetching the
+page. **`sw.js`** caches the shell (`index.html`, the manifest, the icons, the
+win sound), which is enough to launch and play with no connection at all: cold
+start on a plane, solve, take hints, run the walkthrough, browse stats, open any
+move's proof.
+
+Two things still need the network, and both already fail soft: `/api/games`
+sync (Settings reports it plainly) and the screenshot import. Neither is cached
+— the worker never touches `/api/`, so game data is never served from a stale
+copy.
+
 ## Staying on the current version
 
-There's no service worker, deliberately: `index.html` is served
-`must-revalidate`, so a reload always lands on the newest deploy and there's no
-cache layer to go stale. The gap that leaves is a tab — or an installed app on a
-phone — that simply never reloads, and so keeps running the build it opened with
-while the website has moved on.
+The service worker fetches `index.html` **network-first**, and `must-revalidate`
+on the server means a reload always lands on the newest deploy — the cached copy
+is strictly the offline fallback, never something you can get stuck on while
+online. (The worker asks for the page `no-store` so it can't be handed the
+browser's own cached copy either.) The gap that leaves is a tab — or an
+installed app on a phone — that simply never reloads, and so keeps running the
+build it opened with while the website has moved on.
 
 So the page fingerprints `index.html` (its `ETag`, else `Last-Modified`, else
 `Content-Length`) and re-checks it every minute while visible, plus whenever the
