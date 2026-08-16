@@ -3,6 +3,9 @@
   "functions": {
     "api/parse-sudoku-image.js": {
       "maxDuration": 30
+    },
+    "api/nyt-sudoku.js": {
+      "maxDuration": 15
     }
   },
   "headers": [

@@ -107,6 +107,44 @@ answer.
     spaces and line breaks are ignored) — handy for puzzles you find as a
     string rather than a screenshot. It's checked for conflicts and
     solvability, then saved to your library like any import.
+  - **Today's three, under the top menu.** A strip on the main page shows the
+    day's New York Times puzzles — **Easy · Medium · Hard**, labelled with the
+    date — so any of them is one click from the board. Ones you've solved are
+    ticked, the one on the board is highlighted, and hovering gives the clue
+    count and your time. They're fetched in the background when the app opens;
+    if that fails (offline, NYT down) the strip just stays hidden and the
+    board is unaffected. Clicking one while a game is in progress asks before
+    clearing it.
+  - **Today's NYT** is a tab in the game library (⚙ → *Today's NYT puzzle* is a
+    shortcut to it) holding the same puzzles with more detail. All three
+    difficulties are fetched **in one request** when you open the tab, and
+    **Easy / Medium / Hard** sub-tabs switch between them with no further
+    network — each showing a thumbnail of the grid, its clue count, whether
+    it's already in your library, and your time if you've played it. **Play**
+    loads it with the difficulty and puzzle date already filled in, saved to
+    your library like any other import. Every grid goes through the same
+    conflict and solvability checks as a pasted one, so an unplayable one is
+    dropped rather than loaded.
+
+    The day's puzzles are held until the date rolls over, so reopening the tab
+    costs nothing; **Refresh** forces a refetch. If NYT only returns some of
+    the three, the ones that arrived are still playable and the sub-tabs for
+    the others are disabled with a note.
+
+    The fetch happens server-side, in `/api/nyt-sudoku`: the NYT puzzle pages
+    embed the grid in the HTML as a `window.gameData` blob (free — no
+    subscription or login), but the page is cross-origin with no CORS headers,
+    so the browser can't read it directly. Two things worth knowing:
+
+    - **It's unofficial.** There is no public NYT sudoku API, so this depends
+      on the shape of a page nobody here controls. If they change it the
+      endpoint says so in as many words, and the screenshot and paste imports
+      still work. NYT may also refuse the request from a deployment's
+      datacenter IP; that failure is reported as their block rather than
+      retried.
+    - **Don't republish what you pull.** Personal use is one thing;
+      **Share catalogue** would turn auto-imported NYT puzzles into
+      redistributed NYT content, so keep them out of catalogues you share.
   - **Stats** opens a deep-dive: solve times and accuracy **per difficulty**,
     plus **over-time trends** that chart how your numbers move from game to
     game — a **solve time over time** sparkline per difficulty and a
@@ -402,3 +440,53 @@ a function under `api/`.
 ```
 
 Errors come back as `{ "error": "<message>" }` with a 4xx/5xx status.
+
+`GET /api/nyt-sudoku?difficulty=easy|medium|hard`
+
+```jsonc
+// response
+{
+  "difficulty": "hard",
+  "date": "2026-08-14",                        // NYT's print date, when the page carries one
+  "puzzle": "003000100900400 ...",             // 81 chars, 0 = empty cell
+  "grid": [[0,0,3, ...], ... 9 rows ...]
+}
+```
+
+`GET /api/nyt-sudoku?difficulty=all` — what the **Today's NYT** tab asks for.
+
+```jsonc
+// response
+{
+  "date": "2026-08-14",
+  "puzzles": {                                 // same shape as above, per difficulty
+    "easy":   { "difficulty": "easy",   "date": "...", "puzzle": "...", "grid": [...] },
+    "medium": { ... },
+    "hard":   { ... }
+  },
+  "missing": []                                // difficulties that couldn't be read
+}
+```
+
+One NYT page normally embeds all three difficulties, so `all` usually costs a
+**single** upstream fetch; any difficulty that page doesn't carry is fetched
+from its own page concurrently. A partial result is still a `200` — two puzzles
+beat none — with the shortfall named in `missing`. It only fails outright when
+none of the three could be read.
+
+Errors come back as `{ "error": "<message>", "reason": "<code>" }` with a
+4xx/5xx status. `reason` distinguishes the failures that need different
+responses from the caller:
+
+| `reason` | Status | Meaning |
+| --- | --- | --- |
+| `bad-request` | 400 | `difficulty` wasn't one of the three |
+| `blocked` | 502 | NYT refused this server (403/401) — usually the deployment's IP |
+| `upstream` | 502 | NYT returned some other non-2xx |
+| `network` | 502 | NYT couldn't be reached |
+| `timeout` | 504 | NYT didn't respond within 10s |
+| `markup-changed` | 502 | The page loaded but the puzzle wasn't in it — needs a code fix |
+| `malformed` | 502 | The puzzle data wasn't 81 cells of 0-9 |
+
+Successful responses are edge-cached (`s-maxage=1800`) since the puzzle changes
+once a day; failures are `no-store`.
