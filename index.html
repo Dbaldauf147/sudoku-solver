@@ -690,7 +690,7 @@
           <div id="exBoard"></div>
           <p id="exCaption" class="body"></p>
           <div id="exGames"></div>
-          <div class="actions"><button id="exDrill" hidden>Practice this</button><button id="exClose" class="primary">Got it</button></div>
+          <div class="actions"><button id="exSteps" hidden>Show me step by step</button><button id="exDrill" hidden>Practice this</button><button id="exClose" class="primary">Got it</button></div>
         </div>
       </div>
 
@@ -1614,6 +1614,14 @@
       // The elimination techniques, simplest first. Shared by the hint engine and per-move attribution so
       // both credit the same technique. A move only falls back to "Advanced" when none of these make progress.
       const ELIM_TECHS = [lockedCandidates, nakedPair, hiddenPair, nakedTriple, hiddenTriple, nakedQuad, hiddenQuad, xWing, skyscraper, twoStringKite, xyWing, xyzWing, wWing, swordfish, jellyfish, simpleColoring, remotePairs, xyChain];
+      // Which function can emit which label. Hunting a worked example for one technique means asking
+      // one function per position rather than all eighteen — and a label with no rule behind it
+      // (Mistake, Forced, Advanced) isn't in here at all, so the hunt can be called off immediately.
+      const ELIM_TECH_FN = { "Pointing pair": lockedCandidates, "Pointing triple": lockedCandidates, "Locked candidate": lockedCandidates,
+        "Naked pair": nakedPair, "Hidden pair": hiddenPair, "Naked triple": nakedTriple, "Hidden triple": hiddenTriple,
+        "Naked quad": nakedQuad, "Hidden quad": hiddenQuad, "X-wing": xWing, "Skyscraper": skyscraper, "Two-string kite": twoStringKite,
+        "XY-wing": xyWing, "XYZ-wing": xyzWing, "W-wing": wWing, "Swordfish": swordfish, "Jellyfish": jellyfish,
+        "Simple colouring": simpleColoring, "Remote pairs": remotePairs, "XY-chain": xyChain };
 
       function findHint(grid) {
         const M = candMap(grid);
@@ -4156,6 +4164,14 @@
           drillBtn.hidden = !canDrill;
           drillBtn.onclick = canDrill ? () => loadDrill(key) : null;
         }
+        // The same step-by-step board a hint draws, on a real position where this technique is the
+        // move. Only offered when one is actually found — no position, no button, no empty promise.
+        const stepsBtn = document.getElementById("exSteps");
+        if (stepsBtn) {
+          const canShow = !!findTechPosition(tech);
+          stepsBtn.hidden = !canShow;
+          stepsBtn.onclick = canShow ? () => openTechVisual(tech) : null;
+        }
         document.getElementById("exModal").hidden = false;
       }
       // List every logged game that used this technique, newest first, with its date and difficulty.
@@ -4378,7 +4394,8 @@
       }
       function renderWalkthrough() {
         if (walkPanel.hidden || !walkSteps.length) return;
-        const total = walkSteps.length, s = walkSteps[walkIdx], isHint = walkMode === "hint";
+        const total = walkSteps.length, s = walkSteps[walkIdx];
+        const isEx = walkMode === "example", isHint = walkMode === "hint" || isEx;   // both draw a proof
         const pct = Math.round(((walkIdx + 1) / total) * 100);
         const jump = (id, label, off) => `<button id="${id}"${off ? " disabled" : ""}>${label}</button>`;
         // A hint runs to a handful of steps — the ±5 / Start / End jumps only earn their space on a full solve.
@@ -4392,8 +4409,10 @@
             <span><b class="cut">7</b> ruled out</span><span><b class="new">7</b> placed</span>`
           : `<span><b>7</b> given</span><span><b class="placed">7</b> placed here</span>
             <span><b class="new">7</b> placed this step</span><span><b class="cut">7</b> removed this step</span>`;
-        walkPanel.innerHTML = `<button id="wBack">← Back</button><h2>${isHint ? "Hint, step by step" : "Step-by-step solution"}</h2>
-          <p class="hintline">${isHint
+        walkPanel.innerHTML = `<button id="wBack">← Back</button><h2>${isEx ? `${esc(walkFrom)}, step by step` : isHint ? "Hint, step by step" : "Step-by-step solution"}</h2>
+          <p class="hintline">${isEx
+            ? `A worked example on a real board where this technique is the move — a practice puzzle, not your game. Your own board and clock are untouched.`
+            : isHint
             ? `Every deduction between the board as it stands and ${esc(walkFrom)}, drawn out. Your game and clock are untouched.`
             : `The full solve from ${esc(walkFrom)}, one deduction at a time. Your game and clock are untouched.`}</p>
           <div class="walk-nav">
@@ -4454,18 +4473,23 @@
       // a naked single crosses out all eight rivals in the cell and highlights the digit blocking each
       // one; a hidden single crosses the digit out of every other cell in its unit. Both are things you
       // can only really see on a grid.
-      function buildHintVisual(grid, chain) {
+      function buildHintVisual(grid, chain, isExample) {
         const place = chain.place, M = candMap(grid), steps = [];
         const snap = () => M.map((row) => row.map((s) => [...s].sort((a, b) => a - b)));
         const push = (o) => steps.push({ grid: clone(grid), marks: snap(), placed: [], cut: [], focus: [], unit: [], target: [], placedCells: new Set(), ...o });
-        const { r, c, n } = place, at = loc(r, c);
-        const nSteps = chain.steps.length;
+        const nSteps = chain.steps.length, first = chain.steps[0];
+        const at = place ? loc(place.r, place.c) : null;
 
-        push({ target: [[r, c]],
+        // A worked example can stop at the elimination — there isn't always a placement waiting behind
+        // it — so the opening frame points at the pattern instead of a cell when there's no cell yet.
+        push({ target: place ? [[place.r, place.c]] : [],
+          focus: place || !first ? [] : first.highlight, unit: place || !first ? [] : hintUnitCells(first),
           title: "The board as it stands",
-          detail: `Every empty cell is pencilled in with the digits its row, column, and box still allow. ${at} — in amber — is the cell this hint proves. ${nSteps
-            ? `It isn't forced yet: ${nSteps} elimination${nSteps === 1 ? "" : "s"} ${nSteps === 1 ? "has" : "have"} to come off the board first.`
-            : `Nothing has to come off the board first — the next step is the whole proof.`}` });
+          detail: `Every empty cell is pencilled in with the digits its row, column, and box still allow. ${place
+            ? `${at} — in amber — is the cell being proved. ${nSteps
+                ? `It isn't forced yet: ${nSteps} elimination${nSteps === 1 ? "" : "s"} ${nSteps === 1 ? "has" : "have"} to come off the board first.`
+                : `Nothing has to come off the board first — the next step is the whole proof.`}`
+            : `The highlighted cells are where the ${first ? first.tech.toLowerCase() : "pattern"} sits.`}` });
 
         // Each elimination, with what it removes struck in red where it sat rather than silently gone.
         for (const s of chain.steps) {
@@ -4476,11 +4500,25 @@
           for (const [rr, cc, d] of s.elims) M[rr][cc].delete(d);
         }
 
+        // No placement behind the eliminations (a worked example can end on the removal itself): the
+        // technique's own step is the payoff, so stop there rather than inventing a cell to point at.
+        if (!place) return steps;
+
         // The proof itself: which digits die in the cell, or which cells in the unit can't hold the digit.
+        const { r, c, n } = place;
         const marks = snap(), cut = [], focus = [], lines = [];
         const pencil = (rr, cc, d) => { if (!marks[rr][cc].includes(d)) marks[rr][cc] = [...marks[rr][cc], d].sort((a, b) => a - b); cut.push([rr, cc, d]); };
         let title = `Why ${at} = ${n}`, detail = place.reason, unit = hintUnitCells(place);
-        if (place.unit) {                                    // hidden single — walk the unit that pins it
+        // A full house is proved by what's *already* in the unit, not by what's struck out of the cell:
+        // eight digits are down, one is missing, and the last empty cell takes it.
+        const house = place.tech !== "Full house" ? null
+          : UNITS.find((u) => u.cells.some(([rr, cc]) => rr === r && cc === c) && u.cells.every(([rr, cc]) => (rr === r && cc === c) || grid[rr][cc]));
+        if (house) {
+          const had = house.cells.filter(([rr, cc]) => grid[rr][cc]);
+          for (const [rr, cc] of had) focus.push([rr, cc]);
+          unit = house.cells;
+          detail = `${at} is the last empty cell in ${house.name}. The other eight hold ${had.map(([rr, cc]) => grid[rr][cc]).sort((a, b) => a - b).join(", ")} — every digit but ${n} — so ${n} is the one left to place. That's a full house, the simplest move there is.`;
+        } else if (place.unit) {                             // hidden single — walk the unit that pins it
           for (const [rr, cc] of place.unit.cells) {
             if ((rr === r && cc === c) || grid[rr][cc]) continue;
             pencil(rr, cc, n); focus.push([rr, cc]);
@@ -4506,7 +4544,9 @@
         const done = clone(grid); done[r][c] = n;
         steps.push({ grid: done, marks: snap(), placed: [[r, c, n]], cut: [], focus: [], unit: [], target: [], placedCells: new Set(),
           title: `${at} = ${n}`, tech: place.tech !== "Forced" ? place.tech : null,
-          detail: `That's the move.${nSteps ? " Everything above was in service of this one cell." : ""} Place it here, or close this and place it yourself — either way the clock picks up where it left off.` });
+          detail: `That's the move.${nSteps ? " Everything above was in service of this one cell." : ""} ${isExample
+            ? "This is a practice board, so nothing here touches your own game — press Practice this for a puzzle where the technique is the crux."
+            : "Place it here, or close this and place it yourself — either way the clock picks up where it left off."}` });
         return steps;
       }
       function openHintVisual(chain) {
@@ -4517,6 +4557,76 @@
         walkMode = "hint"; walkFrom = `${loc(place.r, place.c)} = ${place.n}`;
         walkAction = { label: `Place ${place.n} in ${loc(place.r, place.c)}`,
           onClick: () => { pendingTech = place.tech; pendingHint = true; setValue(place.r, place.c, place.n); } };
+        walkPanel.hidden = false; renderWalkthrough();
+        boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause();
+      }
+
+      // ---- the same steps, for a technique you're practising ----
+      // A worked example was one hand-drawn frame with a caption. The visual hint can do better, but
+      // only from a real position — so this hunts one down: play a puzzle forward the way the solver
+      // would, and stop at the first board where the technique fires *from plain pencil marks*. That
+      // last part matters. A position that only works because of earlier eliminations can't be drawn
+      // honestly from the board alone, and a worked example you can't reproduce by filling candidates
+      // in yourself teaches nothing. The practice bank is searched first (its puzzles are picked so the
+      // technique is their crux), then the catalogue, which covers the techniques with no drill bank.
+      const SINGLE_TECHS = new Set(["Full house", "Naked single"]);
+      const techPositions = new Map();
+      function techPositionIn(start, tech) {
+        const g = clone(start), M = candMap(g), single = SINGLE_TECHS.has(tech) || tech.startsWith("Hidden single");
+        const fn = ELIM_TECH_FN[tech];
+        const put = (r, c, n) => {
+          g[r][c] = n; M[r][c] = new Set();
+          for (let i = 0; i < 9; i++) { M[r][i].delete(n); M[i][c].delete(n); }
+          for (const [br, bc] of boxCells(r, c)) M[br][bc].delete(n);
+        };
+        let fallback = null;
+        for (let guard = 0; guard < 400; guard++) {
+          const F = candMap(g);                              // plain pencil marks — no history baked in
+          if (single) {
+            const s = tech === "Full house" ? findFullHouse(F, g) : findNakedSingle(F, g) || findHiddenSingle(F, g);
+            // "Hidden single" (the pre-split label) matches either kind; the split labels match exactly.
+            if (s && (s.tech === tech || (tech === "Hidden single" && s.tech.startsWith("Hidden single"))))
+              return { grid: clone(g), steps: [], place: { kind: "place", r: s.r, c: s.c, n: s.n, tech: s.tech, unit: s.unit, highlight: [[s.r, s.c]], reason: `${s.tech}: ${s.reason}` } };
+          } else {
+            const e = fn(F, g);
+            if (e && e.tech === tech) {
+              const after = findNakedSingle(applyElims(F, e.elims), g) || findHiddenSingle(applyElims(F, e.elims), g);
+              const step = { kind: "eliminate", tech: e.tech, highlight: e.highlight, reason: `${e.tech}: ${e.reason}`, elims: e.elims };
+              const hit = { grid: clone(g), steps: [step], place: after
+                ? { kind: "place", r: after.r, c: after.c, n: after.n, tech: after.tech, unit: after.unit, highlight: [[after.r, after.c]], reason: `${after.tech}: ${after.reason}` }
+                : null };
+              if (after) return hit;                         // a position that also pays off in a placement
+              fallback ||= hit;                              // otherwise keep looking for one that does
+            }
+          }
+          // Advance the solve exactly as the solver would, so the positions we pass through are real.
+          const s = findNakedSingle(M, g) || findHiddenSingle(M, g);
+          if (s) { put(s.r, s.c, s.n); continue; }
+          let e = null;
+          for (const t of ELIM_TECHS) { e = t(M, g); if (e) break; }
+          if (!e) break;
+          for (const [r, c, n] of e.elims) M[r][c].delete(n);
+        }
+        return fallback;
+      }
+      function findTechPosition(tech) {
+        if (techPositions.has(tech)) return techPositions.get(tech);
+        // Mistake, Forced, Advanced and the like name no rule — there's no position to find.
+        if (!ELIM_TECH_FN[tech] && !SINGLE_TECHS.has(tech) && !tech.startsWith("Hidden single")) { techPositions.set(tech, null); return null; }
+        const bank = (TRAINER_BANK[drillKey(tech)] || []).map(parsePuzzle).concat(CATALOG.map((c) => c.grid));
+        let found = null;
+        for (const start of bank) { found = techPositionIn(start, tech); if (found) break; }
+        techPositions.set(tech, found);
+        return found;
+      }
+      function openTechVisual(tech) {
+        const pos = findTechPosition(tech); if (!pos) return;
+        document.getElementById("exModal").hidden = true;
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeSettings(); closeAudit();
+        walkSteps = buildHintVisual(pos.grid, pos, true); walkIdx = 0;
+        walkMode = "example"; walkFrom = tech;
+        const key = drillKey(tech), canDrill = !!(TRAINER_BANK[key] || []).length;
+        walkAction = canDrill ? { label: "Practice this", onClick: () => loadDrill(key) } : null;
         walkPanel.hidden = false; renderWalkthrough();
         boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause();
       }
