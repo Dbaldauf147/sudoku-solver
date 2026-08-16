@@ -154,6 +154,20 @@ answer.
     "Techniques to practice" weak-spots list in Stats) has a **Practice this**
     button that drops you straight into a matching drill — so you can go from
     spotting a weakness to training it in one tap.
+  - **Every technique, worked step by step on a real board.** The refresher
+    pop-up also has **Show me step by step**, which gives the technique the
+    same treatment a hint gets: a real position where that technique *is* the
+    move, then the elimination with its candidates struck in red where they
+    sit, then the single it opens up and the proof of it. The position isn't
+    hand-drawn — it's hunted out of the practice bank (and the catalogue for
+    the techniques with no drill) by playing a puzzle forward and stopping at
+    the first board where the technique fires **from plain pencil marks**, so
+    it's a position you could have reached yourself, and one that pays off in
+    a placement wherever possible. Every rule the coach names has one, from
+    full houses to XY-chains — including the ones that never had a hand-drawn
+    example. Labels that name no rule (a mistake, a forced move) don't offer
+    the button rather than inventing a lesson. **Practice this** sits right
+    there in the panel, so you can go from seeing the pattern to drilling it.
   - A **History** tab on the main page lists every game you've finished (or
     revealed), grouped by date, with its difficulty, source, time, and error
     count — tap **Details** on any entry to jump straight to that game's
