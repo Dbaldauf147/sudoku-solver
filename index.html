@@ -96,6 +96,16 @@
       .mini div:nth-child(9n) { border-right: 0; }
       .mini div:nth-child(n+73) { border-bottom: 0; }
 
+      /* Today's three NYT puzzles, sitting under the top menu. */
+      .nyt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 14px; }
+      .nyt-bar[hidden] { display: none; }
+      .nyt-bar-label { color: var(--muted); font-size: 0.78rem; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.04em; margin-right: 2px; }
+      .nyt-quick { padding: 6px 12px; font-size: 0.85rem; }
+      .nyt-quick.done { color: var(--ok); border-color: var(--ok); }
+      .nyt-quick.current { background: var(--sel); border-color: var(--accent); font-weight: 600; }
+      .nyt-quick:disabled { opacity: 0.45; }
+
       .topbar { position: relative; display: flex; flex-wrap: wrap; align-items: center;
         gap: 10px; margin-bottom: 14px; padding-right: 54px; }
       .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -490,6 +500,15 @@
             <button id="syncStatus" class="syncline" title="Where your saved games and history are stored — tap for details">Checking sync…</button>
           </div>
         </div>
+      </div>
+
+      <!-- Today's three NYT puzzles, one click from the board. Stays hidden until they've
+           actually loaded, so it never shows buttons that can't do anything. -->
+      <div class="nyt-bar" id="nytBar" hidden>
+        <span class="nyt-bar-label" id="nytBarLabel">NYT today</span>
+        <button class="nyt-quick" data-d="easy">Easy</button>
+        <button class="nyt-quick" data-d="medium">Medium</button>
+        <button class="nyt-quick" data-d="hard">Hard</button>
       </div>
 
       <div class="row solving">
@@ -2188,6 +2207,7 @@
         const stats = lsGet(STATS_KEY); stats.unshift(session); lsSet(STATS_KEY, stats); cloudSave("stats", stats);
         bumpBackupCounter();
         session = null; clearActiveGame();
+        renderNytBar();   // a finished game may have just ticked off one of today's three
       }
 
       // ---- buttons ----
@@ -3753,7 +3773,44 @@
           nyt.loading = false;
           nyt.error = err.message || "Couldn't load today's puzzles.";
         }
-        renderNytTab();
+        renderNytUI();
+      }
+
+      // Both views of the same day's puzzles: the strip under the top menu and the library tab.
+      function renderNytUI() { renderNytBar(); renderNytTab(); }
+
+      // The strip under the top menu: today's three, one click from the board. It marks what
+      // you've already solved and which one is on the board, so it doubles as the day's status.
+      function renderNytBar() {
+        const bar = document.getElementById("nytBar"); if (!bar) return;
+        if (!Object.keys(nyt.puzzles).length) { bar.hidden = true; return; }   // nothing loaded (or the fetch failed) — stay out of the way
+        bar.hidden = false;
+        document.getElementById("nytBarLabel").textContent = nyt.date ? `NYT ${fmtCatalogDate(nyt.date)}` : "NYT today";
+
+        const stats = lsGet(STATS_KEY);
+        // What's on the board right now, so the current puzzle can be marked rather than reloaded.
+        let onBoard = null;
+        try { onBoard = gridKey(solving ? clueGridNow() : readGrid()); } catch { onBoard = null; }
+
+        bar.querySelectorAll(".nyt-quick").forEach((b) => {
+          const d = b.dataset.d, tier = NYT_TIERS[d], p = nyt.puzzles[d];
+          b.disabled = !p;
+          if (!p) {
+            b.textContent = tier;
+            b.className = "nyt-quick";
+            b.title = `Today's ${tier.toLowerCase()} puzzle didn't come back from NYT`;
+            return;
+          }
+          const source = p.date ? `NYT ${p.date}` : "NYT";
+          const played = stats.find((s) => s && s.source === source && s.difficulty === tier);
+          const solved = !!(played && played.solved);
+          const current = onBoard && onBoard === gridKey(p.grid);
+          b.textContent = tier + (solved ? " ✓" : "");
+          b.className = `nyt-quick${solved ? " done" : ""}${current ? " current" : ""}`;
+          b.title = `${tier} · ${p.grid.flat().filter(Boolean).length} clues`
+            + (played ? ` · played${played.totalMs ? ` in ${fmtTime(played.totalMs)}` : ""}${solved ? " ✓" : ""}` : "")
+            + (current ? " · on the board now" : "");
+        });
       }
 
       // A thumbnail of the clues, so choosing a difficulty isn't blind.
@@ -3822,6 +3879,10 @@
       function playNyt(d) {
         const p = nyt.puzzles[d]; if (!p) return;
         const tier = NYT_TIERS[d];
+        // From the strip this sits one click from the board, so a game in progress is never
+        // discarded silently — unless it's already this same puzzle, where there's nothing to lose.
+        if (solving && gridKey(clueGridNow()) !== gridKey(p.grid) &&
+            !confirm(`Start today's NYT ${tier.toLowerCase()} puzzle? The game you're playing will be cleared — Save game in the ⚙ menu keeps it first.`)) return;
         closeLibrary();
         resetToEdit();
         writeGrid(p.grid);
@@ -3831,6 +3892,7 @@
         sourceEl.value = p.date ? `NYT ${p.date}` : "NYT";
         renderPencils();
         const added = autoSaveImport(readGrid());
+        renderNytBar();   // this one is on the board now
         showReady(`Today's NYT ${tier.toLowerCase()} puzzle${p.date ? ` (${p.date})` : ""} is loaded and ${added ? "saved to your library" : "matched to one already saved"}${syncNote()}. Start the timer when you're ready.`);
       }
 
@@ -5495,10 +5557,10 @@
       });
 
       // ---- today's NYT puzzle ----
-      // Lives in the game library as its own tab (renderNytTab), so all three of today's
-      // puzzles load together and the sub-tabs switch between them. This menu entry is just
-      // the shortcut to it.
+      // Two ways in on the same fetched day: the strip under the top menu (renderNytBar) for
+      // one-click play, and the library tab (renderNytTab) for the thumbnails and detail.
       document.getElementById("nytPuzzle").addEventListener("click", () => openLibrary("nyt"));
+      document.querySelectorAll(".nyt-quick").forEach((b) => b.addEventListener("click", () => playNyt(b.dataset.d)));
       // ---- init ----
       select(0, 0);
       if (!restoreActiveGame()) renderPencils();
@@ -5508,6 +5570,10 @@
         const code = new URLSearchParams(location.search).get("share");
         if (code) openShare(code);
       }).catch(() => {}); // init/cloud problems must never break the already-wired UI
+      // Fetch today's three in the background so the strip under the top menu is populated on
+      // arrival. It's one edge-cached request, it blocks nothing, and if it fails (offline, NYT
+      // down) the strip simply stays hidden — the tab reports the reason if you go looking.
+      loadNyt();
     </script>
   </body>
 </html>

@@ -90,8 +90,16 @@ answer.
     spaces and line breaks are ignored) — handy for puzzles you find as a
     string rather than a screenshot. It's checked for conflicts and
     solvability, then saved to your library like any import.
+  - **Today's three, under the top menu.** A strip on the main page shows the
+    day's New York Times puzzles — **Easy · Medium · Hard**, labelled with the
+    date — so any of them is one click from the board. Ones you've solved are
+    ticked, the one on the board is highlighted, and hovering gives the clue
+    count and your time. They're fetched in the background when the app opens;
+    if that fails (offline, NYT down) the strip just stays hidden and the
+    board is unaffected. Clicking one while a game is in progress asks before
+    clearing it.
   - **Today's NYT** is a tab in the game library (⚙ → *Today's NYT puzzle* is a
-    shortcut to it) holding the New York Times daily Sudoku. All three
+    shortcut to it) holding the same puzzles with more detail. All three
     difficulties are fetched **in one request** when you open the tab, and
     **Easy / Medium / Hard** sub-tabs switch between them with no further
     network — each showing a thumbnail of the grid, its clue count, whether
