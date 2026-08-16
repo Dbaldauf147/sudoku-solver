@@ -120,8 +120,18 @@
         background: var(--bg); border: 1px solid var(--line); border-radius: 10px;
         box-shadow: 0 16px 40px rgba(17, 20, 28, 0.22); overflow: hidden; }
       .dropdown[hidden] { display: none; }
-      .dropdown button { border: none; border-radius: 0; text-align: left; background: transparent; padding: 12px 14px; font-weight: 500; }
+      .dropdown button { border: none; border-radius: 0; text-align: left; background: transparent; padding: 12px 14px;
+        font-family: inherit; font-weight: 500; line-height: 1.2; }
       .dropdown button:hover { background: var(--panel); }
+      /* Import screenshot is a <label> wrapping a hidden file input, so it needs the row treatment
+         `.dropdown button` gives everything else in the menu. */
+      .dropdown label.file { border: none; border-radius: 0; text-align: left; background: transparent;
+        padding: 12px 14px; font-family: inherit; font-size: 0.95rem; font-weight: 500; line-height: 1.2; }
+      .dropdown label.file:hover { background: var(--panel); }
+      /* A profile name can run long — keep it on one line instead of widening the whole menu. */
+      .dropdown .whoami { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      /* Divider between the navigation group (profile, home, library, import) and the game actions. */
+      .dropdown .sep { border-top: 1px solid var(--line); }
       .syncline { padding: 10px 14px; font-size: 0.78rem; color: var(--muted); border-top: 1px solid var(--line); line-height: 1.3; }
       /* It's a button now (tap for sync details), so keep the divider `.dropdown button` would strip. */
       .dropdown button.syncline { border-top: 1px solid var(--line); font-weight: 400; }
@@ -476,16 +486,16 @@
     <main>
       <div class="topbar">
         <div class="tabs">
-          <button id="homeBtn" class="home" title="Back to your game">🏠 Home</button>
-          <label class="file">Import screenshot<input id="file" type="file" accept="image/*" /></label>
-          <button id="libraryBtn">Game library</button>
           <button id="practiceBtn" title="Drill one technique at a time">Practice</button>
-          <button id="whoami" class="whoami" title="Profile — tap to switch or sign in">Playing as: Guest</button>
         </div>
         <div class="menu">
           <button id="gear" aria-label="Menu" title="Menu">⚙</button>
           <div id="gearMenu" class="dropdown" hidden>
-            <button id="start">Start solving</button>
+            <button id="whoami" class="whoami" title="Profile — tap to switch or sign in">Playing as: Guest</button>
+            <button id="homeBtn" class="home" title="Back to your game">🏠 Home</button>
+            <button id="libraryBtn">Game library</button>
+            <label class="file">Import screenshot<input id="file" type="file" accept="image/*" /></label>
+            <button id="start" class="sep">Start solving</button>
             <button id="hint">Hint</button>
             <button id="walkBtn" title="Watch the puzzle solve itself, one deduction at a time">Step-by-step solve</button>
             <button id="statsBtn">Stats</button>
@@ -500,7 +510,6 @@
             <button id="reveal">Reveal solution</button>
             <button id="edit">Edit puzzle</button>
             <button id="clear">Clear board</button>
-            <button id="profileBtn">Profile</button>
             <button id="shareBtn">Share catalogue</button>
             <button id="backupBtn">Backup &amp; restore</button>
             <button id="syncStatus" class="syncline" title="Where your saved games and history are stored — tap for details">Checking sync…</button>
@@ -2333,8 +2342,9 @@
         }
         return false;
       }
-      document.getElementById("profileBtn").addEventListener("click", openProfile);
-      // "Playing as" chip in the top bar — shows Guest vs the active profile, opens the profile dialog.
+      // "Playing as" chip at the top of the ⚙ menu — shows Guest vs the active profile, opens the
+      // profile dialog. It replaces the separate "Profile" item the menu used to carry: same action,
+      // and this one names who you're playing as.
       const whoamiEl = document.getElementById("whoami");
       function renderWhoami() {
         whoamiEl.textContent = `Playing as: ${profile ? profile.name : "Guest"}`;
