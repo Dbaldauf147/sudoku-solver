@@ -106,14 +106,13 @@
       .nyt-quick.current { background: var(--sel); border-color: var(--accent); font-weight: 600; }
       .nyt-quick:disabled { opacity: 0.45; }
 
-      .topbar { position: relative; display: flex; flex-wrap: wrap; align-items: center;
-        gap: 10px; margin-bottom: 14px; padding-right: 54px; }
-      .tabs { display: flex; flex-wrap: wrap; gap: 6px; }
-      .tabs button, .tabs label.file { padding: 8px 13px; font-size: 0.9rem; }
+      /* Every control now lives in the ⚙ menu, so the bar is just the gear, parked on the right.
+         The menu keeps its own stacking context for the dropdown to hang from. */
+      .topbar { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 14px; }
       .home { font-weight: 600; }
       .whoami { color: var(--muted); font-weight: 600; }
       .whoami.signed { color: var(--accent); border-color: var(--accent); }
-      .menu { position: absolute; top: 0; right: 0; }
+      .menu { position: relative; }
       #gear { font-size: 1.2rem; padding: 8px 12px; line-height: 1; }
       .dropdown { position: absolute; right: 0; top: calc(100% + 6px); z-index: 100;
         display: flex; flex-direction: column; min-width: 184px;
@@ -485,15 +484,13 @@
   <body>
     <main>
       <div class="topbar">
-        <div class="tabs">
-          <button id="practiceBtn" title="Drill one technique at a time">Practice</button>
-        </div>
         <div class="menu">
           <button id="gear" aria-label="Menu" title="Menu">⚙</button>
           <div id="gearMenu" class="dropdown" hidden>
             <button id="whoami" class="whoami" title="Profile — tap to switch or sign in">Playing as: Guest</button>
             <button id="homeBtn" class="home" title="Back to your game">🏠 Home</button>
             <button id="libraryBtn">Game library</button>
+            <button id="practiceBtn" title="Drill one technique at a time">Practice</button>
             <label class="file">Import screenshot<input id="file" type="file" accept="image/*" /></label>
             <button id="start" class="sep">Start solving</button>
             <button id="hint">Hint</button>
