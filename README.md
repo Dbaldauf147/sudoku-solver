@@ -232,8 +232,11 @@ answer.
     **grouped by date** (Today, Yesterday, then by day), newest first, with
     each entry's difficulty and source — where you can **load**, **edit**, or
     **delete** any puzzle.
-  - Stats, Step-by-step solve, Settings, Check entries, Reveal solution, Edit
-    puzzle, and Start solving live under a ⚙ menu in the top-right corner.
+  - Every action lives under a ⚙ menu in the top-right corner — the gear is the
+    only thing in the top bar, so the board gets the room. The profile chip
+    ("Playing as: …"), Home, Game library, Practice and Import screenshot lead
+    the menu, then Start solving, Hint, Step-by-step solve, Stats, Techniques,
+    Check entries, Settings, Reveal solution, Edit puzzle and the rest.
 
   The coaching and saved library are entirely client-side, so they work
   **without an API key** — only the optional screenshot import calls Claude
