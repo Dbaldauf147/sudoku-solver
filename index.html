@@ -391,6 +391,8 @@
         grid-template-rows: repeat(3, 1fr); font-size: clamp(0.42rem, 2vw, 0.68rem); color: var(--muted); font-weight: 600; }
       .wpencil span { display: flex; align-items: center; justify-content: center; }
       .wpencil span.cut { color: var(--bad); text-decoration: line-through; font-weight: 800; }
+      /* The candidate a visual hint proves, drawn big and green among the ones struck around it. */
+      .wpencil span.pick { color: var(--ok); font-size: 1.5em; font-weight: 800; }
       .walk-nav { display: flex; align-items: center; gap: 10px; margin: 10px 0 6px; }
       .walk-nav button { font-size: 1.1rem; padding: 8px 14px; line-height: 1; }
       .walk-nav .walk-meter { flex: 1 1 auto; text-align: center; }
@@ -401,10 +403,14 @@
       .walk-jump button { flex: 1 1 0; text-align: center; font-size: 0.85rem; }
       .walk-step { text-align: center; margin: 4px 0 10px; }
       .walk-step h3 { margin: 0 0 4px; font-size: 1.1rem; }
-      .walk-step p { margin: 0; color: var(--muted); font-size: 0.88rem; line-height: 1.45; }
+      /* A visual hint's proof lists one line per digit it rules out, so the detail keeps its newlines. */
+      .walk-step p { margin: 0; color: var(--muted); font-size: 0.88rem; line-height: 1.45; white-space: pre-line; }
+      .walk-place { display: block; width: 100%; margin-top: 10px; font-weight: 700; }
       .walk-legend { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px;
         margin: 10px 0 0; font-size: 0.78rem; color: var(--muted); }
       .walk-legend b { font-weight: 700; }
+      .walk-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px;
+        border: 1px solid var(--line); vertical-align: -1px; margin-right: 5px; }
       .walk-legend .cut { color: var(--bad); text-decoration: line-through; }
       .walk-legend .placed { color: var(--warn); }
       .walk-legend .new { color: var(--accent); }
@@ -2647,12 +2653,13 @@
         showExplain(any ? "Notes cleared" : "Notes filled", any ? "Pencil marks removed." : "Filled every empty cell with its possible digits. Switch to Candidate mode to refine them.", "info");
       });
 
-      // Tint the whole row/column/box a technique operates on, so the reasoning is visible on the board.
-      // Units shared by 2+ of the technique's cells are shown; a lone target cell shows its three units.
-      function highlightHintUnits(hint) {
+      // The whole row/column/box a technique operates on, so the reasoning can be shaded — on the live
+      // board by highlightHintUnits, on a replay board by the visual hint. Units shared by 2+ of the
+      // technique's cells are returned; a lone target cell returns its three units.
+      function hintUnitCells(hint) {
         // A hidden single carries the unit that proves it, so shade exactly that unit — the box for a
         // box single, the line for a row/column one. That's the difference between the two, on the board.
-        if (hint.unit) { for (const [r, c] of hint.unit.cells) cellEls[r][c].classList.add("hint-unit"); return; }
+        if (hint.unit) return hint.unit.cells;
         const cells = hint.highlight || [], rc = {}, cc = {}, bc = {};
         for (const [r, c] of cells) { rc[r] = (rc[r] || 0) + 1; cc[c] = (cc[c] || 0) + 1; const b = boxIndex(r, c) - 1; bc[b] = (bc[b] || 0) + 1; }
         const rows = new Set(), cols = new Set(), boxes = new Set();
@@ -2660,9 +2667,14 @@
         for (const k in cc) if (cc[k] >= 2) cols.add(+k);
         for (const k in bc) if (bc[k] >= 2) boxes.add(+k);
         if (hint.kind === "place" && !rows.size && !cols.size && !boxes.size) { rows.add(hint.r); cols.add(hint.c); boxes.add(boxIndex(hint.r, hint.c) - 1); }
-        rows.forEach((r) => { for (let c = 0; c < 9; c++) cellEls[r][c].classList.add("hint-unit"); });
-        cols.forEach((c) => { for (let r = 0; r < 9; r++) cellEls[r][c].classList.add("hint-unit"); });
-        boxes.forEach((b) => { const br = Math.floor(b / 3) * 3, bc2 = (b % 3) * 3; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) cellEls[br + i][bc2 + j].classList.add("hint-unit"); });
+        const out = [];
+        rows.forEach((r) => { for (let c = 0; c < 9; c++) out.push([r, c]); });
+        cols.forEach((c) => { for (let r = 0; r < 9; r++) out.push([r, c]); });
+        boxes.forEach((b) => { const br = Math.floor(b / 3) * 3, bc2 = (b % 3) * 3; for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) out.push([br + i, bc2 + j]); });
+        return out;
+      }
+      function highlightHintUnits(hint) {
+        for (const [r, c] of hintUnitCells(hint)) cellEls[r][c].classList.add("hint-unit");
       }
       function renderHintHighlights(hint) {
         clearHighlights();
@@ -2670,6 +2682,17 @@
         for (const [r, c] of hint.highlight) { cellEls[r][c].classList.remove("hint-unit"); cellEls[r][c].classList.add("peer"); }
         if (hint.kind === "place") { cellEls[hint.r][hint.c].classList.remove("peer"); cellEls[hint.r][hint.c].classList.add("hint"); }
       }
+      // The digit already on the board that stops d from going in (rr,cc) — which cell it sits in and
+      // which unit the two share. Shared by the written breakdown and the visual one, so both point at
+      // the same cell: the text names it, the board highlights it.
+      function blockerCell(grid, rr, cc, d) {
+        for (let i = 0; i < 9; i++) if (i !== cc && grid[rr][i] === d) return { r: rr, c: i, unit: `row ${rr + 1}` };
+        for (let i = 0; i < 9; i++) if (i !== rr && grid[i][cc] === d) return { r: i, c: cc, unit: `column ${cc + 1}` };
+        const br = Math.floor(rr / 3) * 3, bc = Math.floor(cc / 3) * 3;
+        for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if ((br + i !== rr || bc + j !== cc) && grid[br + i][bc + j] === d) return { r: br + i, c: bc + j, unit: `box ${boxIndex(rr, cc)}` };
+        return null;
+      }
+      function blockerText(grid, rr, cc, d) { const b = blockerCell(grid, rr, cc, d); return b ? `${b.unit} (${loc(b.r, b.c)})` : null; }
       // A fuller, step-by-step version of a hint: for a naked single it rules out every other digit with
       // where each is already used; for a hidden single it walks each other cell in the unit; for a
       // technique it spells out the elimination that frees the cell.
@@ -2677,13 +2700,7 @@
         const grid = progressGrid();
         if (hint.kind !== "place") return `${hint.reason}\n\nApply those removals to your candidate marks (or press Auto notes), then scan again — a naked or hidden single usually appears.`;
         const { r, c, n } = hint, cand = candidates(grid, r, c);
-        const blockerFor = (rr, cc, d) => {
-          for (let i = 0; i < 9; i++) if (i !== cc && grid[rr][i] === d) return `row ${rr + 1} (${loc(rr, i)})`;
-          for (let i = 0; i < 9; i++) if (i !== rr && grid[i][cc] === d) return `column ${cc + 1} (${loc(i, cc)})`;
-          const br = Math.floor(rr / 3) * 3, bc = Math.floor(cc / 3) * 3;
-          for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) if ((br + i !== rr || bc + j !== cc) && grid[br + i][bc + j] === d) return `box ${boxIndex(rr, cc)} (${loc(br + i, bc + j)})`;
-          return null;
-        };
+        const blockerFor = (rr, cc, d) => blockerText(grid, rr, cc, d);
         if (cand.length === 1) {
           const lines = [];
           for (let d = 1; d <= 9; d++) { if (d === n) continue; const w = blockerFor(r, c, d); lines.push(`  ${d} — ${w ? "already in " + w : "—"}`); }
@@ -2723,34 +2740,37 @@
       }
       // Walk from the current board through every elimination needed until a placement is forced,
       // collecting each step so the hint can explain the whole way to why that cell = its number.
+      // `grid` rides along so the visual version can redraw the same board the chain was reasoned from.
       function hintChain(grid) {
         let M = candMap(grid); const steps = [];
         for (let guard = 0; guard < 200; guard++) {
           const step = hintStepFrom(M, grid);
-          if (!step) return { steps, place: null };
-          if (step.kind === "place") return { steps, place: step };
+          if (!step) return { steps, place: null, grid };
+          if (step.kind === "place") return { steps, place: step, grid };
           steps.push(step); M = applyElims(M, step.elims);
         }
-        return { steps, place: null };
+        return { steps, place: null, grid };
       }
       function showHint(chain, detailed) {
         const place = chain.place;
         renderHintHighlights(place);
         lastHint = place; select(place.r, place.c);
         const placeAction = { label: `Place ${place.n} in ${loc(place.r, place.c)}`, onClick: () => { pendingTech = place.tech; pendingHint = true; setValue(place.r, place.c, place.n); } };
+        // The same reasoning, drawn: every step on a replay board with the candidates it strikes.
+        const showAction = { label: "Show me on a board", onClick: () => openHintVisual(chain) };
         // Direct single (no eliminations): concise view, with an optional detailed breakdown.
         if (!chain.steps.length) {
           // "Forced" isn't a named technique — show no tech label and skip the step-by-step breakdown.
           const named = place.tech !== "Forced";
           const stepAction = (detailed || !named) ? null : { label: "Explain step by step", onClick: () => showHint(chain, true) };
           const body = detailed ? detailedHintText(place) : place.reason;
-          return showExplain(detailed ? `Why ${loc(place.r, place.c)} = ${place.n}?` : `Hint: ${loc(place.r, place.c)} = ${place.n}`, body, "hint", [placeAction, stepAction], named ? place.tech : undefined);
+          return showExplain(detailed ? `Why ${loc(place.r, place.c)} = ${place.n}?` : `Hint: ${loc(place.r, place.c)} = ${place.n}`, body, "hint", [placeAction, stepAction, showAction], named ? place.tech : undefined);
         }
         // Needs eliminations first: don't stop on them — walk every step, then explain the number.
         // No single tech label here (each step already names its technique inline in the body).
         const lines = chain.steps.map((s, i) => `${i + 1}. ${s.reason}`);
         lines.push(`${chain.steps.length + 1}. That leaves ${loc(place.r, place.c)} = ${place.n} — ${place.reason}`);
-        showExplain(`Hint: ${loc(place.r, place.c)} = ${place.n}`, lines.join("\n\n"), "hint", [placeAction]);
+        showExplain(`Hint: ${loc(place.r, place.c)} = ${place.n}`, lines.join("\n\n"), "hint", [placeAction, showAction]);
       }
       document.getElementById("hint").addEventListener("click", () => {
         closeStats(); closeLibrary(); closeHistory(); // Hint now lives in the menu — make sure the board is visible
@@ -4317,29 +4337,37 @@
       // Walks the solve one deduction at a time — place, prune, place, prune — on a read-only replay
       // board. It never touches your game: the clock auto-pauses while the panel covers the board and
       // your entries are left exactly as they were.
-      let walkSteps = [], walkIdx = 0, walkFrom = "your board";
+      // The same panel serves two lengths of the same idea: the whole solve ("solve") and the single
+      // deduction behind one hint ("hint"). `walkAction` is the hint's Place button, carried into the
+      // panel so you can act on what you've just been shown without closing it first.
+      let walkSteps = [], walkIdx = 0, walkFrom = "your board", walkMode = "solve", walkAction = null;
       function renderWalkBoard(container, s) {
         container.innerHTML = "";
         const b = document.createElement("div"); b.className = "wboard";
         const cut = new Map();
         for (const [r, c, n] of s.cut) { const k = r * 9 + c; if (!cut.has(k)) cut.set(k, new Set()); cut.get(k).add(n); }
-        const now = new Set(s.placed.map(([r, c]) => r * 9 + c));
+        const placedNow = new Set(s.placed.map(([r, c]) => r * 9 + c));
+        // `target` is the cell a visual hint is arguing about — same amber as a fresh placement, since
+        // it's the cell in question either way. `unit` is the row/column/box the argument is read in.
+        const now = new Set([...placedNow, ...(s.target || []).map(([r, c]) => r * 9 + c)]);
         const focus = new Set((s.focus || []).map(([r, c]) => r * 9 + c));
+        const unit = new Set((s.unit || []).map(([r, c]) => r * 9 + c));
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
           const k = r * 9 + c, cell = document.createElement("div");
           cell.className = "wcell"; cell.dataset.row = r; cell.dataset.col = c;
           if (now.has(k)) cell.classList.add("w-now");
           else if (focus.has(k)) cell.classList.add("w-focus");
+          else if (unit.has(k)) cell.classList.add("w-unit");
           if (s.grid[r][c]) {
             cell.textContent = s.grid[r][c];
-            if (now.has(k)) cell.classList.add("w-new");
+            if (placedNow.has(k)) cell.classList.add("w-new");
             else if (s.placedCells.has(k)) cell.classList.add("w-placed");
           } else {
             const pen = document.createElement("div"); pen.className = "wpencil";
-            const has = new Set(s.marks[r][c]), gone = cut.get(k);
+            const has = new Set(s.marks[r][c]), gone = cut.get(k), picked = (s.pick || {})[k];
             for (let n = 1; n <= 9; n++) {
               const span = document.createElement("span");
-              if (has.has(n)) { span.textContent = n; if (gone && gone.has(n)) span.className = "cut"; }
+              if (has.has(n)) { span.textContent = n; if (gone && gone.has(n)) span.className = "cut"; else if (picked === n) span.className = "pick"; }
               pen.appendChild(span);
             }
             cell.appendChild(pen);
@@ -4350,11 +4378,24 @@
       }
       function renderWalkthrough() {
         if (walkPanel.hidden || !walkSteps.length) return;
-        const total = walkSteps.length, s = walkSteps[walkIdx];
+        const total = walkSteps.length, s = walkSteps[walkIdx], isHint = walkMode === "hint";
         const pct = Math.round(((walkIdx + 1) / total) * 100);
         const jump = (id, label, off) => `<button id="${id}"${off ? " disabled" : ""}>${label}</button>`;
-        walkPanel.innerHTML = `<button id="wBack">← Back</button><h2>Step-by-step solution</h2>
-          <p class="hintline">The full solve from ${esc(walkFrom)}, one deduction at a time. Your game and clock are untouched.</p>
+        // A hint runs to a handful of steps — the ±5 / Start / End jumps only earn their space on a full solve.
+        const jumps = total > 6 ? `<div class="walk-jump">
+            ${jump("wStart", "Start", walkIdx === 0)}${jump("wBack5", "−5", walkIdx === 0)}${jump("wFwd5", "+5", walkIdx === total - 1)}${jump("wEnd", "End", walkIdx === total - 1)}
+          </div>` : "";
+        // A hint's board shades cells rather than tracking who placed what, so it gets its own key.
+        const legend = isHint
+          ? `<span><i style="background:#fef3c7"></i>the cell in question</span><span><i style="background:#cfe0ff"></i>cells the proof leans on</span>
+            <span><i style="background:#eef2ff"></i>the unit it's read in</span>
+            <span><b class="cut">7</b> ruled out</span><span><b class="new">7</b> placed</span>`
+          : `<span><b>7</b> given</span><span><b class="placed">7</b> placed here</span>
+            <span><b class="new">7</b> placed this step</span><span><b class="cut">7</b> removed this step</span>`;
+        walkPanel.innerHTML = `<button id="wBack">← Back</button><h2>${isHint ? "Hint, step by step" : "Step-by-step solution"}</h2>
+          <p class="hintline">${isHint
+            ? `Every deduction between the board as it stands and ${esc(walkFrom)}, drawn out. Your game and clock are untouched.`
+            : `The full solve from ${esc(walkFrom)}, one deduction at a time. Your game and clock are untouched.`}</p>
           <div class="walk-nav">
             ${jump("wPrev", "‹", walkIdx === 0)}
             <div class="walk-meter"><span class="k">Step ${walkIdx + 1} of ${total}</span><div class="walk-bar"><i style="width:${pct}%"></i></div></div>
@@ -4362,30 +4403,28 @@
           </div>
           <div class="walk-step"><h3>${esc(s.title)}</h3><p>${esc(s.detail)}</p></div>
           <div id="wBoard"></div>
-          <div class="walk-jump">
-            ${jump("wStart", "Start", walkIdx === 0)}${jump("wBack5", "−5", walkIdx === 0)}${jump("wFwd5", "+5", walkIdx === total - 1)}${jump("wEnd", "End", walkIdx === total - 1)}
-          </div>
+          ${jumps}
+          ${walkAction ? `<button id="wPlace" class="walk-place">${esc(walkAction.label)}</button>` : ""}
           ${s.tech && TECH_INFO[s.tech] ? `<button id="wTech">About this technique</button>` : ""}
-          <div class="walk-legend">
-            <span><b>7</b> given</span><span><b class="placed">7</b> placed here</span>
-            <span><b class="new">7</b> placed this step</span><span><b class="cut">7</b> removed this step</span>
-          </div>`;
+          <div class="walk-legend">${legend}</div>`;
         renderWalkBoard(document.getElementById("wBoard"), s);
         const go = (i) => { walkIdx = Math.max(0, Math.min(walkSteps.length - 1, i)); renderWalkthrough(); };
-        document.getElementById("wBack").onclick = closeWalkthrough;
-        document.getElementById("wPrev").onclick = () => go(walkIdx - 1);
-        document.getElementById("wNext").onclick = () => go(walkIdx + 1);
-        document.getElementById("wStart").onclick = () => go(0);
-        document.getElementById("wBack5").onclick = () => go(walkIdx - 5);
-        document.getElementById("wFwd5").onclick = () => go(walkIdx + 5);
-        document.getElementById("wEnd").onclick = () => go(walkSteps.length - 1);
-        const techBtn = document.getElementById("wTech");
-        if (techBtn) techBtn.onclick = () => openExample(s.tech);
+        const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
+        on("wBack", closeWalkthrough);
+        on("wPrev", () => go(walkIdx - 1));
+        on("wNext", () => go(walkIdx + 1));
+        on("wStart", () => go(0));
+        on("wBack5", () => go(walkIdx - 5));
+        on("wFwd5", () => go(walkIdx + 5));
+        on("wEnd", () => go(walkSteps.length - 1));
+        // Placing closes the panel first, so the digit lands on a board you can actually see.
+        on("wPlace", () => { const a = walkAction; closeWalkthrough(); if (a) a.onClick(); });
+        on("wTech", () => openExample(s.tech));
         walkPanel.scrollIntoView({ block: "start" });
       }
       function closeWalkthrough() {
         if (!walkPanel.hidden) {
-          walkPanel.hidden = true; walkSteps = [];
+          walkPanel.hidden = true; walkSteps = []; walkMode = "solve"; walkAction = null;
           boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause();
         }
       }
@@ -4399,13 +4438,88 @@
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (start[r][c]) { filled++; if (givens[r][c]) given++; }
         walkFrom = filled > given ? "where your board stands now" : "the starting clues";
         if (filled === 81) return showExplain("Nothing left to walk", "The grid is already complete.", "ok");
-        walkSteps = buildWalkthrough(start); walkIdx = 0;
+        walkSteps = buildWalkthrough(start); walkIdx = 0; walkMode = "solve"; walkAction = null;
         walkPanel.hidden = false; renderWalkthrough();
         boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause();
       }
       document.getElementById("walkBtn").addEventListener("click", () => {
-        if (walkPanel.hidden) openWalkthrough(); else closeWalkthrough();
+        // From a visual hint, this swaps up to the full solve rather than just closing the panel.
+        if (walkPanel.hidden || walkMode === "hint") openWalkthrough(); else closeWalkthrough();
       });
+
+      // ---- a hint, drawn ----
+      // The same chain the hint explains in words, laid out as replay-board steps: the board as it
+      // stands, then each elimination with the candidates it strikes shown where they sit, then the
+      // proof that pins the cell, then the placement. The proof step is the one that earns the panel —
+      // a naked single crosses out all eight rivals in the cell and highlights the digit blocking each
+      // one; a hidden single crosses the digit out of every other cell in its unit. Both are things you
+      // can only really see on a grid.
+      function buildHintVisual(grid, chain) {
+        const place = chain.place, M = candMap(grid), steps = [];
+        const snap = () => M.map((row) => row.map((s) => [...s].sort((a, b) => a - b)));
+        const push = (o) => steps.push({ grid: clone(grid), marks: snap(), placed: [], cut: [], focus: [], unit: [], target: [], placedCells: new Set(), ...o });
+        const { r, c, n } = place, at = loc(r, c);
+        const nSteps = chain.steps.length;
+
+        push({ target: [[r, c]],
+          title: "The board as it stands",
+          detail: `Every empty cell is pencilled in with the digits its row, column, and box still allow. ${at} — in amber — is the cell this hint proves. ${nSteps
+            ? `It isn't forced yet: ${nSteps} elimination${nSteps === 1 ? "" : "s"} ${nSteps === 1 ? "has" : "have"} to come off the board first.`
+            : `Nothing has to come off the board first — the next step is the whole proof.`}` });
+
+        // Each elimination, with what it removes struck in red where it sat rather than silently gone.
+        for (const s of chain.steps) {
+          const why = s.reason.startsWith(s.tech + ": ") ? s.reason.slice(s.tech.length + 2) : s.reason;
+          const one = s.elims.length === 1;
+          push({ title: s.tech, tech: s.tech, cut: s.elims, focus: s.highlight, unit: hintUnitCells(s),
+            detail: `${why} ${s.elims.length} candidate${one ? " is" : "s are"} struck in red where ${one ? "it sits" : "they sit"} — that's the removal this step is worth.` });
+          for (const [rr, cc, d] of s.elims) M[rr][cc].delete(d);
+        }
+
+        // The proof itself: which digits die in the cell, or which cells in the unit can't hold the digit.
+        const marks = snap(), cut = [], focus = [], lines = [];
+        const pencil = (rr, cc, d) => { if (!marks[rr][cc].includes(d)) marks[rr][cc] = [...marks[rr][cc], d].sort((a, b) => a - b); cut.push([rr, cc, d]); };
+        let title = `Why ${at} = ${n}`, detail = place.reason, unit = hintUnitCells(place);
+        if (place.unit) {                                    // hidden single — walk the unit that pins it
+          for (const [rr, cc] of place.unit.cells) {
+            if ((rr === r && cc === c) || grid[rr][cc]) continue;
+            pencil(rr, cc, n); focus.push([rr, cc]);
+            const b = blockerCell(grid, rr, cc, n);
+            lines.push(`${loc(rr, cc)} — no: ${n} is already in ${b ? `${b.unit}, at ${loc(b.r, b.c)}` : "reach"}`);
+          }
+          detail = `Where can ${n} go in ${place.unit.name}? Every other empty cell there has ${n} struck:\n${lines.join("\n")}\nOnly ${at} is left, so ${n} goes there — even though the cell still shows other candidates. That's what makes the single a hidden one.${hiddenSingleAside(hiddenUnitsFor(M, grid, r, c, n), n)}`;
+        } else if (M[r][c].size === 1) {                     // naked single — rule out the other eight
+          for (let d = 1; d <= 9; d++) {
+            if (d === n) continue;
+            pencil(r, c, d);
+            const b = blockerCell(grid, r, c, d);
+            if (b) { focus.push([b.r, b.c]); lines.push(`${d} — already in ${b.unit}, at ${loc(b.r, b.c)}`); }
+            else lines.push(`${d} — removed by the step${nSteps === 1 ? "" : "s"} above`);
+          }
+          detail = `Ruling every other digit out of ${at}:\n${lines.join("\n")}\nThe blue cells are where each one is already used. Everything but ${n} is struck, so ${at} = ${n} — a naked single.`;
+        } else {                                             // "Forced": no named rule, just the one digit that works
+          for (const d of M[r][c]) if (d !== n) pencil(r, c, d);
+        }
+        push({ title, tech: place.tech !== "Forced" ? place.tech : null, marks, cut, focus, unit, target: [[r, c]],
+          pick: { [r * 9 + c]: n }, detail });
+
+        const done = clone(grid); done[r][c] = n;
+        steps.push({ grid: done, marks: snap(), placed: [[r, c, n]], cut: [], focus: [], unit: [], target: [], placedCells: new Set(),
+          title: `${at} = ${n}`, tech: place.tech !== "Forced" ? place.tech : null,
+          detail: `That's the move.${nSteps ? " Everything above was in service of this one cell." : ""} Place it here, or close this and place it yourself — either way the clock picks up where it left off.` });
+        return steps;
+      }
+      function openHintVisual(chain) {
+        if (!chain || !chain.place) return;
+        closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeSettings(); closeAudit();
+        const place = chain.place;
+        walkSteps = buildHintVisual(chain.grid || progressGrid(), chain); walkIdx = 0;
+        walkMode = "hint"; walkFrom = `${loc(place.r, place.c)} = ${place.n}`;
+        walkAction = { label: `Place ${place.n} in ${loc(place.r, place.c)}`,
+          onClick: () => { pendingTech = place.tech; pendingHint = true; setValue(place.r, place.c, place.n); } };
+        walkPanel.hidden = false; renderWalkthrough();
+        boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause();
+      }
       // Which stats tab is showing; remembered across opens. A win jumps to "this".
       let statsTab = "all";
       let timeChartMode = "overtime"; // "overtime" = solve time over time · "permove" = avg time per move

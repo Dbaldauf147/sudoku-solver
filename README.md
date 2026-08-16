@@ -34,6 +34,23 @@ answer.
     names the technique — naked single, hidden single in a box or a
     row/column, pointing pair, box/line reduction, naked pair, hidden pair,
     X-wing), and offers to place it for you.
+  - **Hints you can see, not just read.** Every hint carries a **Show me on a
+    board** button that lays the same reasoning out step by step on a read-only
+    replay board: the board as it stands with all candidates pencilled in and
+    the cell in question in amber, then *each* elimination the hint needed —
+    named, explained, and with the candidates it removes **struck in red where
+    they sit** — and then the proof itself. That last step is the one a grid
+    tells better than a sentence: a **naked single** crosses out all eight rival
+    digits in the cell and highlights the cell already using each one, so you
+    can see the eight blockers at once; a **hidden single** crosses the digit
+    out of every other cell in the unit that pins it, so "it fits nowhere else"
+    is something you look at rather than take on trust. The digit being proved
+    is drawn large and green among the ones struck around it, and a colour key
+    says what the shading means. Step through with ‹ ›, tap **About this
+    technique** for the worked example, or place the digit straight from the
+    panel — the clock auto-pauses while it's open and your board is left exactly
+    as it was. A move that no named rule forces says so plainly instead of
+    inventing one.
   - **Step-by-step solve** replays the *whole* solve the way you'd do it on
     paper: place, prune, place, prune, until the grid is full. It works
     **easiest-first and one placement per step** — every naked single before any
