@@ -1630,7 +1630,7 @@
         for (const tech of ELIM_TECHS) {
           const e = tech(M, grid); if (!e) continue;
           const after = findNakedSingle(applyElims(M, e.elims), grid) || findHiddenSingle(applyElims(M, e.elims), grid);
-          if (after) return { kind: "place", r: after.r, c: after.c, n: after.n, tech: e.tech, highlight: e.highlight.concat([[after.r, after.c]]), reason: `${e.tech}: ${e.reason} That leaves ${loc(after.r, after.c)} = ${after.n} (${after.tech.toLowerCase()}).` };
+          if (after) return { kind: "place", r: after.r, c: after.c, n: after.n, tech: e.tech, highlight: e.highlight.concat([[after.r, after.c]]), reason: `${e.tech}: ${e.reason} That leaves ${loc(after.r, after.c)} = ${after.n} (${techName(after.tech)}).` };
           return { kind: "eliminate", tech: e.tech, highlight: e.highlight, reason: `${e.tech}: ${e.reason} Update your candidate marks, then look again.` };
         }
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] === 0)
@@ -1884,6 +1884,16 @@
         cellEls[r][c].classList.add("conflict-src");
       }
       function listUnits(units) { return units.length <= 1 ? (units[0] || "") : units.length === 2 ? units.join(" and ") : units.slice(0, -1).join(", ") + ", and " + units[units.length - 1]; }
+      // A technique's name mid-sentence. Plain names lowercase ("a naked single"), but an acronym-led
+      // one keeps its capitals — "an X-wing", never "a x-wing" — and the article follows how that first
+      // letter is *said*, so X ("ex") takes "an" while W ("double-you") takes "a".
+      const SAID_WITH_VOWEL = "AEFHILMNORSX";
+      function techName(tech) { return /^([A-Z]{2,}|[A-Z]-)/.test(tech) ? tech : tech.toLowerCase(); }
+      function techPhrase(tech) {
+        const name = techName(tech);
+        const vowel = name === tech ? SAID_WITH_VOWEL.includes(tech[0]) : "aeiou".includes(name[0]);
+        return `${vowel ? "an" : "a"} ${name}`;
+      }
       function renderPencils() {
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
           const has = !!inputs[r][c].value, spans = pencils[r][c];
@@ -3854,7 +3864,7 @@
         const str = bank[Math.floor(Math.random() * bank.length)];
         const grid = parsePuzzle(str), tier = tierForRank(TECH_RANK[tech] || 3);
         resetToEdit(); writeGrid(grid); difficultyEl.value = tier; sourceEl.value = "Trainer · " + tech; renderPencils();
-        showReady(`Drill: ${tech}. This puzzle's toughest step is a ${tech.toLowerCase()} — solve it and watch for that pattern. Stuck? Hint walks you through it.`);
+        showReady(`Drill: ${tech}. This puzzle's toughest step is ${techPhrase(tech)} — solve it and watch for that pattern. Stuck? Hint walks you through it.`);
       }
 
       // Recommend drills for the techniques the player is weakest at: primarily the ones they've
@@ -4489,7 +4499,7 @@
             ? `${at} — in amber — is the cell being proved. ${nSteps
                 ? `It isn't forced yet: ${nSteps} elimination${nSteps === 1 ? "" : "s"} ${nSteps === 1 ? "has" : "have"} to come off the board first.`
                 : `Nothing has to come off the board first — the next step is the whole proof.`}`
-            : `The highlighted cells are where the ${first ? first.tech.toLowerCase() : "pattern"} sits.`}` });
+            : `The highlighted cells are where the ${first ? techName(first.tech) : "pattern"} sits.`}` });
 
         // Each elimination, with what it removes struck in red where it sat rather than silently gone.
         for (const s of chain.steps) {
