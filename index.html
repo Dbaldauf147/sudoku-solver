@@ -79,6 +79,22 @@
       .lib-tabs { display: flex; gap: 6px; margin: 12px 0 16px; flex-wrap: wrap; }
       .lib-tabs .lib-tab { flex: 1; min-width: 96px; }
       .lib-tabs .lib-tab.on { background: var(--sel); border-color: var(--accent); color: var(--text); font-weight: 600; }
+      /* Difficulty sub-tabs inside the Today's NYT tab. Same shape as the tab bar above them,
+         a size down, so the nesting reads at a glance. */
+      .nyt-subs { display: flex; gap: 6px; margin: 0 0 14px; flex-wrap: wrap; }
+      .nyt-subs .nyt-sub { flex: 1; min-width: 88px; font-size: 0.85rem; }
+      .nyt-subs .nyt-sub.on { background: var(--sel); border-color: var(--accent); color: var(--text); font-weight: 600; }
+      .nyt-subs .nyt-sub:disabled { opacity: 0.5; }
+      /* Thumbnail of a puzzle's clues, so a sub-tab shows the grid you'd be taking on. */
+      .mini { display: grid; grid-template-columns: repeat(9, 1fr); width: 186px; max-width: 62vw;
+              border: 2px solid var(--thick); background: var(--panel); margin: 12px 0; }
+      .mini div { aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+                  font-size: 0.62rem; font-weight: 700; color: var(--given);
+                  border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+      .mini div.rb { border-right: 2px solid var(--thick); }
+      .mini div.bb { border-bottom: 2px solid var(--thick); }
+      .mini div:nth-child(9n) { border-right: 0; }
+      .mini div:nth-child(n+73) { border-bottom: 0; }
 
       .topbar { position: relative; display: flex; flex-wrap: wrap; align-items: center;
         gap: 10px; margin-bottom: 14px; padding-right: 54px; }
@@ -555,22 +571,6 @@
         </div>
       </div>
 
-      <div id="nytModal" class="overlay" hidden>
-        <div class="modal">
-          <h2>Today's NYT puzzle</h2>
-          <p>Pick a difficulty and today's New York Times daily Sudoku is fetched and loaded, with its difficulty and date filled in for you.</p>
-          <div class="actions" style="justify-content:flex-start;flex-wrap:wrap">
-            <button class="nyt-diff" data-difficulty="easy">Easy</button>
-            <button class="nyt-diff" data-difficulty="medium">Medium</button>
-            <button class="nyt-diff" data-difficulty="hard">Hard</button>
-          </div>
-          <p id="nytMsg" class="body" style="min-height:1.2em;margin:8px 0 0"></p>
-          <div class="actions">
-            <button id="nytCancel">Cancel</button>
-          </div>
-        </div>
-      </div>
-
       <div id="pauseModal" class="overlay" hidden>
         <div class="modal">
           <h2>Game paused</h2>
@@ -837,8 +837,6 @@
         if (ex && !ex.hidden) { if (e.key === "Enter" || e.key === "Escape") document.getElementById("exClose").click(); return; }
         const paste = document.getElementById("pasteModal");
         if (paste && !paste.hidden) { if (e.key === "Escape") document.getElementById("pasteCancel").click(); return; } // let the textarea receive digits
-        const nyt = document.getElementById("nytModal");
-        if (nyt && !nyt.hidden) { if (e.key === "Escape") document.getElementById("nytCancel").click(); return; }
         const prof = document.getElementById("profileModal");
         if (prof && !prof.hidden) {
           if (e.key === "Escape") prof.hidden = true;
@@ -3533,9 +3531,10 @@
       function renderGameLibrary() {
         if (libraryPanel.hidden) return;
         const counts = { saved: lsGet(STORE_KEY).length, history: lsGet(STATS_KEY).length, catalog: CATALOG.length, practice: TRAINER_TECHS.length };
-        const tab = (id, label) => `<button class="lib-tab${libTab === id ? " on" : ""}" data-tab="${id}">${label} <span class="k">(${counts[id]})</span></button>`;
+        // Today's tab has no meaningful count until the fetch lands, so it's the one without one.
+        const tab = (id, label) => `<button class="lib-tab${libTab === id ? " on" : ""}" data-tab="${id}">${label}${counts[id] === undefined ? "" : ` <span class="k">(${counts[id]})</span>`}</button>`;
         libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Game library</h2>` +
-          `<div class="lib-tabs">${tab("saved", "Saved")}${tab("history", "History")}${tab("catalog", "Catalogue")}${tab("practice", "Practice")}</div>` +
+          `<div class="lib-tabs">${tab("nyt", "Today's NYT")}${tab("saved", "Saved")}${tab("history", "History")}${tab("catalog", "Catalogue")}${tab("practice", "Practice")}</div>` +
           `<div id="libContent"></div>`;
         document.getElementById("lb").onclick = closeLibrary;
         libraryPanel.querySelectorAll(".lib-tab").forEach((b) => (b.onclick = () => {
@@ -3544,6 +3543,7 @@
         if (libTab === "history") renderHistoryTab();
         else if (libTab === "catalog") renderCatalogTab();
         else if (libTab === "practice") renderPracticeTab();
+        else if (libTab === "nyt") renderNytTab();
         else renderSavedTab();
       }
 
@@ -3703,6 +3703,137 @@
         content.innerHTML = `<div class="card">Built-in puzzles — pick one to play from scratch.</div>${rows}`;
         content.querySelectorAll(".cat-play").forEach((b) => (b.onclick = () => playCatalog(Number(b.dataset.i))));
       }
+      // ---- Today's NYT tab ----
+      // All three of today's puzzles are fetched in one request when the tab is opened, then
+      // held for the rest of the day; the sub-tabs switch between them with no further network.
+      // Each is verified here the same way a pasted grid is, so an unplayable one is dropped
+      // rather than loaded onto the board.
+      const NYT_TIERS = { easy: "Easy", medium: "Medium", hard: "Hard" };
+      let nyt = { date: null, puzzles: {}, missing: [], loadedOn: null, loading: false, error: null };
+      let nytSub = "easy";
+      const nytDayKey = () => new Date().toDateString();   // local day: the puzzle rolls over with the player's date
+
+      // What went wrong, in terms of what the player can do about it. `reason` comes from the
+      // endpoint; a fetch that never landed (offline, endpoint not deployed) has none.
+      function nytError(reason, error) {
+        if (reason === "blocked") return "The New York Times turned down the request from this app's server — that's their block on the deployment, not something a retry fixes. Import a screenshot instead.";
+        if (reason === "markup-changed") return "The puzzles weren't where they usually sit on the NYT page — they've most likely changed their layout, so this needs a code fix. Import a screenshot instead.";
+        if (reason === "timeout" || reason === "network") return "Couldn't reach the New York Times just now. Try again in a moment, or import a screenshot.";
+        return `${error || "Unknown error"} — you can still paste a puzzle or import a screenshot.`;
+      }
+
+      async function loadNyt(force) {
+        if (nyt.loading) return;
+        // Already have today's? Then this is a no-op — reopening the tab shouldn't refetch.
+        if (!force && nyt.loadedOn === nytDayKey() && Object.keys(nyt.puzzles).length) return;
+        nyt.loading = true; nyt.error = null; renderNytTab();
+        try {
+          const r = await fetch("/api/nyt-sudoku?difficulty=all", { cache: "no-store" });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(nytError(data.reason, data.error));
+
+          const puzzles = {};
+          for (const d of Object.keys(NYT_TIERS)) {
+            const p = data.puzzles && data.puzzles[d];
+            if (!p || typeof p.puzzle !== "string") continue;
+            const grid = parsePuzzle(p.puzzle);
+            if (grid.flat().filter(Boolean).length === 0) continue;
+            if (hasConflict(grid) || !solve(clone(grid))) continue;   // unplayable — leave it out
+            puzzles[d] = { grid, date: p.date || data.date || null };
+          }
+          if (!Object.keys(puzzles).length) throw new Error("None of today's puzzles came back in a playable state. Import a screenshot instead.");
+
+          nyt = {
+            date: data.date || null, puzzles,
+            missing: Object.keys(NYT_TIERS).filter((d) => !puzzles[d]),
+            loadedOn: nytDayKey(), loading: false, error: null,
+          };
+          if (!puzzles[nytSub]) nytSub = Object.keys(puzzles)[0];   // don't sit on a sub-tab that has nothing
+        } catch (err) {
+          nyt.loading = false;
+          nyt.error = err.message || "Couldn't load today's puzzles.";
+        }
+        renderNytTab();
+      }
+
+      // A thumbnail of the clues, so choosing a difficulty isn't blind.
+      function miniGrid(grid) {
+        let cells = "";
+        grid.forEach((row, r) => row.forEach((v, c) => {
+          const cls = `${c % 3 === 2 ? "rb" : ""} ${r % 3 === 2 ? "bb" : ""}`.trim();
+          cells += `<div${cls ? ` class="${cls}"` : ""}>${v || ""}</div>`;
+        }));
+        return `<div class="mini">${cells}</div>`;
+      }
+
+      function renderNytTab() {
+        if (libraryPanel.hidden || libTab !== "nyt") return;
+        const content = document.getElementById("libContent"); if (!content) return;
+        const loaded = Object.keys(nyt.puzzles);
+
+        if (nyt.loading) { content.innerHTML = `<div class="card">Fetching today's puzzles from the New York Times…</div>`; return; }
+        if (nyt.error) {
+          content.innerHTML = `<div class="card"><b>Couldn't load today's puzzles.</b><br><span class="k">${esc(nyt.error)}</span></div>
+            <div class="saved-row"><div class="saved-meta">The screenshot and paste imports still work.</div>
+            <div class="saved-actions"><button id="nytRetry" class="primary">Try again</button></div></div>`;
+          document.getElementById("nytRetry").onclick = () => loadNyt(true);
+          return;
+        }
+        if (!loaded.length) { content.innerHTML = `<div class="card">Opening this tab loads today's puzzles…</div>`; loadNyt(); return; }
+
+        const subs = Object.keys(NYT_TIERS).map((d) => {
+          const has = !!nyt.puzzles[d];
+          return `<button class="nyt-sub${nytSub === d ? " on" : ""}" data-sub="${d}"${has ? "" : " disabled title=\"Not available today\""}>${NYT_TIERS[d]}</button>`;
+        }).join("");
+
+        const p = nyt.puzzles[nytSub];
+        const tier = NYT_TIERS[nytSub];
+        const source = p.date ? `NYT ${p.date}` : "NYT";
+        const clues = p.grid.flat().filter(Boolean).length;
+        // Have you already got this one, or already played it? Both are worth knowing before
+        // starting: the library match is by grid, the play history by the source it was saved under.
+        const inLibrary = lsGet(STORE_KEY).some((g) => gridKey(g.grid) === gridKey(p.grid));
+        const played = lsGet(STATS_KEY).find((s) => s && s.source === source && s.difficulty === tier);
+        const playedNote = played
+          ? ` · <span style="color:var(--ok)">Played${played.totalMs ? ` in ${fmtTime(played.totalMs)}` : ""}${played.solved ? " ✓" : ""}</span>`
+          : "";
+        const missingNote = nyt.missing.length
+          ? `<div class="card"><b>${nyt.missing.map((d) => NYT_TIERS[d]).join(" and ")}</b> didn't come back today — the others are below.</div>`
+          : "";
+
+        content.innerHTML =
+          `<div class="card">Today's New York Times daily Sudoku${nyt.date ? ` · <b>${esc(fmtCatalogDate(nyt.date))}</b>` : ""}. Pick a difficulty and play it — it's saved to your library like any other import.</div>` +
+          missingNote +
+          `<div class="nyt-subs">${subs}</div>` +
+          `<div class="saved-row">
+             <div class="saved-meta"><b>${esc(tier)}</b> · ${clues} clues${playedNote}<br>
+               <span class="k">${esc(source)}${inLibrary ? " · already in your library" : ""}</span>
+               ${miniGrid(p.grid)}</div>
+             <div class="saved-actions"><button class="nyt-play primary" data-d="${nytSub}">Play</button></div>
+           </div>` +
+          `<div class="saved-row"><div class="saved-meta"><span class="k">Fetched fresh each day.</span></div>
+             <div class="saved-actions"><button id="nytRefresh">Refresh</button></div></div>`;
+
+        content.querySelectorAll(".nyt-sub").forEach((b) => (b.onclick = () => { nytSub = b.dataset.sub; renderNytTab(); }));
+        content.querySelector(".nyt-play").onclick = () => playNyt(nytSub);
+        document.getElementById("nytRefresh").onclick = () => loadNyt(true);
+      }
+
+      function playNyt(d) {
+        const p = nyt.puzzles[d]; if (!p) return;
+        const tier = NYT_TIERS[d];
+        closeLibrary();
+        resetToEdit();
+        writeGrid(p.grid);
+        // Set these before auto-saving: a newly added library entry takes its difficulty and
+        // source from the popup fields.
+        difficultyEl.value = tier;
+        sourceEl.value = p.date ? `NYT ${p.date}` : "NYT";
+        renderPencils();
+        const added = autoSaveImport(readGrid());
+        showReady(`Today's NYT ${tier.toLowerCase()} puzzle${p.date ? ` (${p.date})` : ""} is loaded and ${added ? "saved to your library" : "matched to one already saved"}${syncNote()}. Start the timer when you're ready.`);
+      }
+
       function playCatalog(i) {
         const p = CATALOG[i]; if (!p) return;
         closeLibrary();
@@ -5364,62 +5495,10 @@
       });
 
       // ---- today's NYT puzzle ----
-      // The grid is fetched by /api/nyt-sudoku (the NYT page can't be read from the browser —
-      // it's cross-origin with no CORS headers), then loaded through the same path as a pasted
-      // puzzle. It's an unofficial route into a page nobody here controls, so a failure is
-      // reported for what it is and always leaves the manual imports as a way through.
-      const nytModal = document.getElementById("nytModal"), nytMsg = document.getElementById("nytMsg");
-      const nytButtons = Array.from(document.querySelectorAll(".nyt-diff"));
-      function openNyt() {
-        if (solving) return showExplain("Already solving", "Press Edit puzzle first, then load today's NYT puzzle.", "info");
-        closeLibrary(); closeHistory(); closeStats();
-        nytMsg.textContent = ""; nytModal.hidden = false;
-      }
-      function closeNyt() { nytModal.hidden = true; }
-      document.getElementById("nytPuzzle").addEventListener("click", openNyt);
-      document.getElementById("nytCancel").addEventListener("click", closeNyt);
-      nytModal.addEventListener("click", (e) => { if (e.target.id === "nytModal") closeNyt(); });
-
-      // What went wrong, in terms of what the player can do about it. `reason` comes from the
-      // endpoint; a fetch that never landed (offline, endpoint not deployed) has none.
-      function nytError(reason, error) {
-        if (reason === "blocked") return "The New York Times turned down the request from this app's server — that's their block on the deployment, not something a retry fixes. Import a screenshot instead.";
-        if (reason === "markup-changed") return "The puzzle wasn't where it usually sits on the NYT page — they've most likely changed their layout, so this needs a code fix. Import a screenshot instead.";
-        if (reason === "timeout" || reason === "network") return "Couldn't reach the New York Times just now. Try again in a moment, or import a screenshot.";
-        return `${error || "Unknown error"} — you can still paste the puzzle or import a screenshot.`;
-      }
-
-      nytButtons.forEach((btn) => btn.addEventListener("click", async () => {
-        const difficulty = btn.dataset.difficulty;
-        const tier = difficulty.charAt(0).toUpperCase() + difficulty.slice(1);   // easy -> Easy, to match the app's own labels
-        nytButtons.forEach((b) => { b.disabled = true; });
-        nytMsg.textContent = `Fetching today's ${difficulty} puzzle…`;
-        try {
-          const r = await fetch(`/api/nyt-sudoku?difficulty=${difficulty}`, { cache: "no-store" });
-          const data = await r.json().catch(() => ({}));
-          if (!r.ok) throw new Error(nytError(data.reason, data.error));
-
-          const grid = parsePuzzle(String(data.puzzle || ""));
-          // The endpoint validates the digits; these check the puzzle itself, exactly as a
-          // pasted grid is checked, so a mangled response can't become an unsolvable board.
-          if (hasConflict(grid)) throw new Error("The puzzle NYT returned has a repeated digit in a row, column, or box.");
-          if (!solve(clone(grid))) throw new Error("The puzzle NYT returned has no valid solution.");
-
-          closeNyt();
-          writeGrid(grid); renderPencils();
-          // Set these before auto-saving: a newly added library entry takes its difficulty
-          // and source from the popup fields.
-          difficultyEl.value = tier;
-          sourceEl.value = data.date ? `NYT ${data.date}` : "NYT";
-          const added = autoSaveImport(readGrid());
-          showReady(`Today's NYT ${difficulty} puzzle${data.date ? ` (${data.date})` : ""} is loaded and ${added ? "saved to your library" : "matched to one already saved"}${syncNote()}. Start the timer when you're ready.`);
-        } catch (err) {
-          nytMsg.textContent = err.message || "Couldn't load today's puzzle.";
-        } finally {
-          nytButtons.forEach((b) => { b.disabled = false; });
-        }
-      }));
-
+      // Lives in the game library as its own tab (renderNytTab), so all three of today's
+      // puzzles load together and the sub-tabs switch between them. This menu entry is just
+      // the shortcut to it.
+      document.getElementById("nytPuzzle").addEventListener("click", () => openLibrary("nyt"));
       // ---- init ----
       select(0, 0);
       if (!restoreActiveGame()) renderPencils();

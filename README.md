@@ -90,10 +90,21 @@ answer.
     spaces and line breaks are ignored) — handy for puzzles you find as a
     string rather than a screenshot. It's checked for conflicts and
     solvability, then saved to your library like any import.
-  - **Today's NYT puzzle** fetches the New York Times daily Sudoku — pick Easy,
-    Medium, or Hard and it loads with the difficulty and puzzle date already
-    filled in, then saves to your library like any other import. The grid goes
-    through the same conflict and solvability checks as a pasted one.
+  - **Today's NYT** is a tab in the game library (⚙ → *Today's NYT puzzle* is a
+    shortcut to it) holding the New York Times daily Sudoku. All three
+    difficulties are fetched **in one request** when you open the tab, and
+    **Easy / Medium / Hard** sub-tabs switch between them with no further
+    network — each showing a thumbnail of the grid, its clue count, whether
+    it's already in your library, and your time if you've played it. **Play**
+    loads it with the difficulty and puzzle date already filled in, saved to
+    your library like any other import. Every grid goes through the same
+    conflict and solvability checks as a pasted one, so an unplayable one is
+    dropped rather than loaded.
+
+    The day's puzzles are held until the date rolls over, so reopening the tab
+    costs nothing; **Refresh** forces a refetch. If NYT only returns some of
+    the three, the ones that arrived are still playable and the sub-tabs for
+    the others are disabled with a note.
 
     The fetch happens server-side, in `/api/nyt-sudoku`: the NYT puzzle pages
     embed the grid in the HTML as a `window.gameData` blob (free — no
@@ -402,6 +413,27 @@ Errors come back as `{ "error": "<message>" }` with a 4xx/5xx status.
   "grid": [[0,0,3, ...], ... 9 rows ...]
 }
 ```
+
+`GET /api/nyt-sudoku?difficulty=all` — what the **Today's NYT** tab asks for.
+
+```jsonc
+// response
+{
+  "date": "2026-08-14",
+  "puzzles": {                                 // same shape as above, per difficulty
+    "easy":   { "difficulty": "easy",   "date": "...", "puzzle": "...", "grid": [...] },
+    "medium": { ... },
+    "hard":   { ... }
+  },
+  "missing": []                                // difficulties that couldn't be read
+}
+```
+
+One NYT page normally embeds all three difficulties, so `all` usually costs a
+**single** upstream fetch; any difficulty that page doesn't carry is fetched
+from its own page concurrently. A partial result is still a `200` — two puzzles
+beat none — with the shortfall named in `missing`. It only fails outright when
+none of the three could be read.
 
 Errors come back as `{ "error": "<message>", "reason": "<code>" }` with a
 4xx/5xx status. `reason` distinguishes the failures that need different
