@@ -414,8 +414,17 @@
       .set-row .set-about { color: var(--muted); font-size: 0.85rem; line-height: 1.45; margin-top: 3px; }
       .set-row .sw { flex: 0 0 auto; min-width: 62px; text-align: center; font-weight: 700; }
       .set-row .sw.on { background: var(--sel); border-color: var(--accent); color: var(--accent); }
-      .sync-actions { display: flex; gap: 8px; }
+      .sync-actions { display: flex; gap: 8px; flex-wrap: wrap; }
       .sync-actions button { flex: 1 1 0; text-align: center; }
+      /* Weekly email digest */
+      #digestEmail { width: 100%; margin: 8px 0; }
+      #digestBox { line-height: 1.5; }
+      #digestBox .dg-state { font-weight: 600; }
+      #digestBox .dg-on { color: var(--ok); }
+      #digestBox .dg-off { color: var(--muted); }
+      .dg-preview { white-space: pre-wrap; font-size: 0.82rem; line-height: 1.5; margin: 10px 0 0;
+        max-height: 320px; overflow: auto; background: var(--bg); border: 1px solid var(--line);
+        border-radius: 8px; padding: 10px 12px; }
       #syncDiag { line-height: 1.5; }
       #syncDiag code { font-size: 0.85em; }
 
@@ -2634,7 +2643,12 @@
             </div>`;
           }).join("") +
           `<h3>Sync</h3><div id="syncDiag" class="card">Checking…</div>
-           <div class="sync-actions"><button id="syncNowBtn">Sync now</button><button id="syncPushBtn">Upload this device</button><button id="syncRecheck">Re-check</button></div>`;
+           <div class="sync-actions"><button id="syncNowBtn">Sync now</button><button id="syncPushBtn">Upload this device</button><button id="syncRecheck">Re-check</button></div>
+           <h3>Weekly email digest</h3>
+           <p class="hintline">A Monday email naming what has slipped — the difficulties, techniques and stall patterns where your recent games are slower or less accurate than the ones before. Improvements get a line at the end; the body is the part you'd otherwise miss.</p>
+           <div id="digestBox" class="card">Checking…</div>
+           <input id="digestEmail" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" value="${esc(digestEmail)}">
+           <div class="sync-actions"><button id="digestSave" class="primary">Turn on</button><button id="digestPreview">Preview</button><button id="digestSend">Send now</button><button id="digestOff">Turn off</button></div>`;
         document.getElementById("setBack").onclick = closeSettings;
         settingsPanel.querySelectorAll(".sw").forEach((btn) => {
           btn.onclick = () => { SETTINGS[Number(btn.dataset.i)].toggle(); renderSettings(); };
@@ -2650,7 +2664,95 @@
           setTimeout(() => { updateSyncStatus(); renderSyncDiag(); }, 1200);
         };
         document.getElementById("syncRecheck").onclick = renderSyncDiag;
+        wireDigestControls();
         renderSyncDiag();
+        renderDigestState();
+      }
+
+      // ---- weekly email digest ----
+      // The address is remembered on this device so the field refills; whether the weekly mail is
+      // actually on lives in the store, since that's what the scheduled job reads.
+      const DIGEST_EMAIL_KEY = "sudoku-coach:digest-email";
+      let digestEmail = "";
+      try { digestEmail = localStorage.getItem(DIGEST_EMAIL_KEY) || ""; } catch {}
+      function digestSay(msg, kind) {
+        const box = document.getElementById("digestBox");
+        if (box) box.innerHTML = `<span class="dg-state ${kind === "on" ? "dg-on" : kind === "off" ? "dg-off" : ""}">${esc(msg)}</span>`;
+      }
+      async function renderDigestState() {
+        const box = document.getElementById("digestBox");
+        if (!box) return;
+        box.textContent = "Checking…";
+        try {
+          const r = await fetch(`/api/digest?status=1${profileParam()}`, { cache: "no-store" });
+          if (r.status === 501) return digestSay("This deployment has no cloud store connected, so there's nothing for a weekly job to read. Preview and Send now still work — they analyse the games on this device.", "off");
+          if (!r.ok) return digestSay("Couldn't reach the digest service. Preview and Send now may still work.", "off");
+          const j = await r.json();
+          const mailer = j.mailer ? "" : " Sending isn't configured on this deployment yet (it needs a RESEND_API_KEY), so nothing will actually be delivered.";
+          const save = document.getElementById("digestSave");
+          if (j.subscribed) {
+            digestSay(`On — mailing ${j.email} every Monday.${mailer}`, "on");
+            const f = document.getElementById("digestEmail");
+            if (f && !f.value) f.value = j.email;
+            // Once it's on, the same button is how you move it to a different address.
+            if (save) save.textContent = "Update address";
+          } else {
+            digestSay(`Off. Add an address and turn it on to get it weekly.${mailer}`, "off");
+            if (save) save.textContent = "Turn on";
+          }
+        } catch { digestSay("Couldn't reach the digest service.", "off"); }
+      }
+      function digestAddress() {
+        const f = document.getElementById("digestEmail");
+        const v = (f && f.value || "").trim();
+        if (!v) { digestSay("Type the address to send the digest to first.", "off"); if (f) f.focus(); return null; }
+        try { localStorage.setItem(DIGEST_EMAIL_KEY, v); } catch {}
+        digestEmail = v;
+        return v;
+      }
+      // Preview and Send now post this device's games, so they work before any cloud sync — the
+      // weekly job is the only part that needs the store.
+      async function digestPost(body) {
+        const r = await fetch(`/api/digest${profileParam().replace(/^&/, "?")}`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+        let j = {};
+        try { j = await r.json(); } catch {}
+        return { ok: r.ok, status: r.status, j };
+      }
+      function wireDigestControls() {
+        const save = document.getElementById("digestSave");
+        if (!save) return;
+        save.onclick = async () => {
+          const email = digestAddress(); if (!email) return;
+          digestSay("Turning on…");
+          const { ok, status, j } = await digestPost({ email });
+          if (!ok) return digestSay(j.error || (status === 501 ? "No cloud store connected, so the weekly job has nothing to read." : "Couldn't turn the digest on."), "off");
+          renderDigestState();
+        };
+        document.getElementById("digestOff").onclick = async () => {
+          digestSay("Turning off…");
+          const { ok, j } = await digestPost({ unsubscribe: true });
+          if (!ok) return digestSay(j.error || "Couldn't turn the digest off.", "off");
+          renderDigestState();
+        };
+        document.getElementById("digestPreview").onclick = async () => {
+          digestSay("Building your digest…");
+          const { ok, j } = await digestPost({ games: lsGet(STATS_KEY), preview: true });
+          if (!ok) return digestSay(j.error || "Couldn't build the digest — the service didn't answer.", "off");
+          // The state line is repainted first and awaited: it rewrites the box, so appending the
+          // preview before it lands would wipe the preview out again.
+          await renderDigestState();
+          const box = document.getElementById("digestBox");
+          if (box) box.insertAdjacentHTML("beforeend", `<div class="dg-preview">${esc(j.text || "")}</div>`);
+        };
+        document.getElementById("digestSend").onclick = async () => {
+          const email = digestAddress(); if (!email) return;
+          digestSay("Sending…");
+          const { ok, j } = await digestPost({ games: lsGet(STATS_KEY), to: email });
+          if (!ok) return digestSay(j.error || "Couldn't send — the digest service didn't answer.", "off");
+          digestSay(`Sent to ${email} — “${j.subject}”.`, "on");
+        };
       }
       // What sync is actually doing on this device, in the terms that decide it: is a store connected
       // at all, which profile namespace is this device reading, and do the local and cloud copies

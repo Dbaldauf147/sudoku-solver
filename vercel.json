@@ -6,8 +6,14 @@
     },
     "api/nyt-sudoku.js": {
       "maxDuration": 15
+    },
+    "api/digest.js": {
+      "maxDuration": 60
     }
   },
+  "crons": [
+    { "path": "/api/digest", "schedule": "0 14 * * 1" }
+  ],
   "headers": [
     {
       "source": "/",
