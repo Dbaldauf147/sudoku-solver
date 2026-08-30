@@ -1982,6 +1982,37 @@
       function unitStrikes(u, grid, r, c, n) {
         return u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && !(rr === r && cc === c)).map(([rr, cc]) => [rr, cc, n]);
       }
+      // A move that needs several chained eliminations is proved by all of them, not just the last.
+      // The move detail draws the target cell's candidates and strikes through what the proof removes,
+      // so a step that cleared one of those candidates has to be reported as well: leaving it out left
+      // the modal asserting "that leaves 3 as the only candidate" beside an unstruck 7, with nothing on
+      // screen to say where the 7 went.
+      //
+      // `need` lists the removals the conclusion actually rests on, as "r,c,n" keys. The steps that made
+      // them are reported alongside the step that finished the job; any others the search passed through
+      // only cleared candidates elsewhere, so they're counted rather than recited.
+      function chainProof(chain, need, tail, note) {
+        const wanted = new Set([chain.length - 1]);
+        for (const key of need) {
+          const i = chain.findIndex((e) => e.elims.some((x) => x.join(",") === key));
+          if (i >= 0) wanted.add(i);
+        }
+        const used = [...wanted].sort((a, b) => a - b).map((i) => chain[i]);
+        const last = used[used.length - 1], many = used.length > 1, rest = chain.length - used.length;
+        // Two steps can't remove the same candidate twice — a technique only fires on candidates still
+        // standing — but dedupe anyway so a repeat could never draw one strike on top of another.
+        const seen = new Set(), strikes = [];
+        for (const e of used) for (const x of e.elims) { const k = x.join(","); if (!seen.has(k)) { seen.add(k); strikes.push(x); } }
+        return {
+          tech: last.tech,
+          body: `${used.map((e) => e.reason).join(" ")} ${many ? "Together that leaves" : "That leaves"} ${tail}.`
+            + (rest ? ` (${rest} further step${rest === 1 ? "" : "s"} along the way only cleared candidates elsewhere.)` : ""),
+          strikes,
+          strikeNote: many
+            ? `${used.length} chained steps remove them between them, and that's what leaves ${note}.`
+            : `the ${last.tech} removes ${last.elims.length === 1 ? "it" : "them"}, and that's what leaves ${note}.`,
+        };
+      }
       function describeCorrect(M, grid, r, c, n) {
         for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c) && u.cells.every(([rr, cc]) => (rr === r && cc === c) || grid[rr][cc] !== 0))
           return { tech: "Full house", body: `${loc(r, c)} was the last empty cell in ${u.name}, so it takes the only digit missing there.`,
@@ -1998,19 +2029,26 @@
         // Iterating (rather than trying a single round) means moves that need several chained
         // eliminations get named instead of being lumped into "Advanced".
         let cur = M;
+        const chain = [];
         for (let step = 0; step < 60; step++) {
           let e = null;
           for (const tech of ELIM_TECHS) { e = tech(cur, grid); if (e) break; }
           if (!e) break;                       // nothing more to deduce with the techniques we name
           cur = applyElims(cur, e.elims);
+          chain.push(e);
+          // Pinned to one candidate: the conclusion rests on clearing every other digit this cell
+          // still offered, so each of those removals has to be traced back to the step that made it.
           if (cur[r][c].size === 1 && [...cur[r][c]][0] === n)
-            return { tech: e.tech, body: `${e.reason} That leaves ${n} as the only candidate for ${loc(r, c)}.`,
-              strikes: e.elims, strikeNote: `the ${e.tech} removes ${e.elims.length === 1 ? "it" : "them"}, and that's what leaves ${loc(r, c)} holding only ${n}.` };
+            return chainProof(chain, [...M[r][c]].filter((d) => d !== n).map((d) => [r, c, d].join(",")),
+              `${n} as the only candidate for ${loc(r, c)}`, `${loc(r, c)} holding only ${n}`);
+          // Last spot for the digit in a unit: here it's the removals of n from the unit's other
+          // cells that the conclusion rests on.
           for (const u of UNITS) if (u.cells.some(([rr, cc]) => rr === r && cc === c)) {
             const spots = u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && cur[rr][cc].has(n));
             if (spots.length === 1 && spots[0][0] === r && spots[0][1] === c)
-              return { tech: e.tech, body: `${e.reason} That leaves ${loc(r, c)} as the only spot for ${n} in ${u.name}.`,
-                strikes: e.elims, strikeNote: `the ${e.tech} removes ${e.elims.length === 1 ? "it" : "them"}, and that's what leaves ${loc(r, c)} as the only spot for ${n} in ${u.name}.` };
+              return chainProof(chain,
+                u.cells.filter(([rr, cc]) => grid[rr][cc] === 0 && !(rr === r && cc === c) && M[rr][cc].has(n)).map(([rr, cc]) => [rr, cc, n].join(",")),
+                `${loc(r, c)} as the only spot for ${n} in ${u.name}`, `${loc(r, c)} as the only spot for ${n} in ${u.name}`);
           }
         }
         return { tech: "Forced", body: `${n} is correct — it's the only digit that lets the rest of the grid be completed from ${loc(r, c)}.`, strikes: [] };
