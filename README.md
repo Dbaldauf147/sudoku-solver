@@ -114,14 +114,20 @@ answer.
     spaces and line breaks are ignored) — handy for puzzles you find as a
     string rather than a screenshot. It's checked for conflicts and
     solvability, then saved to your library like any import.
-  - **Today's three, under the top menu.** A strip on the main page shows the
-    day's New York Times puzzles — **Easy · Medium · Hard**, labelled with the
-    date — so any of them is one click from the board. Ones you've solved are
+  - **A day's three, under the top menu.** A strip on the main page shows a
+    day's New York Times puzzles — the **date on top as a picker**, then
+    **Easy · Medium · Hard** below it — so any of them is one click from the
+    board, and any archived day is one click away too. Ones you've solved are
     ticked, the one on the board is highlighted, and hovering gives the clue
-    count and your time. They're fetched in the background when the app opens;
-    if that fails (offline, NYT down) the strip just stays hidden and the
-    board is unaffected. Clicking one while a game is in progress asks before
-    clearing it.
+    count and your time. The date is shared with the **NYT** library tab, so
+    picking a day in one moves the other.
+
+    It opens on today, fetched in the background as the app starts. If today
+    doesn't come back it falls to the newest day this device does have, rather
+    than showing three dead buttons — which matters because NYT refusing a
+    deployment's IP is persistent, not a blip; the library tab says what
+    failed. Only when there's no day at all does the strip stay hidden.
+    Clicking a puzzle while a game is in progress asks before clearing it.
   - **NYT** is a tab in the game library (⚙ → *NYT puzzles* is a shortcut to
     it) holding the same puzzles with more detail, and a **day picker** for
     going back through earlier days. All three difficulties are fetched **in
