@@ -83,18 +83,25 @@ answer.
     actually needed.
   - A **number pad** (1–9 plus **✕** to clear) with **Normal** and
     **Candidate** modes — Candidate mode toggles your own pencil marks;
-    **Auto notes** fills every empty cell with its possible digits.
+    **Auto notes** (⚙ menu) fills every empty cell with its possible digits.
   - A **timer** runs while you solve, a live **error count** tracks wrong
     entries, and every move is logged with the time since your last choice and
     the technique that justifies it. The clock **auto-pauses when you switch
     away** from the tab (and there's a manual **Pause**), so idle time doesn't
     skew your stats. **Undo** (Ctrl/⌘-Z) and **Redo** (Ctrl/⌘-Y or
     Ctrl/⌘-Shift-Z) step back and forth through your entries. Once a digit is
-    placed nine times its number-pad key is crossed out. **Restart** sits beside
-    Pause above the board — one confirmation and the puzzle is back to its
-    starting clues with a fresh clock, the same reset that lives in the ⚙ menu.
+    placed nine times its number-pad key is crossed out. The row above the board
+    is **Undo · Redo · Clear board · Pause · Restart**. **Restart** takes one
+    confirmation and puts the puzzle back to its starting clues with a fresh
+    clock — the same reset that lives in the ⚙ menu. **Clear board** is the
+    bigger hammer next to it: it empties the grid and drops you back to editing,
+    so it asks first too, and says which of the two you probably meant. It's
+    also still in the ⚙ menu, which is the only place it can be reached from
+    while you're setting a puzzle up (that row only appears once you're
+    solving).
   - **Pencil marks** can be filled for every empty cell at once with **Auto
-    notes**, and an **Auto-update notes** setting keeps them tidy — placing a
+    notes** (⚙ menu — press it again to clear them), and an **Auto-update
+    notes** setting keeps them tidy — placing a
     digit clears it from the notes of every cell in that row, column, and box
     automatically (and undo puts them back), so you can work advanced
     techniques without re-pencilling by hand.
@@ -281,7 +288,8 @@ answer.
     only thing in the top bar, so the board gets the room. The profile chip
     ("Playing as: …"), Home, Game library, Practice and Import screenshot lead
     the menu, then Start solving, Hint, Step-by-step solve, Stats, Techniques,
-    Check entries, Settings, Reveal solution, Edit puzzle and the rest.
+    Check entries, Auto notes, Settings, Reveal solution, Edit puzzle and the
+    rest.
 
   The coaching and saved library are entirely client-side, so they work
   **without an API key** — only the optional screenshot import calls Claude
