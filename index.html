@@ -523,6 +523,7 @@
             <button id="statsBtn">Stats</button>
             <button id="techBtn">Techniques</button>
             <button id="check">Check entries</button>
+            <button id="autonotes" title="Fill every empty cell with its possible digits — or clear the notes if they're already there">Auto notes</button>
             <button id="pastePuzzle">Paste puzzle</button>
             <button id="nytPuzzle" title="Today's New York Times daily Sudoku, and the earlier days this device has archived">NYT puzzles</button>
             <button id="saveGame">Save game</button>
@@ -551,7 +552,7 @@
       <div class="row solving">
         <button id="undo">Undo</button>
         <button id="redo">Redo</button>
-        <button id="autonotes">Auto notes</button>
+        <button id="clearBoard" title="Empty the whole board and go back to editing">Clear board</button>
         <button id="pause">Pause</button>
         <button id="restart" title="Back to the starting clues with a fresh clock">Restart</button>
       </div>
@@ -644,6 +645,17 @@
           <div class="actions">
             <button id="resetCancel">Keep playing</button>
             <button id="resetConfirm" class="primary">Reset game</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="clearModal" class="overlay" hidden>
+        <div class="modal">
+          <h2>Clear the board?</h2>
+          <p id="clearMsg"></p>
+          <div class="actions">
+            <button id="clearCancel">Keep it</button>
+            <button id="clearConfirm" class="primary">Clear board</button>
           </div>
         </div>
       </div>
@@ -2869,6 +2881,9 @@
       document.getElementById("redo").addEventListener("click", redo);
 
       document.getElementById("autonotes").addEventListener("click", () => {
+        // Reachable from the ⚙ menu at any time now, but it has nothing to work from before a solve
+        // starts: with no givens and no solution, every cell would take all nine digits.
+        if (!solving) return showExplain("No game to note", "Start a puzzle first — Auto notes fills the pencil marks for the game you're playing.", "info");
         const grid = progressGrid();
         const any = marks.some((row, r) => row.some((s, c) => !givens[r][c] && !inputs[r][c].value && s.size));
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
@@ -3031,7 +3046,31 @@
       });
 
       document.getElementById("edit").addEventListener("click", resetToEdit);
-      document.getElementById("clear").addEventListener("click", () => { for (const row of inputs) for (const i of row) i.value = ""; resetToEdit(); });
+      // Clear board empties every cell and drops back to editing. It sits in two places — the ⚙ menu
+      // (the only one reachable while you're setting a puzzle up) and the toolbar during a solve — so
+      // both go through the same confirmation, the way Reset game and Restart do.
+      const clearModal = document.getElementById("clearModal");
+      function clearBoardNow() {
+        for (const row of inputs) for (const i of row) i.value = "";
+        resetToEdit();
+      }
+      function promptClearBoard() {
+        closeMenu();
+        // Nothing entered anywhere: there's nothing to lose, so don't make them confirm an empty board.
+        const anything = inputs.some((row) => row.some((i) => i.value));
+        if (!anything) return clearBoardNow();
+        // Mid-solve the puzzle itself survives in the library; a set-up board that was never started
+        // doesn't exist anywhere else, which is the more expensive of the two.
+        document.getElementById("clearMsg").textContent = solving
+          ? "This empties the whole board and ends the solve — your progress and the timer go with it. The puzzle stays in your library. To keep playing this puzzle from its clues, use Restart instead."
+          : "This empties every digit on the board. Clues you've typed but never started solving aren't saved anywhere, so they can't be brought back.";
+        clearModal.hidden = false;
+      }
+      document.getElementById("clear").addEventListener("click", promptClearBoard);
+      document.getElementById("clearBoard").addEventListener("click", promptClearBoard);
+      document.getElementById("clearCancel").addEventListener("click", () => { clearModal.hidden = true; });
+      clearModal.addEventListener("click", (e) => { if (e.target === clearModal) clearModal.hidden = true; });
+      document.getElementById("clearConfirm").addEventListener("click", () => { clearModal.hidden = true; clearBoardNow(); });
 
       // Reset the *current* game back to its starting clues (keeps the puzzle; wipes your progress).
       // Gated behind a confirmation so it can't be triggered by accident.
