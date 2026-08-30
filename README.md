@@ -147,9 +147,27 @@ answer.
       redistributed NYT content, so keep them out of catalogues you share.
   - **Stats** opens a deep-dive: solve times and accuracy **per difficulty**,
     plus **over-time trends** that chart how your numbers move from game to
-    game — a **solve time over time** sparkline per difficulty and a
-    **technique time over time** sparkline per technique, each tagged with a
-    faster/slower badge so you can see whether you're improving. It also has a
+    game. A **Your averages** panel heads the trends section — average solve,
+    the last five, your best and your typical time per move for each
+    difficulty, with how the recent five compare — and under it are three
+    full-size charts you switch between (the one you pick is remembered):
+    - **Over time** — one chart per difficulty: a time axis, a point per solved
+      game oldest to newest, a trailing average through them, and your overall
+      average and best drawn across so a single game reads against them.
+    - **Per move** — average time per move at each position, one line per
+      difficulty, each with its own dashed average line.
+    - **Slow-down clusters** — where in a puzzle you stall. Each game is split
+      into ten stretches from first move to last, and each difficulty gets a
+      lane of bubbles sized by how often moves in that stretch ran more than
+      1.6× your median pause **for that game** — so a difficulty that simply
+      runs slower throughout doesn't read as one long stall. A dashed ring
+      marks each difficulty's worst stretch, and a sentence per lane says
+      where you stall and what it costs. Tapping a difficulty in the legend
+      hides it from both this chart and the per-move one.
+
+    There's also a **technique time over time** sparkline per technique, each
+    tagged with a faster/slower badge so you can see whether you're improving.
+    It also has a
     "where you spend time" breakdown of typical (median) time **per technique**
     so you can see what trips you up, and a per-game timeline that bars out the
     gap before each move and flags the slow ones. That breakdown also carries a
@@ -336,6 +354,38 @@ Browser ──(base64 image)──▶ /api/parse-sudoku-image ──▶ Claude V
    └──────────────── { grid: number[9][9] } ◀────────────────┘
 ```
 
+### Weekly "what's slipping" email (optional)
+
+⚙ → **Settings → Weekly email digest** turns on a Monday email that names the
+parts of your game that have **got worse** — the difficulties, techniques,
+stall patterns, mistake rates and hint counts where your recent games trail the
+ones before them. Improvements get a short closing list; the body is the
+slippage, because that's the part you wouldn't go looking for.
+
+Every comparison is made **inside one difficulty**. Pooling them is the trap
+here: a fortnight of Hard puzzles would make every technique look like it had
+slowed down when all that changed was what you chose to play. A finding needs
+both a meaningful size and enough games either side of the comparison before it
+is reported, and one technique slipping across several difficulties is rolled up
+into a single row rather than three.
+
+**Preview** and **Send now** analyse the games on the device you're holding, so
+they work with no store connected. The weekly job reads from the store, so it
+needs cross-device sync above.
+
+To set it up:
+
+1. Connect the Redis store as for sync (the subscriptions live there too).
+2. Add `RESEND_API_KEY` from [Resend](https://resend.com) in your Vercel
+   project's **Environment Variables**. Without it the endpoint still analyses
+   and previews, and the Settings panel says sending isn't configured.
+3. Optionally set `DIGEST_FROM` (e.g. `Sudoku Coach <coach@yourdomain>`). The
+   default is Resend's shared onboarding sender, which only delivers to the
+   email on your own Resend account.
+4. Optionally set `CRON_SECRET`; when it's set, the scheduled `GET /api/digest`
+   must present it as a bearer token. Vercel supplies this header automatically.
+5. **Redeploy.** `vercel.json` schedules the job for Mondays at 14:00 UTC.
+
 ## Local development
 
 ```bash
@@ -443,6 +493,29 @@ a function under `api/`.
 ```
 
 Errors come back as `{ "error": "<message>" }` with a 4xx/5xx status.
+
+`POST /api/digest` — the "what's slipping" digest.
+
+```jsonc
+// analyse the games you send and return the rendered email without sending it
+{ "games": [ /* game records */ ], "preview": true }
+// -> { "subject": "...", "html": "...", "text": "...", "configured": true }
+
+// …or send it now
+{ "games": [ /* game records */ ], "to": "you@example.com" }
+// -> { "ok": true, "sent": true, "to": "...", "subject": "..." }
+
+// subscribe / unsubscribe the weekly job (needs ?profile=<id>)
+{ "email": "you@example.com" }   // -> { "ok": true, "subscribed": true }
+{ "unsubscribe": true }          // -> { "ok": true, "subscribed": false }
+```
+
+`GET /api/digest?status=1&profile=<id>` → `{ subscribed, email, mailer }`.
+
+`GET /api/digest` with no query is the cron entry point: it mails every
+subscriber, reading each profile's history from the store, and returns a
+per-subscriber result list. Subscribers with no recorded games are skipped
+rather than mailed an empty week.
 
 `GET /api/nyt-sudoku?difficulty=easy|medium|hard`
 
