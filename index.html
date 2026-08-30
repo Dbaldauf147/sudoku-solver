@@ -101,10 +101,17 @@
       .mini div:nth-child(n+73) { border-bottom: 0; }
 
       /* Today's three NYT puzzles, sitting under the top menu. */
-      .nyt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 14px; }
+      .nyt-bar { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: -4px 0 14px; }
       .nyt-bar[hidden] { display: none; }
+      .nyt-bar-day { display: flex; align-items: center; gap: 6px; }
+      .nyt-bar-tiers { display: flex; flex-wrap: wrap; gap: 6px; }
       .nyt-bar-label { color: var(--muted); font-size: 0.78rem; font-weight: 600;
         text-transform: uppercase; letter-spacing: 0.04em; margin-right: 2px; }
+      /* The day reads as the strip's heading rather than a form control, but stays a real select so
+         it's obvious it can be changed — and so the picker is one tap on a phone. */
+      #nytBarDay { font-size: 0.78rem; font-weight: 600; padding: 2px 4px; min-width: 0;
+        color: var(--muted); background: none; border: 1px solid transparent; border-radius: 6px; }
+      #nytBarDay:hover, #nytBarDay:focus { color: var(--text); border-color: var(--line); }
       .nyt-quick { padding: 6px 12px; font-size: 0.85rem; }
       .nyt-quick.done { color: var(--ok); border-color: var(--ok); }
       .nyt-quick.current { background: var(--sel); border-color: var(--accent); font-weight: 600; }
@@ -543,10 +550,15 @@
       <!-- Today's three NYT puzzles, one click from the board. Stays hidden until they've
            actually loaded, so it never shows buttons that can't do anything. -->
       <div class="nyt-bar" id="nytBar" hidden>
-        <span class="nyt-bar-label" id="nytBarLabel">NYT today</span>
-        <button class="nyt-quick" data-d="easy">Easy</button>
-        <button class="nyt-quick" data-d="medium">Medium</button>
-        <button class="nyt-quick" data-d="hard">Hard</button>
+        <div class="nyt-bar-day">
+          <span class="nyt-bar-label">NYT</span>
+          <select id="nytBarDay" title="Pick a day — today, or any earlier one this device has archived"></select>
+        </div>
+        <div class="nyt-bar-tiers">
+          <button class="nyt-quick" data-d="easy">Easy</button>
+          <button class="nyt-quick" data-d="medium">Medium</button>
+          <button class="nyt-quick" data-d="hard">Hard</button>
+        </div>
       </div>
 
       <div class="row solving">
@@ -4180,9 +4192,23 @@
       // you've already solved and which one is on the board, so it doubles as the day's status.
       function renderNytBar() {
         const bar = document.getElementById("nytBar"); if (!bar) return;
-        if (!Object.keys(nyt.puzzles).length) { bar.hidden = true; return; }   // nothing loaded (or the fetch failed) — stay out of the way
+        const dates = nytDayOptions();
+        const date = selectedNytDate();
+        const day = nytDayView(date);
+        // Nothing on this device for any day — no fetch landed and the archive is empty. Stay out of
+        // the way entirely rather than showing a picker over three dead buttons. Tested against the
+        // stored archive rather than by resolving each day: nytDayView parses and solvability-checks
+        // a day's grids, and this runs on every render of the strip.
+        if (!day && !loadNytArchive().length && !Object.keys(nyt.puzzles).length) { bar.hidden = true; return; }
         bar.hidden = false;
-        document.getElementById("nytBarLabel").textContent = nyt.date ? `NYT ${fmtCatalogDate(nyt.date)}` : "NYT today";
+
+        // The date sits above the difficulties and picks the day both this strip and the library tab
+        // are showing, so an earlier day is one tap from the board just like today is.
+        const sel = document.getElementById("nytBarDay");
+        const today = dates[0];
+        sel.innerHTML = dates.map((d) =>
+          `<option value="${d}"${d === date ? " selected" : ""}>${esc(fmtCatalogDate(d))}${d === today ? " · today" : ""}</option>`).join("");
+        sel.disabled = dates.length < 2;
 
         const stats = lsGet(STATS_KEY);
         // What's on the board right now, so the current puzzle can be marked rather than reloaded.
@@ -4190,12 +4216,14 @@
         try { onBoard = gridKey(solving ? clueGridNow() : readGrid()); } catch { onBoard = null; }
 
         bar.querySelectorAll(".nyt-quick").forEach((b) => {
-          const d = b.dataset.d, tier = NYT_TIERS[d], p = nyt.puzzles[d];
+          const d = b.dataset.d, tier = NYT_TIERS[d], p = day && day.puzzles[d];
           b.disabled = !p;
           if (!p) {
             b.textContent = tier;
             b.className = "nyt-quick";
-            b.title = `Today's ${tier.toLowerCase()} puzzle didn't come back from NYT`;
+            b.title = date === today
+              ? `Today's ${tier.toLowerCase()} puzzle didn't come back from NYT`
+              : `No ${tier.toLowerCase()} puzzle archived for ${fmtCatalogDate(date)}`;
             return;
           }
           const source = p.date ? `NYT ${p.date}` : "NYT";
@@ -4229,6 +4257,20 @@
         return dates.sort((a, b) => (a < b ? 1 : -1));   // newest first
       }
 
+      // The day both views are showing. Kept in one place so the strip under the top menu and the
+      // library tab can't drift apart — picking Aug 24 on the strip and then opening the tab should
+      // land on Aug 24. Falls back to today when the chosen day has aged out of the archive.
+      function selectedNytDate() {
+        const dates = nytDayOptions();
+        if (nytDay && !dates.includes(nytDay)) nytDay = null;
+        if (nytDay) return nytDay;                       // an explicit pick always wins, today included
+        // Nothing picked yet: today, unless today didn't come back — then the newest day that did.
+        // NYT refusing a deployment's IP is persistent, so defaulting to today there would leave the
+        // strip showing three dead buttons on every visit with playable days sitting behind it.
+        // `find` stops at the first day that resolves, which is today in the ordinary case.
+        return dates.find((d) => nytDayView(d)) || dates[0];
+      }
+
       // Prev/next walk the same list the dropdown holds, so there's no way to land on a day with
       // nothing behind it. The list is newest first, so "older" is the higher index.
       function nytDayPicker(dates, date) {
@@ -4254,7 +4296,7 @@
           nytDay = d;
           const day = nytDayView(d);
           if (day && !day.puzzles[nytSub]) nytSub = Object.keys(day.puzzles)[0] || nytSub;
-          renderNytTab();
+          renderNytUI();   // the strip under the top menu shows the same day, so it moves too
         };
         sel.onchange = () => go(sel.value);
         document.getElementById("nytOlder").onclick = () => go(dates[i + 1]);
@@ -4274,8 +4316,7 @@
         const content = document.getElementById("libContent"); if (!content) return;
 
         const dates = nytDayOptions();
-        if (nytDay && !dates.includes(nytDay)) nytDay = null;   // a day that has since aged out of the archive
-        const date = nytDay || dates[0];
+        const date = selectedNytDate();   // shared with the strip under the top menu
         const isToday = date === dates[0];
         // Drawn above the loading and error states too: a failed fetch of today mustn't lock you out
         // of the days already on the device.
@@ -4330,6 +4371,11 @@
           : "";
 
         const archived = loadNytArchive().length;
+        // Landed on an earlier day because today's fetch failed: the error card below only renders on
+        // the today view, so without this the failure would be invisible from here.
+        const todayFailed = !isToday && nyt.error && !nytDay
+          ? `<div class="card"><b>Today's puzzles didn't load.</b> <span class="k">${esc(nyt.error)}</span></div>`
+          : "";
         const intro = isToday
           ? `<div class="card">Today's New York Times daily Sudoku${day.date ? ` · <b>${esc(fmtCatalogDate(day.date))}</b>` : ""}. Pick a difficulty and play it — it's saved to your library like any other import.</div>`
           : `<div class="card">The New York Times daily Sudoku for <b>${esc(fmtCatalogDate(date))}</b>, captured on the day it was published. It plays exactly like today's.</div>`;
@@ -4341,7 +4387,7 @@
           : `<div class="saved-row"><div class="saved-meta"><span class="k">From the archive — NYT no longer serves this day, so it's played from the copy taken while it was current.</span></div></div>`;
 
         content.innerHTML =
-          picker + intro + missingNote +
+          picker + todayFailed + intro + missingNote +
           `<div class="nyt-subs">${subs}</div>` +
           `<div class="saved-row">
              <div class="saved-meta"><b>${esc(tier)}</b> · ${clues} clues${playedNote}<br>
@@ -6475,7 +6521,14 @@
       // Two ways in on the same fetched day: the strip under the top menu (renderNytBar) for
       // one-click play, and the library tab (renderNytTab) for the thumbnails and detail.
       document.getElementById("nytPuzzle").addEventListener("click", () => openLibrary("nyt"));
-      document.querySelectorAll(".nyt-quick").forEach((b) => b.addEventListener("click", () => playNyt(b.dataset.d)));
+      document.querySelectorAll(".nyt-quick").forEach((b) => b.addEventListener("click", () => playNyt(b.dataset.d, nytDayView(selectedNytDate()))));
+      // Changing the day here changes it for the library tab too — they show the same day.
+      document.getElementById("nytBarDay").addEventListener("change", (e) => {
+        nytDay = e.target.value;
+        const day = nytDayView(nytDay);
+        if (day && !day.puzzles[nytSub]) nytSub = Object.keys(day.puzzles)[0] || nytSub;
+        renderNytUI();
+      });
       // ---- init ----
       select(0, 0);
       if (!restoreActiveGame()) renderPencils();
