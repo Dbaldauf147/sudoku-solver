@@ -341,7 +341,19 @@
       .chart-toggle { display: flex; gap: 8px; margin: 4px 0 12px; }
       .chart-toggle .ctog { flex: 1 1 0; text-align: center; font-size: 0.85rem; }
       .chart-toggle .ctog.on { background: var(--sel); border-color: var(--accent); color: var(--text); font-weight: 600; }
-      .pace-chart { width: 100%; height: auto; display: block; }
+      .pace-chart { width: 100%; height: auto; display: block; margin: 2px 0 4px; }
+      /* Averages panel above the trend charts. */
+      .avg-card .avg-head { margin-bottom: 8px; }
+      .avg-row { padding: 8px 0; border-top: 1px solid var(--line); font-size: 0.9rem; }
+      .avg-row:first-of-type { border-top: none; padding-top: 0; }
+      .avg-row .avg-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+      .avg-row .avg-d { font-weight: 700; }
+      .avg-row .avg-note { font-size: 0.82rem; text-align: right; }
+      .avg-row .avg-figs { margin-top: 2px; line-height: 1.55; }
+      /* One takeaway sentence per difficulty under the slow-down cluster chart. */
+      .cluster-notes { margin: 8px 0 6px; font-size: 0.86rem; line-height: 1.5; }
+      .cluster-notes > div { margin: 4px 0; }
+      .cluster-notes .lgdot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
       .chart-legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 6px; font-size: 0.85rem; }
       .chart-legend .lg { display: inline-flex; align-items: center; gap: 6px; }
       .chart-legend .lgdot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
@@ -406,8 +418,17 @@
       .set-row .set-about { color: var(--muted); font-size: 0.85rem; line-height: 1.45; margin-top: 3px; }
       .set-row .sw { flex: 0 0 auto; min-width: 62px; text-align: center; font-weight: 700; }
       .set-row .sw.on { background: var(--sel); border-color: var(--accent); color: var(--accent); }
-      .sync-actions { display: flex; gap: 8px; }
+      .sync-actions { display: flex; gap: 8px; flex-wrap: wrap; }
       .sync-actions button { flex: 1 1 0; text-align: center; }
+      /* Weekly email digest */
+      #digestEmail { width: 100%; margin: 8px 0; }
+      #digestBox { line-height: 1.5; }
+      #digestBox .dg-state { font-weight: 600; }
+      #digestBox .dg-on { color: var(--ok); }
+      #digestBox .dg-off { color: var(--muted); }
+      .dg-preview { white-space: pre-wrap; font-size: 0.82rem; line-height: 1.5; margin: 10px 0 0;
+        max-height: 320px; overflow: auto; background: var(--bg); border: 1px solid var(--line);
+        border-radius: 8px; padding: 10px 12px; }
       #syncDiag { line-height: 1.5; }
       #syncDiag code { font-size: 0.85em; }
 
@@ -2634,7 +2655,12 @@
             </div>`;
           }).join("") +
           `<h3>Sync</h3><div id="syncDiag" class="card">Checking…</div>
-           <div class="sync-actions"><button id="syncNowBtn">Sync now</button><button id="syncPushBtn">Upload this device</button><button id="syncRecheck">Re-check</button></div>`;
+           <div class="sync-actions"><button id="syncNowBtn">Sync now</button><button id="syncPushBtn">Upload this device</button><button id="syncRecheck">Re-check</button></div>
+           <h3>Weekly email digest</h3>
+           <p class="hintline">A Monday email naming what has slipped — the difficulties, techniques and stall patterns where your recent games are slower or less accurate than the ones before. Improvements get a line at the end; the body is the part you'd otherwise miss.</p>
+           <div id="digestBox" class="card">Checking…</div>
+           <input id="digestEmail" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" value="${esc(digestEmail)}">
+           <div class="sync-actions"><button id="digestSave" class="primary">Turn on</button><button id="digestPreview">Preview</button><button id="digestSend">Send now</button><button id="digestOff">Turn off</button></div>`;
         document.getElementById("setBack").onclick = closeSettings;
         settingsPanel.querySelectorAll(".sw").forEach((btn) => {
           btn.onclick = () => { SETTINGS[Number(btn.dataset.i)].toggle(); renderSettings(); };
@@ -2650,7 +2676,95 @@
           setTimeout(() => { updateSyncStatus(); renderSyncDiag(); }, 1200);
         };
         document.getElementById("syncRecheck").onclick = renderSyncDiag;
+        wireDigestControls();
         renderSyncDiag();
+        renderDigestState();
+      }
+
+      // ---- weekly email digest ----
+      // The address is remembered on this device so the field refills; whether the weekly mail is
+      // actually on lives in the store, since that's what the scheduled job reads.
+      const DIGEST_EMAIL_KEY = "sudoku-coach:digest-email";
+      let digestEmail = "";
+      try { digestEmail = localStorage.getItem(DIGEST_EMAIL_KEY) || ""; } catch {}
+      function digestSay(msg, kind) {
+        const box = document.getElementById("digestBox");
+        if (box) box.innerHTML = `<span class="dg-state ${kind === "on" ? "dg-on" : kind === "off" ? "dg-off" : ""}">${esc(msg)}</span>`;
+      }
+      async function renderDigestState() {
+        const box = document.getElementById("digestBox");
+        if (!box) return;
+        box.textContent = "Checking…";
+        try {
+          const r = await fetch(`/api/digest?status=1${profileParam()}`, { cache: "no-store" });
+          if (r.status === 501) return digestSay("This deployment has no cloud store connected, so there's nothing for a weekly job to read. Preview and Send now still work — they analyse the games on this device.", "off");
+          if (!r.ok) return digestSay("Couldn't reach the digest service. Preview and Send now may still work.", "off");
+          const j = await r.json();
+          const mailer = j.mailer ? "" : " Sending isn't configured on this deployment yet (it needs a RESEND_API_KEY), so nothing will actually be delivered.";
+          const save = document.getElementById("digestSave");
+          if (j.subscribed) {
+            digestSay(`On — mailing ${j.email} every Monday.${mailer}`, "on");
+            const f = document.getElementById("digestEmail");
+            if (f && !f.value) f.value = j.email;
+            // Once it's on, the same button is how you move it to a different address.
+            if (save) save.textContent = "Update address";
+          } else {
+            digestSay(`Off. Add an address and turn it on to get it weekly.${mailer}`, "off");
+            if (save) save.textContent = "Turn on";
+          }
+        } catch { digestSay("Couldn't reach the digest service.", "off"); }
+      }
+      function digestAddress() {
+        const f = document.getElementById("digestEmail");
+        const v = (f && f.value || "").trim();
+        if (!v) { digestSay("Type the address to send the digest to first.", "off"); if (f) f.focus(); return null; }
+        try { localStorage.setItem(DIGEST_EMAIL_KEY, v); } catch {}
+        digestEmail = v;
+        return v;
+      }
+      // Preview and Send now post this device's games, so they work before any cloud sync — the
+      // weekly job is the only part that needs the store.
+      async function digestPost(body) {
+        const r = await fetch(`/api/digest${profileParam().replace(/^&/, "?")}`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+        let j = {};
+        try { j = await r.json(); } catch {}
+        return { ok: r.ok, status: r.status, j };
+      }
+      function wireDigestControls() {
+        const save = document.getElementById("digestSave");
+        if (!save) return;
+        save.onclick = async () => {
+          const email = digestAddress(); if (!email) return;
+          digestSay("Turning on…");
+          const { ok, status, j } = await digestPost({ email });
+          if (!ok) return digestSay(j.error || (status === 501 ? "No cloud store connected, so the weekly job has nothing to read." : "Couldn't turn the digest on."), "off");
+          renderDigestState();
+        };
+        document.getElementById("digestOff").onclick = async () => {
+          digestSay("Turning off…");
+          const { ok, j } = await digestPost({ unsubscribe: true });
+          if (!ok) return digestSay(j.error || "Couldn't turn the digest off.", "off");
+          renderDigestState();
+        };
+        document.getElementById("digestPreview").onclick = async () => {
+          digestSay("Building your digest…");
+          const { ok, j } = await digestPost({ games: lsGet(STATS_KEY), preview: true });
+          if (!ok) return digestSay(j.error || "Couldn't build the digest — the service didn't answer.", "off");
+          // The state line is repainted first and awaited: it rewrites the box, so appending the
+          // preview before it lands would wipe the preview out again.
+          await renderDigestState();
+          const box = document.getElementById("digestBox");
+          if (box) box.insertAdjacentHTML("beforeend", `<div class="dg-preview">${esc(j.text || "")}</div>`);
+        };
+        document.getElementById("digestSend").onclick = async () => {
+          const email = digestAddress(); if (!email) return;
+          digestSay("Sending…");
+          const { ok, j } = await digestPost({ games: lsGet(STATS_KEY), to: email });
+          if (!ok) return digestSay(j.error || "Couldn't send — the digest service didn't answer.", "off");
+          digestSay(`Sent to ${email} — “${j.subject}”.`, "on");
+        };
       }
       // What sync is actually doing on this device, in the terms that decide it: is a store connected
       // at all, which profile namespace is this device reading, and do the local and cloud copies
@@ -4441,6 +4555,90 @@
         }
         return pts;
       }
+      // ---- shared chart geometry ----
+      // Every trends chart is drawn into a fixed viewBox and scaled to the card by CSS, so these
+      // are proportions rather than pixels. They're deliberately generous: the 48px sparkline these
+      // replaced had no room for an axis, an average line, or a legible label.
+      const CHART = { W: 340, H: 208, padL: 48, padR: 12, padT: 14, padB: 34 };
+      // Labels that sit inside the plot (an average, a best) get a stroke in the card colour painted
+      // behind the glyphs, so they stay readable wherever a data line runs underneath them.
+      const HALO = 'stroke="var(--panel)" stroke-width="3" paint-order="stroke" stroke-linejoin="round"';
+      // Horizontal gridlines with their value labelled down the left edge.
+      function chartGrid(ticks, sy, fmt) {
+        const { W, padL, padR } = CHART;
+        return ticks.map((t) => {
+          const y = sy(t).toFixed(1);
+          return `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="var(--line)" stroke-width="1"></line>`
+            + `<text x="${padL - 6}" y="${(Number(y) + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--muted)">${esc(fmt(t))}</text>`;
+        }).join("");
+      }
+      // A trailing average over the last `w` points — the line that says where you actually are now,
+      // without one bad night reading as a slump.
+      function rollingAvg(vals, w) {
+        return vals.map((_, i) => {
+          const slice = vals.slice(Math.max(0, i - w + 1), i + 1);
+          return slice.reduce((a, b) => a + b, 0) / slice.length;
+        });
+      }
+      const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+
+      // ---- solve time over time (one chart per difficulty) ----
+      // Every solved game of one difficulty, oldest → newest, at full size: a point per game, a
+      // trailing average through them, and your overall average and best drawn across so a single
+      // game reads against them instead of hanging in space.
+      function solveTimeChart(pts, color) {
+        const n = pts.length, vals = pts.map((p) => p.v);
+        const avg = mean(vals), best = Math.min(...vals), worst = Math.max(...vals);
+        const { W, H, padL, padR, padT, padB } = CHART;
+        const plotW = W - padL - padR, plotH = H - padT - padB;
+        // A padded band around your times rather than a zero baseline: solve times cluster, and
+        // anchoring at zero flattens the very movement this chart exists to show. The axis labels
+        // carry the absolute numbers, so nothing is hidden by starting above zero.
+        const span = worst - best || Math.max(1000, avg * 0.2);
+        const lo = Math.max(0, best - span * 0.2), hi = worst + span * 0.2;
+        const sx = (i) => padL + (n === 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+        const sy = (v) => padT + (1 - (v - lo) / (hi - lo)) * plotH;
+        const ticks = [0, 1, 2, 3].map((i) => lo + ((hi - lo) * i) / 3);
+        const grid = chartGrid(ticks, sy, fmtTime);
+
+        const path = pts.map((p, i) => `${sx(i).toFixed(1)},${sy(p.v).toFixed(1)}`).join(" ");
+        const area = n > 1
+          ? `<polygon points="${padL},${(padT + plotH).toFixed(1)} ${path} ${(padL + plotW).toFixed(1)},${(padT + plotH).toFixed(1)}" fill="${color}" fill-opacity="0.12"></polygon>`
+          : "";
+        const line = n > 1
+          ? `<polyline points="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>`
+          : "";
+        // The trailing average only earns its ink once there are enough games for it to differ
+        // from the raw line.
+        const win = Math.max(2, Math.min(5, Math.ceil(n / 4)));
+        const roll = n >= 4
+          ? `<polyline points="${rollingAvg(vals, win).map((v, i) => `${sx(i).toFixed(1)},${sy(v).toFixed(1)}`).join(" ")}" fill="none" stroke="var(--text)" stroke-width="1.5" stroke-opacity="0.55" stroke-dasharray="1 3" stroke-linejoin="round"></polyline>`
+          : "";
+        // Dots thin out on long histories so they stay readable rather than merging into a band.
+        // They paint under the average and best lines, whose labels carry a halo — a dot landing
+        // on a label would otherwise strike through it.
+        const step = n > 40 ? Math.ceil(n / 40) : 1;
+        const dots = pts.map((p, i) => (i % step === 0 || i === n - 1)
+          ? `<circle cx="${sx(i).toFixed(1)}" cy="${sy(p.v).toFixed(1)}" r="${n > 30 ? 2 : 3}" fill="${color}"><title>${esc(p.label)}</title></circle>`
+          : "").join("");
+
+        const ref = (v, stroke, dash, text, anchorTop) => {
+          const y = sy(v);
+          return `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" stroke="${stroke}" stroke-width="1.5" stroke-dasharray="${dash}"></line>`
+            + `<text x="${W - padR - 2}" y="${(y + (anchorTop ? -4 : 10)).toFixed(1)}" text-anchor="end" font-size="9" font-weight="600" fill="${stroke}" ${HALO}>${esc(text)}</text>`;
+        };
+        const avgLine = ref(avg, "var(--warn)", "5 3", `avg ${fmtTime(avg)}`, true);
+        // Skipped when best and average sit on top of each other, where two labels would collide.
+        const bestLine = Math.abs(sy(best) - sy(avg)) > 12 ? ref(best, "var(--ok)", "2 3", `best ${fmtTime(best)}`, false) : "";
+
+        let xaxis = "";
+        for (const i of [...new Set([0, n >> 1, n - 1])]) {
+          xaxis += `<text x="${sx(i).toFixed(1)}" y="${(H - padB + 14).toFixed(1)}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}" font-size="9" fill="var(--muted)">${esc(pts[i].when)}</text>`;
+        }
+        xaxis += `<text x="${(padL + plotW / 2).toFixed(1)}" y="${H - 4}" text-anchor="middle" font-size="9" fill="var(--muted)">${n} solved game${n === 1 ? "" : "s"}, oldest → newest</text>`;
+        return `<svg viewBox="0 0 ${W} ${H}" class="pace-chart" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Solve time per game, oldest to newest. Average ${esc(fmtTime(avg))}, best ${esc(fmtTime(best))}.">${grid}${area}${line}${roll}${dots}${avgLine}${bestLine}${xaxis}</svg>`;
+      }
+
       // ---- avg time per move, by move position (used by the "Avg time per move" chart) ----
       const DIFF_COLORS = { Easy: "#4ade80", Medium: "#f59e0b", Hard: "#ff6b6b" };
       function movePaceSeries(games, diff) {
@@ -4457,47 +4655,51 @@
         }
         return pts;
       }
-      // Difficulties switched off on the per-move chart. Kept out of the axis scaling too, so hiding the
-      // slowest difficulty zooms in on the rest instead of leaving them squashed along the bottom.
+      // Difficulties switched off on the per-move and cluster charts. Kept out of the axis scaling
+      // too, so hiding the slowest difficulty zooms in on the rest instead of leaving them squashed
+      // along the bottom. The same set drives both charts, so a difficulty you've hidden stays hidden
+      // when you switch between them.
       let paceHidden = new Set();
       try { paceHidden = new Set(JSON.parse(localStorage.getItem("sudoku-coach:pacehide")) || []); } catch {}
       function togglePaceSeries(d) {
         paceHidden.has(d) ? paceHidden.delete(d) : paceHidden.add(d);
         try { localStorage.setItem("sudoku-coach:pacehide", JSON.stringify([...paceHidden])); } catch {}
       }
+      // The legend always lists every difficulty you have games for — including the hidden ones,
+      // which is the only way back once they're off. `note` adds a per-difficulty figure (its
+      // average) beside the name, so the legend carries data rather than just colour.
+      function paceLegendHTML(series, note) {
+        const legend = series.map((s) => {
+          const off = paceHidden.has(s.label);
+          const extra = note ? note(s) : "";
+          return `<button type="button" class="lg${off ? " off" : ""}" data-d="${esc(s.label)}" aria-pressed="${off ? "false" : "true"}" title="${off ? "Show" : "Hide"} ${esc(s.label)}"><span class="lgdot" style="background:${s.color}"></span>${esc(s.label)}${extra ? ` <span class="k">${esc(extra)}</span>` : ""}</button>`;
+        }).join("");
+        return `<div class="chart-legend">${legend}</div>`;
+      }
+      function allHiddenCard(legendHTML) {
+        return `<div class="card">
+          <p class="k" style="margin:6px 0 10px">Every difficulty is hidden — tap one to bring it back.</p>
+          ${legendHTML}
+        </div>`;
+      }
       function movePaceChart(games, diffs) {
         const series = diffs
           .map((d) => ({ label: d, color: DIFF_COLORS[d] || "var(--accent)", pts: movePaceSeries(games, d), games: games.filter((g) => g.difficulty === d && (g.moves || []).length).length }))
-          .filter((s) => s.pts.length);
+          .filter((s) => s.pts.length)
+          .map((s) => ({ ...s, avg: mean(s.pts.map((p) => p.v)) }));
         if (!series.length) return '<div class="card">Play a few games and your average time per move will chart here, by difficulty.</div>';
-        // The legend always lists every difficulty you have games for — including the hidden ones, which
-        // is the only way back once they're off.
-        const legend = series.map((s) => {
-          const off = paceHidden.has(s.label);
-          return `<button type="button" class="lg${off ? " off" : ""}" data-d="${esc(s.label)}" aria-pressed="${off ? "false" : "true"}" title="${off ? "Show" : "Hide"} ${esc(s.label)}"><span class="lgdot" style="background:${s.color}"></span>${esc(s.label)} <span class="k">(${s.games})</span></button>`;
-        }).join("");
-        const legendHTML = `<div class="chart-legend">${legend}</div>`;
+        const legendHTML = paceLegendHTML(series, (s) => `${s.games} game${s.games === 1 ? "" : "s"} · avg ${fmtDt(s.avg)}`);
         const shown = series.filter((s) => !paceHidden.has(s.label));
-        if (!shown.length) {
-          return `<div class="card">
-            <p class="k" style="margin:6px 0 10px">Every difficulty is hidden — tap one to bring it back.</p>
-            ${legendHTML}
-          </div>`;
-        }
+        if (!shown.length) return allHiddenCard(legendHTML);
         const maxX = Math.max(2, ...shown.flatMap((s) => s.pts.map((p) => p.x)));
         const maxY = Math.max(1, ...shown.flatMap((s) => s.pts.map((p) => p.v)));
-        const W = 300, H = 156, padL = 46, padR = 10, padT = 8, padB = 30;
+        const { W, H, padL, padR, padT, padB } = CHART;
         const plotW = W - padL - padR, plotH = H - padT - padB;
         const sx = (x) => padL + (maxX === 1 ? 0 : (x - 1) / (maxX - 1)) * plotW;
         const sy = (v) => padT + (1 - v / maxY) * plotH;
-        let grid = "";
-        for (const t of [0, maxY / 2, maxY]) {
-          const y = sy(t);
-          grid += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" stroke="var(--line)" stroke-width="1"></line>`;
-          grid += `<text x="${padL - 6}" y="${(y + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--muted)">${esc(fmtDt(t))}</text>`;
-        }
+        const grid = chartGrid([0, 1, 2, 3, 4].map((i) => (maxY * i) / 4), sy, fmtDt);
         let xaxis = "";
-        for (const t of [...new Set([1, Math.round(maxX / 2), maxX])]) {
+        for (const t of [...new Set([1, Math.round(maxX / 4), Math.round(maxX / 2), Math.round((maxX * 3) / 4), maxX])]) {
           xaxis += `<text x="${sx(t).toFixed(1)}" y="${H - padB + 15}" text-anchor="middle" font-size="9" fill="var(--muted)">${t}</text>`;
         }
         xaxis += `<text x="${(padL + plotW / 2).toFixed(1)}" y="${H - 4}" text-anchor="middle" font-size="9" fill="var(--muted)">move number</text>`;
@@ -4506,10 +4708,127 @@
           const pathPts = s.pts.map((p) => `${sx(p.x).toFixed(1)},${sy(p.v).toFixed(1)}`).join(" ");
           lines += `<polyline points="${pathPts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>`;
         }
+        // Each difficulty's own average, flat across the plot: the line the wiggles are wiggling around.
+        let avgLines = "";
+        for (const s of shown) {
+          const y = sy(s.avg).toFixed(1);
+          avgLines += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="${s.color}" stroke-width="1.25" stroke-dasharray="5 4" stroke-opacity="0.75"></line>`
+            + `<text x="${W - padR - 2}" y="${(Number(y) - 3).toFixed(1)}" text-anchor="end" font-size="8.5" font-weight="600" fill="${s.color}" ${HALO}>avg ${esc(fmtDt(s.avg))}</text>`;
+        }
         return `<div class="card">
-          <svg viewBox="0 0 ${W} ${H}" class="pace-chart" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Average time per move by difficulty — showing ${esc(shown.map((s) => s.label).join(", "))}">${grid}${lines}${xaxis}</svg>
+          <svg viewBox="0 0 ${W} ${H}" class="pace-chart" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Average time per move by difficulty — showing ${esc(shown.map((s) => s.label).join(", "))}">${grid}${lines}${avgLines}${xaxis}</svg>
           ${legendHTML}
-          <span class="k">Average time per move at each position — lower is quicker. Later positions average fewer games. Tap a difficulty to hide or show it; the axes rescale to what's left.</span>
+          <span class="k">Average time per move at each position — lower is quicker, and each dashed line is that difficulty's overall average. Later positions average fewer games. Tap a difficulty to hide or show it; the axes rescale to what's left.</span>
+        </div>`;
+      }
+
+      // ---- where in a game you slow down (the cluster chart) ----
+      // "Slow" is judged inside each game against that game's own median pause, so a hard puzzle
+      // that simply runs slower throughout doesn't read as one long slowdown. What's left is the
+      // shape of your rhythm: the stretches where you stall relative to how you played that game.
+      const SLOW_FACTOR = 1.6, CLUSTER_BINS = 10;
+      function slowdownBins(games, diff) {
+        const gs = games.filter((g) => g.difficulty === diff && (g.moves || []).filter((m) => typeof m.dt === "number").length >= CLUSTER_BINS);
+        if (!gs.length) return null;
+        const bins = Array.from({ length: CLUSTER_BINS }, () => ({ n: 0, slow: 0, total: 0 }));
+        for (const g of gs) {
+          const moves = g.moves.filter((m) => typeof m.dt === "number");
+          const bar = median(moves.map((m) => m.dt)) * SLOW_FACTOR;
+          moves.forEach((m, i) => {
+            const b = Math.min(CLUSTER_BINS - 1, Math.floor((i / moves.length) * CLUSTER_BINS));
+            bins[b].n++; bins[b].total += m.dt;
+            if (bar > 0 && m.dt > bar) bins[b].slow++;
+          });
+        }
+        const out = bins.map((b, i) => ({
+          i, n: b.n, slow: b.slow,
+          rate: b.n ? b.slow / b.n : 0,
+          avg: b.n ? b.total / b.n : 0,
+          from: i * (100 / CLUSTER_BINS), to: (i + 1) * (100 / CLUSTER_BINS),
+        }));
+        const moves = out.reduce((a, b) => a + b.n, 0);
+        if (!moves) return null;
+        return { games: gs.length, moves, bins: out, peak: out.reduce((a, b) => (b.rate > a.rate ? b : a)), rate: out.reduce((a, b) => a + b.slow, 0) / moves };
+      }
+      function slowdownClusterChart(games, diffs) {
+        const rows = diffs
+          .map((d) => ({ label: d, color: DIFF_COLORS[d] || "var(--accent)", data: slowdownBins(games, d) }))
+          .filter((r) => r.data);
+        if (!rows.length) return '<div class="card">Play a few full games and this will cluster your slow patches by how far into the puzzle they land, one lane per difficulty.</div>';
+        const legendHTML = paceLegendHTML(rows, (r) => `${r.data.games} game${r.data.games === 1 ? "" : "s"} · ${Math.round(r.data.rate * 100)}% slow moves`);
+        const shown = rows.filter((r) => !paceHidden.has(r.label));
+        if (!shown.length) return allHiddenCard(legendHTML);
+
+        const W = CHART.W, padL = 60, padR = 16, padT = 26, padB = 42, laneH = 46;
+        const H = padT + shown.length * laneH + padB, plotW = W - padL - padR;
+        // Bubbles are scaled against the busiest cluster on screen, so the pattern stays visible
+        // whether you stall on a tenth of your moves or half of them. Area, not radius, tracks the
+        // rate — a bubble that looks twice as big really is twice as often.
+        const peakRate = Math.max(...shown.flatMap((r) => r.data.bins.map((b) => b.rate)), 0.0001);
+        const R_MAX = Math.min(15, plotW / CLUSTER_BINS / 2 - 0.5);
+        const cx = (b) => padL + ((b.i + 0.5) / CLUSTER_BINS) * plotW;
+
+        let lanes = "";
+        shown.forEach((r, li) => {
+          const cy = padT + li * laneH + laneH / 2;
+          lanes += `<line x1="${padL}" y1="${cy.toFixed(1)}" x2="${W - padR}" y2="${cy.toFixed(1)}" stroke="var(--line)" stroke-width="1"></line>`
+            + `<text x="${padL - 8}" y="${(cy + 3).toFixed(1)}" text-anchor="end" font-size="10" font-weight="600" fill="${r.color}">${esc(r.label)}</text>`;
+          for (const b of r.data.bins) {
+            if (!b.n) continue;
+            const rad = b.rate > 0 ? Math.max(2.5, R_MAX * Math.sqrt(b.rate / peakRate)) : 1.5;
+            const label = `${r.label} · ${Math.round(b.from)}–${Math.round(b.to)}% in · ${b.slow} of ${b.n} moves ran slow (${Math.round(b.rate * 100)}%) · avg ${fmtDt(b.avg)}`;
+            lanes += `<circle cx="${cx(b).toFixed(1)}" cy="${cy.toFixed(1)}" r="${rad.toFixed(1)}" fill="${r.color}" fill-opacity="${(0.22 + 0.5 * (b.rate / peakRate)).toFixed(2)}" stroke="${r.color}" stroke-width="1"><title>${esc(label)}</title></circle>`;
+          }
+          // A ring round the worst stretch in each lane — the one thing to take away per difficulty.
+          const p = r.data.peak;
+          if (p.rate > 0) {
+            const rad = Math.max(2.5, R_MAX * Math.sqrt(p.rate / peakRate));
+            lanes += `<circle cx="${cx(p).toFixed(1)}" cy="${cy.toFixed(1)}" r="${(rad + 3.5).toFixed(1)}" fill="none" stroke="${r.color}" stroke-width="1" stroke-dasharray="2 2"></circle>`;
+          }
+        });
+        let xaxis = "";
+        for (const pct of [0, 25, 50, 75, 100]) {
+          const x = padL + (pct / 100) * plotW;
+          xaxis += `<line x1="${x.toFixed(1)}" y1="${padT - 8}" x2="${x.toFixed(1)}" y2="${(H - padB + 4).toFixed(1)}" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 3"></line>`
+            + `<text x="${x.toFixed(1)}" y="${(H - padB + 17).toFixed(1)}" text-anchor="${pct === 0 ? "start" : pct === 100 ? "end" : "middle"}" font-size="9" fill="var(--muted)">${pct === 0 ? "start" : pct === 100 ? "finish" : `${pct}%`}</text>`;
+        }
+        xaxis += `<text x="${(padL + plotW / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" font-size="9" fill="var(--muted)">how far into the puzzle</text>`;
+        const notes = shown.map((r) => {
+          const p = r.data.peak;
+          if (!p.rate) return `<div><span class="lgdot" style="background:${r.color}"></span> <b>${esc(r.label)}</b> — no move ran away from your pace in ${r.data.games} game${r.data.games === 1 ? "" : "s"}. Even rhythm throughout.</div>`;
+          return `<div><span class="lgdot" style="background:${r.color}"></span> <b>${esc(r.label)}</b> — you stall most <b>${Math.round(p.from)}–${Math.round(p.to)}% in</b>: ${Math.round(p.rate * 100)}% of moves there ran slow, averaging ${fmtDt(p.avg)} each, against ${Math.round(r.data.rate * 100)}% across the whole game.</div>`;
+        }).join("");
+        return `<div class="card">
+          <svg viewBox="0 0 ${W} ${H}" class="pace-chart" preserveAspectRatio="xMidYMid meet" role="img" aria-label="How often you slow down at each stage of a puzzle, one lane per difficulty — showing ${esc(shown.map((r) => r.label).join(", "))}">${xaxis}${lanes}</svg>
+          ${legendHTML}
+          <div class="cluster-notes">${notes}</div>
+          <span class="k">Each game is split into ten stretches from first move to last. A bubble is how often moves in that stretch ran more than ${SLOW_FACTOR}× your median pause <em>for that game</em> — so a difficulty that's slower throughout doesn't read as one long stall. Bigger bubble = you slow down there more often; the dashed ring marks each difficulty's worst stretch. Tap a difficulty to hide or show it.</span>
+        </div>`;
+      }
+
+      // ---- average times, at a glance, above the trend charts ----
+      // The trends show movement; this shows the level the movement is around, which is the number
+      // you actually quote to yourself.
+      function avgTimesHTML(games, diffs) {
+        const rows = diffs.map((d) => {
+          const solved = games.filter((g) => g.solved && g.difficulty === d).sort((a, b) => (a.finishedAt || a.startedAt) - (b.finishedAt || b.startedAt));
+          if (!solved.length) return null;
+          const times = solved.map((g) => g.totalMs);
+          const recent = times.slice(-5);
+          const moves = games.filter((g) => g.difficulty === d).flatMap((g) => g.moves || []).filter((m) => typeof m.dt === "number");
+          return { d, n: times.length, avg: mean(times), recent: mean(recent), rn: recent.length, best: Math.min(...times), perMove: mean(moves.map((m) => m.dt)) };
+        }).filter(Boolean);
+        if (!rows.length) return "";
+        return `<div class="card avg-card"><div class="avg-head"><b>Your averages</b> <span class="k">across every solved game</span></div>
+          ${rows.map((r) => {
+            const delta = r.avg ? Math.round(((r.recent - r.avg) / r.avg) * 100) : 0;
+            const cls = delta <= -5 ? "down" : delta >= 5 ? "up" : "flat";
+            const note = r.rn < 2 ? "" : `<span class="trend ${cls}">${delta <= -5 ? `▼ ${Math.abs(delta)}% under` : delta >= 5 ? `▲ ${delta}% over` : "on"} your average</span>`;
+            return `<div class="avg-row">
+              <div class="avg-top"><span class="avg-d" style="color:${DIFF_COLORS[r.d] || "var(--accent)"}">${esc(r.d)}</span><span class="avg-note">${note}</span></div>
+              <div class="avg-figs"><b>${fmtTime(r.avg)}</b> <span class="k">avg over ${r.n} solve${r.n === 1 ? "" : "s"}</span> · <b>${fmtTime(r.recent)}</b> <span class="k">last ${r.rn}</span> · <b>${fmtTime(r.best)}</b> <span class="k">best</span> · <b>${fmtDt(r.perMove)}</b> <span class="k">per move</span></div>
+            </div>`;
+          }).join("")}
         </div>`;
       }
 
@@ -5114,7 +5433,10 @@
       }
       // Which stats tab is showing; remembered across opens. A win jumps to "this".
       let statsTab = "all";
-      let timeChartMode = "overtime"; // "overtime" = solve time over time · "permove" = avg time per move
+      // Which of the three solve-time trend charts is showing. Remembered across visits, since
+      // whichever one you read your times from is the one you want up next time too.
+      let timeChartMode = "overtime"; // "overtime" · "permove" · "clusters"
+      try { const m = localStorage.getItem("sudoku-coach:timechart"); if (m) timeChartMode = m; } catch {}
       function setStatsTab(tab) {
         statsTab = tab;
         statsEl.querySelectorAll(".stab").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
@@ -5379,18 +5701,30 @@
             <span class="k">errors</span> ${totalErrors} (${(totalErrors / gs.length).toFixed(1)}/game)</div>`;
         }
 
-        // solve time over time — per difficulty, one bar per solved game (oldest → newest)
+        // solve time over time — per difficulty, one point per solved game (oldest → newest), drawn
+        // full size against that difficulty's average and best.
         const chron = [...games].sort((a, b) => a.startedAt - b.startedAt);
         let diffTrend = "";
         for (const d of diffs) {
           const solved = chron.filter((g) => g.solved && g.difficulty === d);
           if (!solved.length) continue;
-          const pts = solved.map((g) => ({ v: g.totalMs, label: `${new Date(g.startedAt).toLocaleDateString()} · ${fmtTime(g.totalMs)}` }));
-          diffTrend += `<div class="card"><b>${d}</b> · ${pts.length} solved · ${trendNote(pts.map((p) => p.v))}
-            ${sparkLine(pts, "var(--accent)")}
-            <span class="k">oldest → newest · best ${fmtTime(Math.min(...pts.map((p) => p.v)))}</span></div>`;
+          const pts = solved.map((g) => {
+            const when = new Date(g.startedAt);
+            return {
+              v: g.totalMs,
+              when: when.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+              label: `${when.toLocaleDateString()} · ${fmtTime(g.totalMs)}${g.source ? ` · ${g.source}` : ""}`,
+            };
+          });
+          const vals = pts.map((p) => p.v), avg = mean(vals);
+          const recent = vals.slice(-5), rAvg = mean(recent);
+          diffTrend += `<div class="card"><b style="color:${DIFF_COLORS[d] || "var(--accent)"}">${d}</b> · ${pts.length} solved · ${trendNote(vals)}
+            ${solveTimeChart(pts, DIFF_COLORS[d] || "var(--accent)")}
+            <span class="k"><b>${fmtTime(avg)}</b> average · <b>${fmtTime(rAvg)}</b> over your last ${recent.length} · <b>${fmtTime(Math.min(...vals))}</b> best · <b>${fmtTime(vals[vals.length - 1])}</b> most recent</span></div>`;
         }
         if (!diffTrend) diffTrend = '<div class="card">Solve a few puzzles and your times will chart here, so you can watch them drop.</div>';
+        // The averages panel sits above the toggle, so the level is on screen whichever chart is showing.
+        const avgPanel = avgTimesHTML(games, diffs);
 
         // by technique (typical time per move)
         const allMoves = games.flatMap((g) => g.moves);
@@ -5447,9 +5781,11 @@
           ${recDrills ? `<h3>Recommended drills for you</h3>${recDrills}` : ""}
           <h3>By difficulty</h3>${summary || '<div class="card">No solved games yet.</div>'}
           <h3>Solve time trends</h3>
+          ${avgPanel}
           <div class="chart-toggle">
-            <button class="ctog" data-mode="overtime">Solve time over time</button>
-            <button class="ctog" data-mode="permove">Avg time per move</button>
+            <button class="ctog" data-mode="overtime">Over time</button>
+            <button class="ctog" data-mode="permove">Per move</button>
+            <button class="ctog" data-mode="clusters">Slow-down clusters</button>
           </div>
           <div id="timeChartBox"></div>
           <h3>Where you spend time</h3>${techTable}
@@ -5490,9 +5826,13 @@
         const auditOpen = document.getElementById("auditOpen");
         if (auditOpen) auditOpen.onclick = () => openAudit(thisPaneGame);
         setStatsTab(statsTab);   // apply the remembered tab
-        // Solve-time trends toggle: swap between "over time" and "avg time per move". The per-move chart
+        // Solve-time trends toggle: over time · per move · slow-down clusters. The per-move and cluster charts
         // is re-rendered on each paint rather than reused, since hiding a difficulty rescales it.
-        const timeCharts = { overtime: () => diffTrend, permove: () => movePaceChart(games, diffs) };
+        const timeCharts = {
+          overtime: () => diffTrend,
+          permove: () => movePaceChart(games, diffs),
+          clusters: () => slowdownClusterChart(games, diffs),
+        };
         const paintTimeChart = () => {
           const box = document.getElementById("timeChartBox");
           if (box) box.innerHTML = (timeCharts[timeChartMode] || (() => ""))();
@@ -5502,7 +5842,11 @@
             b.onclick = () => { togglePaceSeries(b.dataset.d); paintTimeChart(); };
           });
         };
-        statsEl.querySelectorAll(".ctog").forEach((b) => (b.onclick = () => { timeChartMode = b.dataset.mode; paintTimeChart(); }));
+        statsEl.querySelectorAll(".ctog").forEach((b) => (b.onclick = () => {
+          timeChartMode = b.dataset.mode;
+          try { localStorage.setItem("sudoku-coach:timechart", timeChartMode); } catch {}
+          paintTimeChart();
+        }));
         paintTimeChart();
       }
       // Move-by-move timeline: one bar per move sized by the pause before it, slow moves flagged.
