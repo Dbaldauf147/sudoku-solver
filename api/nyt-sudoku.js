@@ -19,10 +19,10 @@
 //
 //           4xx/5xx { error: string, reason: string }
 //
-// `all` is what the app's "Today's NYT" tab asks for. One page usually embeds all three
-// difficulties, so the common case costs a single fetch; any difficulty that page doesn't
-// carry is fetched from its own page. A partial result is still a 200 — two puzzles beat
-// none — with the shortfall named in `missing`.
+// `all` is what the app's NYT tab asks for, and what the archive cron captures a day with (see
+// api/nyt-archive.js). One page usually embeds all three difficulties, so the common case costs a
+// single fetch; any difficulty that page doesn't carry is fetched from its own page. A partial
+// result is still a 200 — two puzzles beat none — with the shortfall named in `missing`.
 
 const DIFFICULTIES = ["easy", "medium", "hard"];
 const UPSTREAM = "https://www.nytimes.com/puzzles/sudoku/";
@@ -192,39 +192,13 @@ function readPuzzle(data, difficulty) {
   }
 }
 
-export default async function handler(req, res) {
-  if (req.method !== "GET") {
-    res.setHeader("Allow", "GET");
-    return res.status(405).json({ error: "Method not allowed", reason: "method" });
-  }
-
-  const requested = String(req.query.difficulty || "easy").toLowerCase();
-  if (requested !== "all" && !DIFFICULTIES.includes(requested)) {
-    return res.status(400).json({
-      error: `difficulty must be one of ${DIFFICULTIES.join(", ")}, or all`,
-      reason: "bad-request",
-    });
-  }
-  const difficulty = requested === "all" ? "easy" : requested;
-
-  // The daily puzzle changes once a day, so a shared edge cache spares NYT (and us) a
-  // fetch per player. stale-while-revalidate keeps a slow upstream off the critical path.
-  res.setHeader("Cache-Control", "public, s-maxage=1800, stale-while-revalidate=3600");
-
-  const fail = (r) => {
-    res.setHeader("Cache-Control", "no-store");
-    const { status, ...body } = r;
-    return res.status(status).json(body);
-  };
-
-  const first = await loadPage(difficulty);
-  if (!first.ok) return fail(first);
-
-  if (requested !== "all") {
-    const read = readPuzzle(first.data, difficulty);
-    if (!read.ok) return fail(read);
-    return res.status(200).json(read.puzzle);
-  }
+// Every difficulty for the current day. Lifted out of the handler so the archive cron
+// (api/nyt-archive.js) can capture a day by calling it directly rather than issuing an HTTP
+// request back to this deployment — one less hop, and it can't be turned away by deployment
+// protection. Returns the same `{ ok: false, status, error, reason }` failures as loadPage.
+export async function loadAllDifficulties() {
+  const first = await loadPage("easy");
+  if (!first.ok) return first;
 
   // One page normally embeds all three difficulties, so this usually ends here. Anything it
   // didn't carry is fetched from its own page, concurrently. A difficulty that fails at any
@@ -248,14 +222,56 @@ export default async function handler(req, res) {
 
   const missing = DIFFICULTIES.filter((d) => !puzzles[d]);
   if (missing.length === DIFFICULTIES.length) {
-    return fail({
+    return {
+      ok: false,
       status: 502,
       error: "The NYT pages had no readable puzzles in their game data — their layout has probably changed",
       reason: "markup-changed",
-    });
+    };
   }
 
   // Every puzzle carries the same print date; take it from whichever one turned up.
   const date = DIFFICULTIES.map((d) => puzzles[d]?.date).find(Boolean) || null;
-  return res.status(200).json({ date, puzzles, missing });
+  return { ok: true, date, puzzles, missing };
+}
+
+export default async function handler(req, res) {
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ error: "Method not allowed", reason: "method" });
+  }
+
+  const requested = String(req.query.difficulty || "easy").toLowerCase();
+  if (requested !== "all" && !DIFFICULTIES.includes(requested)) {
+    return res.status(400).json({
+      error: `difficulty must be one of ${DIFFICULTIES.join(", ")}, or all`,
+      reason: "bad-request",
+    });
+  }
+  const difficulty = requested === "all" ? "easy" : requested;
+
+  // The daily puzzle changes once a day, so a shared edge cache spares NYT (and us) a
+  // fetch per player. stale-while-revalidate keeps a slow upstream off the critical path.
+  res.setHeader("Cache-Control", "public, s-maxage=1800, stale-while-revalidate=3600");
+
+  const fail = (r) => {
+    res.setHeader("Cache-Control", "no-store");
+    // `ok` and `status` are how the loaders above report a failure to this handler; the caller gets
+    // the documented { error, reason } and the status on the response itself.
+    const { status, ok, ...body } = r;
+    return res.status(status).json(body);
+  };
+
+  if (requested !== "all") {
+    const page = await loadPage(difficulty);
+    if (!page.ok) return fail(page);
+    const read = readPuzzle(page.data, difficulty);
+    if (!read.ok) return fail(read);
+    return res.status(200).json(read.puzzle);
+  }
+
+  const all = await loadAllDifficulties();
+  if (!all.ok) return fail(all);
+  const { ok, ...day } = all;
+  return res.status(200).json(day);
 }

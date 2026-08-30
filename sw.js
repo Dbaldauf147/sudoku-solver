@@ -3,7 +3,8 @@
 // Everything the coach does — solving, hints, the walkthrough, stats, the move proofs — is client-side
 // JavaScript over localStorage, so the only thing standing between it and offline play was fetching the
 // page itself. That's all this caches: the shell (index.html, the manifest, the icons, the win sound).
-// No game data passes through here; games live in localStorage and sync separately.
+// Your games don't pass through here; they live in localStorage and sync separately. The one exception
+// is the daily NYT capture below, which parks a fetched day for the page to file — see that comment.
 //
 // The rules, in the order the fetch handler applies them:
 //   · anything but GET, and every /api/ request — untouched, so sync and image import behave exactly as
@@ -52,6 +53,51 @@ self.addEventListener("activate", (e) => {
 function revalidate(cache, request) {
   fetch(request).then((res) => { if (res && res.ok) cache.put(request, res.clone()); }).catch(() => {});
 }
+
+// ---- daily NYT capture (best effort) ----
+// NYT only ever serves the current day, so a day nobody opens the app is a day the archive in the
+// page can never obtain afterwards — weekends especially. Where the browser supports Periodic
+// Background Sync (an installed PWA on Chromium; not Safari, and not on iOS at all) this fetches the
+// day while the app is closed and parks it for the page to file into its archive on the next open.
+// The browser alone decides whether and when to run it, so this is a bonus and never a guarantee.
+//
+// Nothing here writes game data: the worker can't reach localStorage, so the day sits in a cache
+// entry — PENDING is a cache key, not a route — until the page drains it (see drainNytCapture).
+const CAPTURE = "sudoku-coach-nyt";
+const PENDING = "/nyt-pending";
+const PENDING_MAX_DAYS = 30;   // an app left closed for a month; anything older isn't worth carrying
+
+async function captureToday() {
+  const res = await fetch("/api/nyt-sudoku?difficulty=all", { cache: "no-store" });
+  if (!res.ok) return;
+  const data = await res.json();
+  // No print date means no day to file it under — the page keys the archive on NYT's own date.
+  if (!data || !data.date || !data.puzzles) return;
+
+  const puzzles = {};
+  for (const d of ["easy", "medium", "hard"]) {
+    const p = data.puzzles[d];
+    if (p && typeof p.puzzle === "string") puzzles[d] = p.puzzle;
+  }
+  if (!Object.keys(puzzles).length) return;
+
+  const cache = await caches.open(CAPTURE);
+  let days = [];
+  try {
+    const hit = await cache.match(PENDING);
+    if (hit) days = await hit.json();
+  } catch {}
+  if (!Array.isArray(days)) days = [];
+  days = days.filter((day) => day && day.date !== data.date);   // a re-run of the same day replaces it
+  days.push({ date: data.date, puzzles });
+  await cache.put(PENDING, new Response(JSON.stringify(days.slice(-PENDING_MAX_DAYS)), {
+    headers: { "Content-Type": "application/json" },
+  }));
+}
+
+self.addEventListener("periodicsync", (e) => {
+  if (e.tag === "nyt-daily") e.waitUntil(captureToday().catch(() => {}));
+});
 
 self.addEventListener("fetch", (e) => {
   const req = e.request;
