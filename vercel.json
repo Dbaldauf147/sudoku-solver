@@ -16,7 +16,6 @@
   },
   "crons": [
     { "path": "/api/digest", "schedule": "0 14 * * 1" },
-    { "path": "/api/nyt-archive?capture=1", "schedule": "0 7 * * *" },
     { "path": "/api/nyt-archive?capture=1", "schedule": "0 19 * * *" }
   ],
   "headers": [

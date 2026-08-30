@@ -502,7 +502,7 @@ a function under `api/`.
 
 1. Add `ANTHROPIC_API_KEY` in your Vercel project's **Environment Variables**.
 2. Add `CRON_SECRET` (any long random string) if you want the daily NYT capture
-   — see below.
+   or the weekly digest — both scheduled jobs authenticate with it.
 3. Deploy:
 
    ```bash
@@ -517,21 +517,34 @@ opens it — weekends especially. Closing that hole needs something fetching on 
 schedule, which is what `crons` in `vercel.json` does:
 
 ```jsonc
-{ "path": "/api/nyt-archive?capture=1", "schedule": "0 7 * * *" }   // 07:00 UTC
-{ "path": "/api/nyt-archive?capture=1", "schedule": "0 19 * * *" }  // 19:00 UTC
+{ "path": "/api/nyt-archive?capture=1", "schedule": "0 19 * * *" }  // 19:00 UTC, 3pm ET
 ```
 
-Both are comfortably after NYT's midnight-ET rollover. The second is a retry: a
-day already held in full is not re-fetched, so it costs one Redis read when the
-morning run worked, and fills in the gap when it didn't (NYT down, a partial
-page). Every device then merges those days into its own archive on next open.
+Comfortably after NYT's midnight-ET rollover, and late enough in their day that
+the page is settled. Every device then merges the captured days into its own
+archive on next open.
+
+**Why one run and not two.** A second run (say 07:00 UTC) would be a free retry
+for a day the first one missed — NYT down, or a page carrying only two of the
+three difficulties — since a day already held in full is never re-fetched and so
+costs one Redis read. It's left out because **Vercel Hobby allows two cron jobs
+per account** and the weekly digest already uses one. On Pro (40 jobs), adding
+the second line is worth it:
+
+```jsonc
+{ "path": "/api/nyt-archive?capture=1", "schedule": "0 7 * * *" }
+```
+
+As it stands, a failed run means that day rests on whatever device opens the app
+that day — which is the ordinary case, just not a guarantee.
 
 To set it up:
 
 1. Connect the Redis store (same one as *Cross-device sync* above — the archive
    lives under `sudoku-coach:nyt-archive`). Without it `/api/nyt-archive`
    replies `501` and each device carries on with its own local archive.
-2. Set `CRON_SECRET` in the project's environment variables. Vercel sends it as
+2. Set `CRON_SECRET` in the project's environment variables — the same one the
+   weekly digest uses, if you've set that up. Vercel sends it as
    `Authorization: Bearer <secret>` on every cron invocation, and the endpoint
    rejects a capture that doesn't carry it.
 3. Redeploy, then check **Vercel → your project → Cron Jobs** for the runs.
