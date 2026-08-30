@@ -115,21 +115,47 @@ answer.
     if that fails (offline, NYT down) the strip just stays hidden and the
     board is unaffected. Clicking one while a game is in progress asks before
     clearing it.
-  - **Today's NYT** is a tab in the game library (⚙ → *Today's NYT puzzle* is a
-    shortcut to it) holding the same puzzles with more detail. All three
-    difficulties are fetched **in one request** when you open the tab, and
-    **Easy / Medium / Hard** sub-tabs switch between them with no further
-    network — each showing a thumbnail of the grid, its clue count, whether
-    it's already in your library, and your time if you've played it. **Play**
-    loads it with the difficulty and puzzle date already filled in, saved to
-    your library like any other import. Every grid goes through the same
-    conflict and solvability checks as a pasted one, so an unplayable one is
-    dropped rather than loaded.
+  - **NYT** is a tab in the game library (⚙ → *NYT puzzles* is a shortcut to
+    it) holding the same puzzles with more detail, and a **day picker** for
+    going back through earlier days. All three difficulties are fetched **in
+    one request** when you open the tab, and **Easy / Medium / Hard** sub-tabs
+    switch between them with no further network — each showing a thumbnail of
+    the grid, its clue count, whether it's already in your library, and your
+    time if you've played it. **Play** loads it with the difficulty and puzzle
+    date already filled in, saved to your library like any other import. Every
+    grid goes through the same conflict and solvability checks as a pasted one,
+    so an unplayable one is dropped rather than loaded.
 
     The day's puzzles are held until the date rolls over, so reopening the tab
     costs nothing; **Refresh** forces a refetch. If NYT only returns some of
     the three, the ones that arrived are still playable and the sub-tabs for
     the others are disabled with a note.
+
+    **Earlier days come from this device, not from NYT.** `/puzzles/sudoku/…`
+    carries no date and has no archive behind it, so a day that isn't fetched
+    while it *is* today can never be fetched again. Every successful fetch
+    therefore files that day's three locally, and the picker (‹ › and a date
+    dropdown, with **Today** to jump back) walks the days this device has
+    captured. Past days play exactly like today's; nothing is refetched for
+    them. The tab count is days archived, and the archive rides along in
+    **Backup & restore** — a restore only ever adds days.
+
+    Two things follow from it being a local capture:
+
+    - **It starts from what you've already played.** Every NYT puzzle is saved
+      to the library tagged `NYT <date>`, so on first run those days are
+      rebuilt from your library history. Days you fetched but never played
+      aren't in there — the archive only fills forwards from here.
+    - **A day the app never sees is gone.** Miss a weekend and those puzzles
+      can't be recovered afterwards, by this app or any other. Where the
+      browser supports it (an **installed** PWA on Chromium — not Safari, and
+      not iOS), the service worker asks for a daily background fetch so closed
+      days are still captured, but the browser decides whether that ever runs.
+      Treat it as a bonus. The only way to guarantee a day is captured is for
+      something to fetch it that day: opening the app, or a server-side cron
+      writing to a shared store (not built — it would also mean this
+      deployment storing and serving NYT puzzles to everyone, which is a
+      different thing from a personal local copy).
 
     The fetch happens server-side, in `/api/nyt-sudoku`: the NYT puzzle pages
     embed the grid in the HTML as a `window.gameData` blob (free — no
@@ -456,7 +482,9 @@ Errors come back as `{ "error": "<message>" }` with a 4xx/5xx status.
 }
 ```
 
-`GET /api/nyt-sudoku?difficulty=all` — what the **Today's NYT** tab asks for.
+`GET /api/nyt-sudoku?difficulty=all` — what the **NYT** tab asks for, once a day.
+There is no date parameter: NYT serves only the current day, which is why the app
+keeps its own archive of the days it has fetched.
 
 ```jsonc
 // response

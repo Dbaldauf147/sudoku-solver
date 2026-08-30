@@ -85,6 +85,10 @@
       .nyt-subs .nyt-sub { flex: 1; min-width: 88px; font-size: 0.85rem; }
       .nyt-subs .nyt-sub.on { background: var(--sel); border-color: var(--accent); color: var(--text); font-weight: 600; }
       .nyt-subs .nyt-sub:disabled { opacity: 0.5; }
+      /* Day picker above those sub-tabs: today, then back through the days this device archived. */
+      .nyt-days { display: flex; gap: 6px; align-items: center; margin: 0 0 12px; flex-wrap: wrap; }
+      .nyt-days select { flex: 1; min-width: 140px; }
+      .nyt-days button { padding: 6px 12px; font-size: 0.85rem; }
       /* Thumbnail of a puzzle's clues, so a sub-tab shows the grid you'd be taking on. */
       .mini { display: grid; grid-template-columns: repeat(9, 1fr); width: 186px; max-width: 62vw;
               border: 2px solid var(--thick); background: var(--panel); margin: 12px 0; }
@@ -499,7 +503,7 @@
             <button id="techBtn">Techniques</button>
             <button id="check">Check entries</button>
             <button id="pastePuzzle">Paste puzzle</button>
-            <button id="nytPuzzle" title="Load today's New York Times daily Sudoku">Today's NYT puzzle</button>
+            <button id="nytPuzzle" title="Today's New York Times daily Sudoku, and the earlier days this device has archived">NYT puzzles</button>
             <button id="saveGame">Save game</button>
             <button id="settingsBtn">Settings</button>
             <button id="targetBtn">Target times</button>
@@ -783,13 +787,16 @@
       const PROFILE_KEY = "sudoku-coach:profile";
       let profile = null;
       try { profile = JSON.parse(localStorage.getItem(PROFILE_KEY)) || null; } catch {}
-      let STORE_KEY, STATS_KEY, ACTIVE_KEY, TARGETS_KEY;
+      let STORE_KEY, STATS_KEY, ACTIVE_KEY, TARGETS_KEY, NYT_ARCHIVE_KEY;
       function applyProfileKeys() {
         const suffix = profile && profile.id ? ":" + profile.id : "";
         STORE_KEY = "sudoku-coach:games" + suffix;
         STATS_KEY = "sudoku-coach:stats" + suffix;
         ACTIVE_KEY = "sudoku-coach:active" + suffix;
         TARGETS_KEY = "sudoku-coach:targets" + suffix;
+        // The days of NYT puzzles this device has captured. Per profile like the rest: two players
+        // sharing a browser shouldn't pool their puzzle history.
+        NYT_ARCHIVE_KEY = "sudoku-coach:nyt-archive" + suffix;
       }
       applyProfileKeys();
       // Whole-game goal per difficulty, in ms — { Easy: 480000, … }. Switching profiles reloads the
@@ -2367,7 +2374,9 @@
       }
       function exportData() {
         let active = null; try { active = JSON.parse(localStorage.getItem(ACTIVE_KEY)); } catch {}
-        return { app: "sudoku-coach", format: 2, exportedAt: Date.now(), profile: profile ? profile.name : null, library: lsGet(STORE_KEY), stats: lsGet(STATS_KEY), active: active || null, targets };
+        // The NYT archive goes in the file too. Every other store can be rebuilt from the cloud or
+        // replayed, but a past day that's lost here can't be fetched again from anywhere.
+        return { app: "sudoku-coach", format: 2, exportedAt: Date.now(), profile: profile ? profile.name : null, library: lsGet(STORE_KEY), stats: lsGet(STATS_KEY), active: active || null, targets, nytArchive: lsGet(NYT_ARCHIVE_KEY) };
       }
       function downloadBackup() {
         const blob = new Blob([JSON.stringify(exportData(), null, 2)], { type: "application/json" });
@@ -2413,6 +2422,9 @@
           lsSet(STATS_KEY, mSt); cloudSave("stats", mSt);
           // Restore an in-progress game from the backup only if there isn't one locally already.
           if (data.active && !localStorage.getItem(ACTIVE_KEY)) { try { localStorage.setItem(ACTIVE_KEY, JSON.stringify(data.active)); } catch {} }
+          // NYT days merge rather than replace, so restoring an older backup can only ever add days
+          // to what this device already has.
+          if (Array.isArray(data.nytArchive)) for (const day of data.nytArchive) archiveNytDay(day && day.date, (day && day.puzzles) || {});
           // Target times: keep the ones set here, fill in any difficulty this device has no target for.
           if (data.targets && typeof data.targets === "object") {
             targets = { ...data.targets, ...targets };
@@ -3595,11 +3607,12 @@
       // Renders the panel shell (back button, tab bar) and delegates the body to the active tab.
       function renderGameLibrary() {
         if (libraryPanel.hidden) return;
-        const counts = { saved: lsGet(STORE_KEY).length, history: lsGet(STATS_KEY).length, catalog: CATALOG.length, practice: TRAINER_TECHS.length };
-        // Today's tab has no meaningful count until the fetch lands, so it's the one without one.
+        const counts = { nyt: loadNytArchive().length, saved: lsGet(STORE_KEY).length, history: lsGet(STATS_KEY).length, catalog: CATALOG.length, practice: TRAINER_TECHS.length };
+        // The NYT count is days this device has archived, not puzzles — today's own three aren't in
+        // it until they've been fetched and filed.
         const tab = (id, label) => `<button class="lib-tab${libTab === id ? " on" : ""}" data-tab="${id}">${label}${counts[id] === undefined ? "" : ` <span class="k">(${counts[id]})</span>`}</button>`;
         libraryPanel.innerHTML = `<button id="lb">← Back</button><h2>Game library</h2>` +
-          `<div class="lib-tabs">${tab("nyt", "Today's NYT")}${tab("saved", "Saved")}${tab("history", "History")}${tab("catalog", "Catalogue")}${tab("practice", "Practice")}</div>` +
+          `<div class="lib-tabs">${tab("nyt", "NYT")}${tab("saved", "Saved")}${tab("history", "History")}${tab("catalog", "Catalogue")}${tab("practice", "Practice")}</div>` +
           `<div id="libContent"></div>`;
         document.getElementById("lb").onclick = closeLibrary;
         libraryPanel.querySelectorAll(".lib-tab").forEach((b) => (b.onclick = () => {
@@ -3768,15 +3781,141 @@
         content.innerHTML = `<div class="card">Built-in puzzles — pick one to play from scratch.</div>${rows}`;
         content.querySelectorAll(".cat-play").forEach((b) => (b.onclick = () => playCatalog(Number(b.dataset.i))));
       }
-      // ---- Today's NYT tab ----
+      // ---- NYT tab ----
       // All three of today's puzzles are fetched in one request when the tab is opened, then
       // held for the rest of the day; the sub-tabs switch between them with no further network.
       // Each is verified here the same way a pasted grid is, so an unplayable one is dropped
-      // rather than loaded onto the board.
+      // rather than loaded onto the board. Earlier days come from the local archive below.
       const NYT_TIERS = { easy: "Easy", medium: "Medium", hard: "Hard" };
-      let nyt = { date: null, puzzles: {}, missing: [], loadedOn: null, loading: false, error: null };
+      let nyt = { date: null, puzzles: {}, loadedOn: null, loading: false, error: null };
       let nytSub = "easy";
+      let nytDay = null;                                   // the day being shown; null means today
       const nytDayKey = () => new Date().toDateString();   // local day: the puzzle rolls over with the player's date
+
+      // ---- this device's NYT archive ----
+      // NYT publishes only the current day: /puzzles/sudoku/<difficulty> carries no date, and there's
+      // no archive endpoint behind it, so a day that isn't fetched while it *is* today can't be fetched
+      // afterwards at all. Going back through the days therefore has to be local — every successful
+      // fetch files that day's three here, and the tab reads them back.
+      //
+      // Which makes this a record of what this device captured, not a window onto NYT's back catalogue:
+      // days when the app never opened are simply absent, and nothing can fill them in later.
+      const ARCHIVE_MAX_DAYS = 400;      // ~13 months. At ~260 bytes a day the whole store stays tiny.
+      const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+      const PUZZLE_81 = /^[0-9]{81}$/;
+      // The player's own day, matching how the strip under the top menu rolls over. Built from the
+      // local parts rather than toISOString(), which would shift the date for anyone west of UTC.
+      const todayISO = () => {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      };
+
+      // Days are stored as { date, puzzles: { easy: "<81 digits>", … }, capturedAt } — digit strings
+      // rather than parsed grids, since this is written far more often than it's read.
+      function loadNytArchive() {
+        return lsGet(NYT_ARCHIVE_KEY)
+          .filter((d) => d && ISO_DATE.test(d.date) && d.puzzles && typeof d.puzzles === "object")
+          .sort((a, b) => (a.date < b.date ? 1 : -1));   // newest first
+      }
+
+      // File a day's puzzles, keyed by NYT's own print date. Difficulties merge rather than replace,
+      // so a day first seen with two of the three keeps them when a later pass brings the third.
+      // Returns whether anything actually changed.
+      function archiveNytDay(date, puzzles) {
+        if (!ISO_DATE.test(String(date || ""))) return false;
+        const days = lsGet(NYT_ARCHIVE_KEY).filter((d) => d && ISO_DATE.test(d.date));
+        let day = days.find((d) => d.date === date), changed = false;
+        if (!day) { day = { date, puzzles: {}, capturedAt: Date.now() }; days.push(day); }
+        if (!day.puzzles || typeof day.puzzles !== "object") day.puzzles = {};
+        for (const [tier, cells] of Object.entries(puzzles || {})) {
+          if (!NYT_TIERS[tier] || !PUZZLE_81.test(String(cells))) continue;
+          if (day.puzzles[tier] !== cells) { day.puzzles[tier] = cells; changed = true; }
+        }
+        // Nothing usable came in, so the day pushed above is dropped with this local copy.
+        if (!changed) return false;
+        days.sort((a, b) => (a.date < b.date ? 1 : -1));
+        lsSet(NYT_ARCHIVE_KEY, days.slice(0, ARCHIVE_MAX_DAYS));   // the oldest days fall off the end
+        archiveCache = { date: null, view: null };
+        return true;
+      }
+
+      // Days played before this archive existed are still recoverable, because every NYT puzzle is
+      // saved to the library with its print date in the source ("NYT 2026-08-14") — so the library
+      // doubles as a partial archive of the days you played. Idempotent: safe to run on every load.
+      function backfillNytArchive() {
+        const byDate = new Map();
+        for (const g of lsGet(STORE_KEY)) {
+          const stamped = /^NYT\s+(\d{4}-\d{2}-\d{2})$/i.exec(String((g && g.source) || "").trim());
+          const tier = String((g && g.difficulty) || "").toLowerCase();
+          if (!stamped || !NYT_TIERS[tier] || !Array.isArray(g.grid) || g.grid.length !== 9) continue;
+          let cells;
+          try { cells = gridKey(g.grid); } catch { continue; }
+          if (!PUZZLE_81.test(cells)) continue;
+          const day = byDate.get(stamped[1]) || {};
+          day[tier] = cells;
+          byDate.set(stamped[1], day);
+        }
+        let filed = 0;
+        for (const [date, puzzles] of byDate) if (archiveNytDay(date, puzzles)) filed++;
+        return filed;
+      }
+
+      // An archived day in the shape the tab renders. Every grid goes back through the same conflict
+      // and solvability checks a pasted one gets, so an entry corrupted in storage is dropped rather
+      // than loaded onto the board. Re-parsing three grids just to switch sub-tab would be wasted
+      // work, so the day last read is held.
+      let archiveCache = { date: null, view: null };
+      function archivedDay(date) {
+        if (archiveCache.date === date) return archiveCache.view;
+        const stored = loadNytArchive().find((d) => d.date === date);
+        let view = null;
+        if (stored) {
+          const puzzles = {};
+          for (const tier of Object.keys(NYT_TIERS)) {
+            const cells = stored.puzzles[tier];
+            if (!PUZZLE_81.test(String(cells))) continue;
+            const grid = parsePuzzle(cells);
+            if (hasConflict(grid) || !solve(clone(grid))) continue;
+            puzzles[tier] = { grid, date };
+          }
+          if (Object.keys(puzzles).length) view = { date, puzzles };
+        }
+        archiveCache = { date, view };
+        return view;
+      }
+
+      // ---- capture while the app is closed (best effort) ----
+      // A day nobody opens the app is a day NYT will never serve again, so the service worker tries to
+      // fetch it in the background (see sw.js). It can't reach localStorage from there, so it parks the
+      // day in a cache entry and this files it on the next open.
+      const NYT_CAPTURE_CACHE = "sudoku-coach-nyt", NYT_CAPTURE_URL = "/nyt-pending";
+      async function drainNytCapture() {
+        if (!("caches" in window)) return 0;
+        try {
+          const cache = await caches.open(NYT_CAPTURE_CACHE);
+          const hit = await cache.match(NYT_CAPTURE_URL);
+          if (!hit) return 0;
+          const days = await hit.json();
+          await cache.delete(NYT_CAPTURE_URL);
+          let filed = 0;
+          for (const day of Array.isArray(days) ? days : []) if (archiveNytDay(day && day.date, (day && day.puzzles) || {})) filed++;
+          return filed;
+        } catch { return 0; }
+      }
+
+      // Ask for that background capture. Chromium gates Periodic Background Sync on the app being
+      // installed and on site engagement, and Safari has no such API at all, so this is attempted
+      // quietly and its absence changes nothing — opening the app still files the day itself.
+      async function registerNytCapture() {
+        try {
+          if (!("serviceWorker" in navigator)) return;
+          const reg = await navigator.serviceWorker.ready;
+          if (!reg.periodicSync) return;
+          const status = await navigator.permissions.query({ name: "periodic-background-sync" }).catch(() => null);
+          if (status && status.state !== "granted") return;
+          await reg.periodicSync.register("nyt-daily", { minInterval: 12 * 60 * 60 * 1000 });
+        } catch {}
+      }
 
       // What went wrong, in terms of what the player can do about it. `reason` comes from the
       // endpoint; a fetch that never landed (offline, endpoint not deployed) has none.
@@ -3808,12 +3947,15 @@
           }
           if (!Object.keys(puzzles).length) throw new Error("None of today's puzzles came back in a playable state. Import a screenshot instead.");
 
-          nyt = {
-            date: data.date || null, puzzles,
-            missing: Object.keys(NYT_TIERS).filter((d) => !puzzles[d]),
-            loadedOn: nytDayKey(), loading: false, error: null,
-          };
+          nyt = { date: data.date || null, puzzles, loadedOn: nytDayKey(), loading: false, error: null };
           if (!puzzles[nytSub]) nytSub = Object.keys(puzzles)[0];   // don't sit on a sub-tab that has nothing
+
+          // File the day, so it's still here next week when NYT has moved on. Only when NYT gave a
+          // print date: a day filed under a guessed one would be a lie the library's own "NYT <date>"
+          // source strings would then repeat.
+          if (data.date) {
+            archiveNytDay(data.date, Object.fromEntries(Object.keys(puzzles).map((d) => [d, gridKey(puzzles[d].grid)])));
+          }
         } catch (err) {
           nyt.loading = false;
           nyt.error = err.message || "Couldn't load today's puzzles.";
@@ -3868,27 +4010,100 @@
         return `<div class="mini">${cells}</div>`;
       }
 
+      // Every day this tab can show: today at the head, then back through the archive. Today is
+      // always offered even when its fetch failed, since that's where the error and retry live.
+      function nytDayOptions() {
+        const today = nyt.date || todayISO();
+        const dates = [today], seen = new Set([today]);
+        for (const day of loadNytArchive()) if (!seen.has(day.date)) { seen.add(day.date); dates.push(day.date); }
+        return dates.sort((a, b) => (a < b ? 1 : -1));   // newest first
+      }
+
+      // Prev/next walk the same list the dropdown holds, so there's no way to land on a day with
+      // nothing behind it. The list is newest first, so "older" is the higher index.
+      function nytDayPicker(dates, date) {
+        if (dates.length < 2) return "";   // only today on this device — a one-line picker says nothing
+        const i = dates.indexOf(date), today = dates[0];
+        const opts = dates.map((d) =>
+          `<option value="${d}"${d === date ? " selected" : ""}>${esc(fmtCatalogDate(d))}${d === today ? " · today" : ""}</option>`).join("");
+        return `<div class="nyt-days">
+            <button id="nytOlder"${i < 0 || i >= dates.length - 1 ? " disabled" : ""} title="Older day">‹</button>
+            <select id="nytDaySel" title="The days this device has archived">${opts}</select>
+            <button id="nytNewer"${i <= 0 ? " disabled" : ""} title="Newer day">›</button>
+            <button id="nytToday"${i === 0 ? " disabled" : ""}>Today</button>
+          </div>`;
+      }
+
+      function wireNytDayPicker(dates, date) {
+        const sel = document.getElementById("nytDaySel"); if (!sel) return;
+        const i = dates.indexOf(date);
+        // Keep the difficulty you were on across a day change where that day has it — going back a
+        // week to compare Hards shouldn't drop you back to Easy.
+        const go = (d) => {
+          if (!d) return;
+          nytDay = d;
+          const day = nytDayView(d);
+          if (day && !day.puzzles[nytSub]) nytSub = Object.keys(day.puzzles)[0] || nytSub;
+          renderNytTab();
+        };
+        sel.onchange = () => go(sel.value);
+        document.getElementById("nytOlder").onclick = () => go(dates[i + 1]);
+        document.getElementById("nytNewer").onclick = () => go(dates[i - 1]);
+        document.getElementById("nytToday").onclick = () => go(dates[0]);
+      }
+
+      // The day being shown. Today comes from the live fetch — it's the only day still fetchable —
+      // and every other day from the archive.
+      function nytDayView(date) {
+        if (date === (nyt.date || todayISO()) && Object.keys(nyt.puzzles).length) return nyt;
+        return archivedDay(date);
+      }
+
       function renderNytTab() {
         if (libraryPanel.hidden || libTab !== "nyt") return;
         const content = document.getElementById("libContent"); if (!content) return;
-        const loaded = Object.keys(nyt.puzzles);
 
-        if (nyt.loading) { content.innerHTML = `<div class="card">Fetching today's puzzles from the New York Times…</div>`; return; }
-        if (nyt.error) {
-          content.innerHTML = `<div class="card"><b>Couldn't load today's puzzles.</b><br><span class="k">${esc(nyt.error)}</span></div>
-            <div class="saved-row"><div class="saved-meta">The screenshot and paste imports still work.</div>
-            <div class="saved-actions"><button id="nytRetry" class="primary">Try again</button></div></div>`;
-          document.getElementById("nytRetry").onclick = () => loadNyt(true);
+        const dates = nytDayOptions();
+        if (nytDay && !dates.includes(nytDay)) nytDay = null;   // a day that has since aged out of the archive
+        const date = nytDay || dates[0];
+        const isToday = date === dates[0];
+        // Drawn above the loading and error states too: a failed fetch of today mustn't lock you out
+        // of the days already on the device.
+        const picker = nytDayPicker(dates, date);
+        const wire = () => wireNytDayPicker(dates, date);
+
+        if (isToday) {
+          if (nyt.loading) { content.innerHTML = picker + `<div class="card">Fetching today's puzzles from the New York Times…</div>`; wire(); return; }
+          if (nyt.error) {
+            const kept = dates.length - 1;
+            content.innerHTML = picker +
+              `<div class="card"><b>Couldn't load today's puzzles.</b><br><span class="k">${esc(nyt.error)}</span>` +
+              (kept ? `<br><span class="k">The ${kept} earlier day${kept === 1 ? " is" : "s are"} still on this device — pick one above.</span>` : "") +
+              `</div>
+              <div class="saved-row"><div class="saved-meta">The screenshot and paste imports still work.</div>
+              <div class="saved-actions"><button id="nytRetry" class="primary">Try again</button></div></div>`;
+            document.getElementById("nytRetry").onclick = () => loadNyt(true);
+            wire();
+            return;
+          }
+          if (!Object.keys(nyt.puzzles).length) { content.innerHTML = `<div class="card">Opening this tab loads today's puzzles…</div>`; loadNyt(); return; }
+        }
+
+        const day = nytDayView(date);
+        if (!day) {
+          content.innerHTML = picker + `<div class="card">Nothing was archived for <b>${esc(fmtCatalogDate(date))}</b> on this device.</div>`;
+          wire();
           return;
         }
-        if (!loaded.length) { content.innerHTML = `<div class="card">Opening this tab loads today's puzzles…</div>`; loadNyt(); return; }
+        if (!day.puzzles[nytSub]) nytSub = Object.keys(day.puzzles)[0];
 
         const subs = Object.keys(NYT_TIERS).map((d) => {
-          const has = !!nyt.puzzles[d];
-          return `<button class="nyt-sub${nytSub === d ? " on" : ""}" data-sub="${d}"${has ? "" : " disabled title=\"Not available today\""}>${NYT_TIERS[d]}</button>`;
+          const has = !!day.puzzles[d];
+          const why = isToday ? "Not available today" : "Not archived for this day";
+          return `<button class="nyt-sub${nytSub === d ? " on" : ""}" data-sub="${d}"${has ? "" : ` disabled title="${why}"`}>${NYT_TIERS[d]}</button>`;
         }).join("");
 
-        const p = nyt.puzzles[nytSub];
+        const p = day.puzzles[nytSub];
         const tier = NYT_TIERS[nytSub];
         const source = p.date ? `NYT ${p.date}` : "NYT";
         const clues = p.grid.flat().filter(Boolean).length;
@@ -3899,13 +4114,24 @@
         const playedNote = played
           ? ` · <span style="color:var(--ok)">Played${played.totalMs ? ` in ${fmtTime(played.totalMs)}` : ""}${played.solved ? " ✓" : ""}</span>`
           : "";
-        const missingNote = nyt.missing.length
-          ? `<div class="card"><b>${nyt.missing.map((d) => NYT_TIERS[d]).join(" and ")}</b> didn't come back today — the others are below.</div>`
+        const gaps = Object.keys(NYT_TIERS).filter((d) => !day.puzzles[d]);
+        const missingNote = gaps.length
+          ? `<div class="card"><b>${gaps.map((d) => NYT_TIERS[d]).join(" and ")}</b> ${isToday ? "didn't come back today" : "weren't archived for this day"} — the others are below.</div>`
           : "";
 
+        const archived = loadNytArchive().length;
+        const intro = isToday
+          ? `<div class="card">Today's New York Times daily Sudoku${day.date ? ` · <b>${esc(fmtCatalogDate(day.date))}</b>` : ""}. Pick a difficulty and play it — it's saved to your library like any other import.</div>`
+          : `<div class="card">The New York Times daily Sudoku for <b>${esc(fmtCatalogDate(date))}</b>, kept by this device on the day it was published. It plays exactly like today's.</div>`;
+        // Why an earlier day might be missing is worth saying plainly, since no button here can fix it.
+        const footer = isToday
+          ? `<div class="saved-row">
+               <div class="saved-meta"><span class="k">Fetched fresh each day and kept here${archived ? ` — ${archived} day${archived === 1 ? "" : "s"} archived so far` : ""}. NYT only ever serves the current day, so a day this app doesn't see is gone.</span></div>
+               <div class="saved-actions"><button id="nytRefresh">Refresh</button></div></div>`
+          : `<div class="saved-row"><div class="saved-meta"><span class="k">From this device's archive — a past day is never refetched, because NYT no longer serves it.</span></div></div>`;
+
         content.innerHTML =
-          `<div class="card">Today's New York Times daily Sudoku${nyt.date ? ` · <b>${esc(fmtCatalogDate(nyt.date))}</b>` : ""}. Pick a difficulty and play it — it's saved to your library like any other import.</div>` +
-          missingNote +
+          picker + intro + missingNote +
           `<div class="nyt-subs">${subs}</div>` +
           `<div class="saved-row">
              <div class="saved-meta"><b>${esc(tier)}</b> · ${clues} clues${playedNote}<br>
@@ -3913,21 +4139,24 @@
                ${miniGrid(p.grid)}</div>
              <div class="saved-actions"><button class="nyt-play primary" data-d="${nytSub}">Play</button></div>
            </div>` +
-          `<div class="saved-row"><div class="saved-meta"><span class="k">Fetched fresh each day.</span></div>
-             <div class="saved-actions"><button id="nytRefresh">Refresh</button></div></div>`;
+          footer;
 
         content.querySelectorAll(".nyt-sub").forEach((b) => (b.onclick = () => { nytSub = b.dataset.sub; renderNytTab(); }));
-        content.querySelector(".nyt-play").onclick = () => playNyt(nytSub);
-        document.getElementById("nytRefresh").onclick = () => loadNyt(true);
+        content.querySelector(".nyt-play").onclick = () => playNyt(nytSub, day);
+        if (isToday) document.getElementById("nytRefresh").onclick = () => loadNyt(true);
+        wire();
       }
 
-      function playNyt(d) {
-        const p = nyt.puzzles[d]; if (!p) return;
+      // `day` defaults to today's fetch, which is what the strip under the top menu passes.
+      function playNyt(d, day) {
+        day = day || nyt;
+        const p = day.puzzles[d]; if (!p) return;
         const tier = NYT_TIERS[d];
+        const when = p.date ? fmtCatalogDate(p.date) : "today";
         // From the strip this sits one click from the board, so a game in progress is never
         // discarded silently — unless it's already this same puzzle, where there's nothing to lose.
         if (solving && gridKey(clueGridNow()) !== gridKey(p.grid) &&
-            !confirm(`Start today's NYT ${tier.toLowerCase()} puzzle? The game you're playing will be cleared — Save game in the ⚙ menu keeps it first.`)) return;
+            !confirm(`Start the NYT ${tier.toLowerCase()} puzzle from ${when}? The game you're playing will be cleared — Save game in the ⚙ menu keeps it first.`)) return;
         closeLibrary();
         resetToEdit();
         writeGrid(p.grid);
@@ -3938,7 +4167,7 @@
         renderPencils();
         const added = autoSaveImport(readGrid());
         renderNytBar();   // this one is on the board now
-        showReady(`Today's NYT ${tier.toLowerCase()} puzzle${p.date ? ` (${p.date})` : ""} is loaded and ${added ? "saved to your library" : "matched to one already saved"}${syncNote()}. Start the timer when you're ready.`);
+        showReady(`The NYT ${tier.toLowerCase()} puzzle from ${when} is loaded and ${added ? "saved to your library" : "matched to one already saved"}${syncNote()}. Start the timer when you're ready.`);
       }
 
       function playCatalog(i) {
@@ -5811,10 +6040,18 @@
         const code = new URLSearchParams(location.search).get("share");
         if (code) openShare(code);
       }).catch(() => {}); // init/cloud problems must never break the already-wired UI
+      // The library already holds every NYT puzzle ever played here, tagged with its print date, so
+      // the archive starts from those days rather than empty.
+      backfillNytArchive();
       // Fetch today's three in the background so the strip under the top menu is populated on
       // arrival. It's one edge-cached request, it blocks nothing, and if it fails (offline, NYT
-      // down) the strip simply stays hidden — the tab reports the reason if you go looking.
+      // down) the strip simply stays hidden — the tab reports the reason if you go looking. The
+      // fetch also files today in the archive, which is the only chance this day will get.
       loadNyt();
+      // Then whatever the service worker captured while the app was closed, and the standing ask
+      // for it to keep doing so. Both are best effort and neither blocks anything above.
+      drainNytCapture().then((filed) => { if (filed) renderNytUI(); });
+      registerNytCapture();
     </script>
   </body>
 </html>
