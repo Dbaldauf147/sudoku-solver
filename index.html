@@ -3903,6 +3903,25 @@
         } catch { return 0; }
       }
 
+      // The shared archive (/api/nyt-archive), filled by the deployment's daily cron. This is what
+      // covers the days this device wasn't opened for at all — a weekend away is captured server-side
+      // and merged in here on the next open. Days merge, so this only ever adds.
+      //
+      // Silent on failure by design: no deployment, no Redis store, or offline all give the same
+      // outcome, which is that the device falls back on the days it captured itself.
+      async function syncNytArchive() {
+        try {
+          const r = await fetch("/api/nyt-archive", { cache: "no-store" });
+          if (!r.ok) return 0;                    // 501 when no store is connected — nothing to say
+          const data = await r.json();
+          let filed = 0;
+          for (const day of Array.isArray(data.days) ? data.days : []) {
+            if (archiveNytDay(day && day.date, (day && day.puzzles) || {})) filed++;
+          }
+          return filed;
+        } catch { return 0; }
+      }
+
       // Ask for that background capture. Chromium gates Periodic Background Sync on the app being
       // installed and on site engagement, and Safari has no such API at all, so this is attempted
       // quietly and its absence changes nothing — opening the app still files the day itself.
@@ -4122,13 +4141,13 @@
         const archived = loadNytArchive().length;
         const intro = isToday
           ? `<div class="card">Today's New York Times daily Sudoku${day.date ? ` · <b>${esc(fmtCatalogDate(day.date))}</b>` : ""}. Pick a difficulty and play it — it's saved to your library like any other import.</div>`
-          : `<div class="card">The New York Times daily Sudoku for <b>${esc(fmtCatalogDate(date))}</b>, kept by this device on the day it was published. It plays exactly like today's.</div>`;
+          : `<div class="card">The New York Times daily Sudoku for <b>${esc(fmtCatalogDate(date))}</b>, captured on the day it was published. It plays exactly like today's.</div>`;
         // Why an earlier day might be missing is worth saying plainly, since no button here can fix it.
         const footer = isToday
           ? `<div class="saved-row">
-               <div class="saved-meta"><span class="k">Fetched fresh each day and kept here${archived ? ` — ${archived} day${archived === 1 ? "" : "s"} archived so far` : ""}. NYT only ever serves the current day, so a day this app doesn't see is gone.</span></div>
+               <div class="saved-meta"><span class="k">Fetched fresh each day and kept here${archived ? ` — ${archived} day${archived === 1 ? "" : "s"} archived so far` : ""}.</span></div>
                <div class="saved-actions"><button id="nytRefresh">Refresh</button></div></div>`
-          : `<div class="saved-row"><div class="saved-meta"><span class="k">From this device's archive — a past day is never refetched, because NYT no longer serves it.</span></div></div>`;
+          : `<div class="saved-row"><div class="saved-meta"><span class="k">From the archive — NYT no longer serves this day, so it's played from the copy taken while it was current.</span></div></div>`;
 
         content.innerHTML =
           picker + intro + missingNote +
@@ -4143,7 +4162,12 @@
 
         content.querySelectorAll(".nyt-sub").forEach((b) => (b.onclick = () => { nytSub = b.dataset.sub; renderNytTab(); }));
         content.querySelector(".nyt-play").onclick = () => playNyt(nytSub, day);
-        if (isToday) document.getElementById("nytRefresh").onclick = () => loadNyt(true);
+        // Refresh is the "go and check" button, so it chases both sources: today from NYT, and any
+        // day this device is missing from the shared archive.
+        if (isToday) document.getElementById("nytRefresh").onclick = () => {
+          loadNyt(true);
+          syncNytArchive().then((filed) => { if (filed) renderNytUI(); });
+        };
         wire();
       }
 
@@ -6048,8 +6072,11 @@
       // down) the strip simply stays hidden — the tab reports the reason if you go looking. The
       // fetch also files today in the archive, which is the only chance this day will get.
       loadNyt();
-      // Then whatever the service worker captured while the app was closed, and the standing ask
-      // for it to keep doing so. Both are best effort and neither blocks anything above.
+      // Then the days this device missed entirely: the shared archive first (the deployment's cron
+      // captures every day whether or not anyone opens the app), then whatever the service worker
+      // managed to capture on its own, and the standing ask for it to keep doing so. None of these
+      // block anything above, and each quietly does nothing where it isn't available.
+      syncNytArchive().then((filed) => { if (filed) renderNytUI(); });
       drainNytCapture().then((filed) => { if (filed) renderNytUI(); });
       registerNytCapture();
     </script>

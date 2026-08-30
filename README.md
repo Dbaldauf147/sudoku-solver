@@ -146,16 +146,17 @@ answer.
       to the library tagged `NYT <date>`, so on first run those days are
       rebuilt from your library history. Days you fetched but never played
       aren't in there — the archive only fills forwards from here.
-    - **A day the app never sees is gone.** Miss a weekend and those puzzles
-      can't be recovered afterwards, by this app or any other. Where the
-      browser supports it (an **installed** PWA on Chromium — not Safari, and
-      not iOS), the service worker asks for a daily background fetch so closed
-      days are still captured, but the browser decides whether that ever runs.
-      Treat it as a bonus. The only way to guarantee a day is captured is for
-      something to fetch it that day: opening the app, or a server-side cron
-      writing to a shared store (not built — it would also mean this
-      deployment storing and serving NYT puzzles to everyone, which is a
-      different thing from a personal local copy).
+    - **A day nothing captures is gone.** So two things capture days besides
+      the app being open. The **daily cron** is the one that actually
+      guarantees it — see *Guaranteed daily capture* below — and covers
+      weekends and holidays whether or not any device is switched on. On top of
+      that, where the browser supports it (an **installed** PWA on Chromium —
+      not Safari, and not iOS), the service worker asks for a daily background
+      fetch; the browser decides whether that ever runs, so treat it as a
+      bonus, not a mechanism.
+
+    Without the cron set up, the archive is still yours and still works — it
+    just only holds the days this device was around for.
 
     The fetch happens server-side, in `/api/nyt-sudoku`: the NYT puzzle pages
     embed the grid in the HTML as a `window.gameData` blob (free — no
@@ -450,11 +451,55 @@ This is a standard [Vercel](https://vercel.com) project — static front end plu
 a function under `api/`.
 
 1. Add `ANTHROPIC_API_KEY` in your Vercel project's **Environment Variables**.
-2. Deploy:
+2. Add `CRON_SECRET` (any long random string) if you want the daily NYT capture
+   — see below.
+3. Deploy:
 
    ```bash
    npm run deploy      # vercel deploy --prod
    ```
+
+### Guaranteed daily capture (optional)
+
+NYT serves only the current day, so a day nothing fetches is gone permanently.
+Each device archives the days it's opened for, which leaves the days nobody
+opens it — weekends especially. Closing that hole needs something fetching on a
+schedule, which is what `crons` in `vercel.json` does:
+
+```jsonc
+{ "path": "/api/nyt-archive?capture=1", "schedule": "0 7 * * *" }   // 07:00 UTC
+{ "path": "/api/nyt-archive?capture=1", "schedule": "0 19 * * *" }  // 19:00 UTC
+```
+
+Both are comfortably after NYT's midnight-ET rollover. The second is a retry: a
+day already held in full is not re-fetched, so it costs one Redis read when the
+morning run worked, and fills in the gap when it didn't (NYT down, a partial
+page). Every device then merges those days into its own archive on next open.
+
+To set it up:
+
+1. Connect the Redis store (same one as *Cross-device sync* above — the archive
+   lives under `sudoku-coach:nyt-archive`). Without it `/api/nyt-archive`
+   replies `501` and each device carries on with its own local archive.
+2. Set `CRON_SECRET` in the project's environment variables. Vercel sends it as
+   `Authorization: Bearer <secret>` on every cron invocation, and the endpoint
+   rejects a capture that doesn't carry it.
+3. Redeploy, then check **Vercel → your project → Cron Jobs** for the runs.
+
+Without `CRON_SECRET` the capture still runs, so a fresh deploy works, but the
+path is then open to anyone. It's *bounded* rather than open — a day already
+archived is never re-fetched, so repeat calls cost a Redis read and never touch
+NYT — but set the secret anyway.
+
+Two notes on what this is:
+
+- **It's a shared dataset.** Like `/api/games`, there's no per-user auth: one
+  day's puzzles are the same for everyone, and every visitor to the deployment
+  can read the archive. That's a step beyond a personal per-device copy, so
+  keep the **Don't republish what you pull** caveat above in mind — a public
+  deployment with this on is serving NYT's puzzles to whoever finds it.
+- **It only fills forwards.** The cron can capture today, and every day after.
+  It cannot recover a day that passed before you set it up, because nothing can.
 
 ## API
 
@@ -521,3 +566,41 @@ responses from the caller:
 
 Successful responses are edge-cached (`s-maxage=1800`) since the puzzle changes
 once a day; failures are `no-store`.
+
+`GET /api/nyt-archive` — the days captured so far, newest first. What each
+device merges into its own archive on open, and how a day nobody was around for
+reaches you.
+
+```jsonc
+// response
+{
+  "configured": true,
+  "count": 2,
+  "days": [
+    { "date": "2026-08-30",
+      "puzzles": { "easy": "0001069 ...", "medium": "...", "hard": "..." },  // 81 chars each
+      "capturedAt": 1756512000000 },
+    { "date": "2026-08-29", "puzzles": { "easy": "..." }, "capturedAt": ... }   // a partial day
+  ]
+}
+```
+
+`?limit=` (default 120, max 400) and `?since=YYYY-MM-DD` trim the list. Days are
+edge-cached (`s-maxage=900`) — an archived day never changes, so only today's
+entry arriving moves this.
+
+`GET /api/nyt-archive?capture=1` — the cron path. Fetches today from
+`/api/nyt-sudoku`'s scraper and files it under NYT's own print date, merging
+difficulties into a day already present rather than replacing it. Requires
+`Authorization: Bearer $CRON_SECRET` when `CRON_SECRET` is set, and a day
+already held in full is not re-fetched. `?force=1` re-fetches it anyway and
+always requires the secret.
+
+```jsonc
+// response
+{ "ok": true, "date": "2026-08-30", "filed": 3, "missing": [], "total": 47, "protected": true }
+{ "ok": true, "date": "2026-08-30", "filed": 0, "note": "already archived" }
+```
+
+With no Redis store connected both paths reply `501 { configured: false, days: [] }`,
+which the app treats as "no shared archive" rather than as an error.

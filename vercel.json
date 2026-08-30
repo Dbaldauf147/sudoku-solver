@@ -6,8 +6,15 @@
     },
     "api/nyt-sudoku.js": {
       "maxDuration": 15
+    },
+    "api/nyt-archive.js": {
+      "maxDuration": 20
     }
   },
+  "crons": [
+    { "path": "/api/nyt-archive?capture=1", "schedule": "0 7 * * *" },
+    { "path": "/api/nyt-archive?capture=1", "schedule": "0 19 * * *" }
+  ],
   "headers": [
     {
       "source": "/",
