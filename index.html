@@ -350,6 +350,13 @@
       .avg-row .avg-d { font-weight: 700; }
       .avg-row .avg-note { font-size: 0.82rem; text-align: right; }
       .avg-row .avg-figs { margin-top: 2px; line-height: 1.55; }
+      /* Time-of-day bands under the "when you play" chart. */
+      .tod-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 7px 0;
+        border-top: 1px solid var(--line); font-size: 0.88rem; }
+      .tod-row:first-child { border-top: none; padding-top: 0; }
+      .tod-row.empty { color: var(--muted); }
+      .tod-row .tod-band { flex: 0 0 auto; font-weight: 700; min-width: 96px; }
+      .tod-row .tod-figs { flex: 1 1 150px; }
       /* One takeaway sentence per difficulty under the slow-down cluster chart. */
       .cluster-notes { margin: 8px 0 6px; font-size: 0.86rem; line-height: 1.5; }
       .cluster-notes > div { margin: 4px 0; }
@@ -4870,6 +4877,128 @@
         </div>`;
       }
 
+
+      // ---- when you play (solve time against the hour you started) ----
+      // Solve times differ far too much between difficulties to share one axis raw — every Easy game
+      // would sit on the floor beneath every Hard one, and the shape you're looking for would be
+      // buried under "Hard takes longer". Each game is plotted against its own difficulty's average
+      // instead, so 100% means "a normal game for you" and the only question the chart asks is
+      // whether the hour you start at moves you off it.
+      //
+      // Games are banded by when they STARTED, so one that runs past midnight counts to the band it
+      // began in — that's the band you chose to sit down in, which is what this is about.
+      const DAY_BANDS = [
+        { label: "Morning", from: 5, to: 12, span: "5am–12pm" },
+        { label: "Afternoon", from: 12, to: 17, span: "12–5pm" },
+        { label: "Evening", from: 17, to: 22, span: "5–10pm" },
+        { label: "Night", from: 22, to: 5, span: "10pm–5am" },
+      ];
+      // The night band wraps midnight, so it's the one that can't be a simple `from <= h < to`.
+      const inBand = (b, h) => (b.from < b.to ? h >= b.from && h < b.to : h >= b.from || h < b.to);
+      function bandFor(h) { return DAY_BANDS.find((b) => inBand(b, h)); }
+      const relPct = (v) => `${v >= 1 ? "+" : "−"}${Math.abs(Math.round((v - 1) * 100))}%`;
+
+      function timeOfDayData(games, diffs) {
+        // Each difficulty's own average is the yardstick, so a difficulty you've only solved once
+        // contributes a point at exactly 100% and tells us nothing — which is honest, not a bug.
+        const usable = (g) => g.solved && g.startedAt && g.totalMs > 0;
+        const avg = {}, counts = {};
+        for (const d of diffs) {
+          const t = games.filter((g) => usable(g) && g.difficulty === d).map((g) => g.totalMs);
+          if (t.length) { avg[d] = mean(t); counts[d] = t.length; }
+        }
+        const pts = [];
+        for (const g of games) {
+          if (!usable(g) || !avg[g.difficulty]) continue;
+          const when = new Date(g.startedAt), h = when.getHours() + when.getMinutes() / 60;
+          pts.push({ h, rel: g.totalMs / avg[g.difficulty], ms: g.totalMs, d: g.difficulty, when });
+        }
+        const bands = DAY_BANDS.map((b) => {
+          const inside = pts.filter((p) => inBand(b, Math.floor(p.h)));
+          const byDiff = diffs.map((d) => {
+            const t = inside.filter((p) => p.d === d).map((p) => p.ms);
+            return t.length ? { d, n: t.length, avg: mean(t) } : null;
+          }).filter(Boolean);
+          return { ...b, n: inside.length, rel: inside.length ? mean(inside.map((p) => p.rel)) : null, byDiff };
+        });
+        return { pts, bands, avg, counts };
+      }
+
+      function timeOfDayChart(data) {
+        const { pts, bands } = data;
+        const { W, H, padL, padR, padT, padB } = CHART;
+        const plotW = W - padL - padR, plotH = H - padT - padB;
+        const rels = pts.map((p) => p.rel);
+        // 100% is always on the axis — it's the line every point is being read against.
+        const lo0 = Math.min(1, ...rels), hi0 = Math.max(1, ...rels), pad = (hi0 - lo0) * 0.15 || 0.1;
+        const lo = Math.max(0, lo0 - pad), hi = hi0 + pad;
+        const sx = (h) => padL + (h / 24) * plotW;
+        const sy = (v) => padT + (1 - (v - lo) / (hi - lo)) * plotH;
+        const grid = chartGrid([0, 1, 2, 3].map((i) => lo + ((hi - lo) * i) / 3), sy, (v) => `${Math.round(v * 100)}%`);
+
+        // The band levels — the actual answer, drawn as a bar across each band's hours. The night
+        // band wraps midnight, so it draws as the two pieces either side of it.
+        let levels = "";
+        for (const b of bands) {
+          if (!b.n) continue;
+          const y = sy(b.rel).toFixed(1);
+          const runs = b.from < b.to ? [[b.from, b.to]] : [[b.from, 24], [0, b.to]];
+          for (const [f, t] of runs)
+            levels += `<line x1="${sx(f).toFixed(1)}" y1="${y}" x2="${sx(t).toFixed(1)}" y2="${y}" stroke="var(--text)" stroke-width="2.5" stroke-opacity="0.55" stroke-linecap="round"></line>`;
+          const [f, t] = runs.reduce((a, x) => (x[1] - x[0] > a[1] - a[0] ? x : a));
+          levels += `<text x="${sx((f + t) / 2).toFixed(1)}" y="${(Number(y) - 5).toFixed(1)}" text-anchor="middle" font-size="8.5" font-weight="700" fill="var(--text)" ${HALO}>${esc(relPct(b.rel))}</text>`;
+        }
+        // 100% — your normal game, whatever difficulty it was.
+        const base = `<line x1="${padL}" y1="${sy(1).toFixed(1)}" x2="${W - padR}" y2="${sy(1).toFixed(1)}" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="5 3"></line>`
+          + `<text x="${padL + 2}" y="${(sy(1) - 4).toFixed(1)}" text-anchor="start" font-size="8.5" font-weight="600" fill="var(--accent)" ${HALO}>your average</text>`;
+
+        const dots = pts.map((p) =>
+          `<circle cx="${sx(p.h).toFixed(1)}" cy="${sy(p.rel).toFixed(1)}" r="3" fill="${DIFF_COLORS[p.d] || "var(--accent)"}" fill-opacity="0.85">`
+          + `<title>${esc(`${p.d} · ${p.when.toLocaleDateString()} ${p.when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} · ${fmtTime(p.ms)} (${relPct(p.rel)} of your ${p.d} average)`)}</title></circle>`).join("");
+
+        let xaxis = "";
+        for (const [h, label] of [[0, "12am"], [6, "6am"], [12, "12pm"], [18, "6pm"], [24, "12am"]]) {
+          xaxis += `<line x1="${sx(h).toFixed(1)}" y1="${padT}" x2="${sx(h).toFixed(1)}" y2="${(padT + plotH).toFixed(1)}" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 3"></line>`
+            + `<text x="${sx(h).toFixed(1)}" y="${H - padB + 14}" text-anchor="${h === 0 ? "start" : h === 24 ? "end" : "middle"}" font-size="9" fill="var(--muted)">${label}</text>`;
+        }
+        xaxis += `<text x="${(padL + plotW / 2).toFixed(1)}" y="${H - 3}" text-anchor="middle" font-size="9" fill="var(--muted)">hour you started</text>`;
+        return `<svg viewBox="0 0 ${W} ${H}" class="pace-chart" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Solve time against the hour you started, each game measured against its own difficulty's average.">${grid}${xaxis}${base}${dots}${levels}</svg>`;
+      }
+
+      function timeOfDayHTML(games, diffs) {
+        const data = timeOfDayData(games, diffs);
+        if (data.pts.length < 3) {
+          return `<div class="card">Solve a few more puzzles and this will chart them against the hour you sat down, so you can see whether you're quicker in the morning or after dinner.</div>`;
+        }
+        const legend = diffs.filter((d) => data.counts[d]).map((d) =>
+          `<span class="lg"><span class="lgdot" style="background:${DIFF_COLORS[d] || "var(--accent)"}"></span>${esc(d)} <span class="k">(${data.counts[d]} · avg ${fmtTime(data.avg[d])})</span></span>`).join("");
+        const rows = data.bands.map((b) => {
+          if (!b.n) return `<div class="tod-row empty"><span class="tod-band">${esc(b.label)}</span><span class="k">${esc(b.span)} · no games yet</span></div>`;
+          const cls = b.rel <= 0.95 ? "down" : b.rel >= 1.05 ? "up" : "flat";
+          const per = b.byDiff.map((x) => `<span style="color:${DIFF_COLORS[x.d] || "var(--accent)"}">${esc(x.d)}</span> ${fmtTime(x.avg)}${x.n > 1 ? ` <span class="k">×${x.n}</span>` : ""}`).join(" · ");
+          return `<div class="tod-row"><span class="tod-band">${esc(b.label)} <span class="k">${esc(b.span)}</span></span>
+            <span class="tod-figs">${per}</span>
+            <span class="trend ${cls}">${b.rel <= 0.95 ? "▼ " : b.rel >= 1.05 ? "▲ " : ""}${esc(relPct(b.rel))}</span></div>`;
+        }).join("");
+        // Only bands with a couple of games get to claim a verdict — one game is an anecdote.
+        const solid = data.bands.filter((b) => b.n >= 2);
+        let takeaway = `<span class="k">A couple of games in two different parts of the day and a verdict will appear here.</span>`;
+        if (solid.length >= 2) {
+          const best = solid.reduce((a, b) => (b.rel < a.rel ? b : a)), worst = solid.reduce((a, b) => (b.rel > a.rel ? b : a));
+          const gap = Math.round((worst.rel / best.rel - 1) * 100);
+          takeaway = gap >= 5
+            ? `You're quickest in the <b>${esc(best.label.toLowerCase())}</b> (${relPct(best.rel)} against your average, over ${best.n} game${best.n === 1 ? "" : "s"}) and slowest at <b>${esc(worst.label.toLowerCase())}</b> (${relPct(worst.rel)}). That's about <b>${gap}%</b> between your best and worst time of day.`
+            : `Your times hold steady whenever you play — no more than ${Math.max(1, gap)}% between your best and worst part of the day.`;
+        }
+        return `<div class="card">
+          ${timeOfDayChart(data)}
+          <div class="chart-legend">${legend}</div>
+          <span class="k">Every solved game against the hour you started it, measured as a percentage of that difficulty's own average — so an Easy game and a Hard one can sit on the same axis. The dark bar across each stretch of the day is your average for that stretch.</span>
+        </div>
+        <div class="card tod-bands">${rows}</div>
+        <div class="card takeaway">${takeaway}</div>`;
+      }
+
       // ---- visual technique examples (shown from the stats technique table) ----
       const TECH_EXAMPLES = {
         "Naked single": { givens: { "0,4": 4, "1,4": 5, "2,4": 6, "3,3": 7, "3,5": 8, "4,0": 1, "4,1": 2, "4,2": 3 },
@@ -5826,6 +5955,7 @@
             <button class="ctog" data-mode="clusters">Slow-down clusters</button>
           </div>
           <div id="timeChartBox"></div>
+          <h3>When you play</h3>${timeOfDayHTML(games, diffs)}
           <h3>Where you spend time</h3>${techTable}
           <p class="sub" style="margin:8px 0 0">Typical = median time between your choices, so a long pause stands out without one outlier skewing it.</p>
           ${overTargetAllHTML(games)}
