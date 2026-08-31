@@ -436,6 +436,23 @@
       .dg-preview { white-space: pre-wrap; font-size: 0.82rem; line-height: 1.5; margin: 10px 0 0;
         max-height: 320px; overflow: auto; background: var(--bg); border: 1px solid var(--line);
         border-radius: 8px; padding: 10px 12px; }
+      /* The HTML preview renders in an iframe so the email's own styles can't leak into the app's,
+         and so what you see is what the mail client gets. White ground on purpose: the email is
+         written for a light background and is sent that way whatever theme the app is in. */
+      .dg-frame { width: 100%; height: 340px; margin: 10px 0 0; border: 1px solid var(--line);
+        border-radius: 8px; background: #fff; display: block; }
+      /* `display: block` above outranks the browser's own [hidden] rule, so the tab switch needs
+         this to actually hide the frame. */
+      .dg-frame[hidden] { display: none; }
+      .dg-tabs { display: flex; gap: 6px; margin: 10px 0 0; }
+      .dg-tabs button { flex: 0 0 auto; font-size: 0.78rem; padding: 4px 10px; }
+      .dg-tabs button.on { background: var(--sel); border-color: var(--accent); font-weight: 600; }
+      /* What a delivery needs, one line each. */
+      .dg-checks { list-style: none; padding: 0; margin: 8px 0 0; font-size: 0.85rem; }
+      .dg-checks li { padding: 3px 0; }
+      .dg-checks .yes { color: var(--ok); }
+      .dg-checks .no { color: var(--bad); }
+      .dg-checks .warn { color: var(--muted); }
       #syncDiag { line-height: 1.5; }
       #syncDiag code { font-size: 0.85em; }
 
@@ -2759,23 +2776,99 @@
         box.textContent = "Checking…";
         try {
           const r = await fetch(`/api/digest?status=1${profileParam()}`, { cache: "no-store" });
-          if (r.status === 501) return digestSay("This deployment has no cloud store connected, so there's nothing for a weekly job to read. Preview and Send now still work — they analyse the games on this device.", "off");
+          // A 501 is "no store", but its body still carries the mailer config — see api/digest.js.
+          if (r.status === 501) return digestChecks({ ...(await r.json().catch(() => ({}))), store: false, subscribed: false });
           if (!r.ok) return digestSay("Couldn't reach the digest service. Preview and Send now may still work.", "off");
           const j = await r.json();
-          const mailer = j.mailer ? "" : " Sending isn't configured on this deployment yet (it needs a RESEND_API_KEY), so nothing will actually be delivered.";
+          digestChecks(j);
+          const f = document.getElementById("digestEmail");
+          if (j.subscribed && f && !f.value) f.value = j.email;
+          // Once it's on, the same button is how you move it to a different address.
           const save = document.getElementById("digestSave");
-          if (j.subscribed) {
-            digestSay(`On — mailing ${j.email} every Monday.${mailer}`, "on");
-            const f = document.getElementById("digestEmail");
-            if (f && !f.value) f.value = j.email;
-            // Once it's on, the same button is how you move it to a different address.
-            if (save) save.textContent = "Update address";
-          } else {
-            digestSay(`Off. Add an address and turn it on to get it weekly.${mailer}`, "off");
-            if (save) save.textContent = "Turn on";
-          }
+          if (save) save.textContent = j.subscribed ? "Update address" : "Turn on";
         } catch { digestSay("Couldn't reach the digest service.", "off"); }
       }
+      // A Monday email needs three separate things, and when it doesn't arrive they all look the
+      // same from in here: no mailer key, no store for the scheduled job to read, or simply not
+      // turned on. Each is stated on its own line with what to do about it, rather than folded into
+      // one sentence that can only describe the first problem it finds.
+      function digestChecks(j) {
+        const box = document.getElementById("digestBox");
+        if (!box) return;
+        const mark = (ok) => ok ? `<span class="yes">✓</span>` : `<span class="no">✗</span>`;
+        const rows = [];
+
+        rows.push(`<li>${mark(j.mailer)} <b>Mail sending</b> — ${j.mailer
+          ? "configured."
+          : "no <code>RESEND_API_KEY</code> on this deployment, so nothing can be delivered. Preview still works."}</li>`);
+
+        rows.push(`<li>${mark(j.store)} <b>Cloud store</b> — ${j.store
+          ? "connected, so the Monday job can read your games."
+          : "not connected. The weekly job has nothing to read and can't hold a subscription. Preview and Send now still work — they use this device's games."}</li>`);
+
+        if (j.store) {
+          rows.push(`<li>${mark(j.subscribed)} <b>Weekly email</b> — ${j.subscribed
+            ? `on, going to ${esc(j.email)} every Monday.`
+            : "off. Add an address and turn it on."}</li>`);
+        }
+
+        // Everything above can read as configured while mail still goes nowhere: Resend's shared
+        // sender only delivers to the address on the Resend account itself.
+        if (j.mailer && j.sharedSender) {
+          rows.push(`<li><span class="warn">!</span> <b>Sender</b> — using Resend's shared
+            <code>onboarding@resend.dev</code>, which only delivers to the address on your own Resend
+            account. Any other address is accepted and never arrives. Set <code>DIGEST_FROM</code> to
+            an address on a domain you've verified with Resend.</li>`);
+        } else if (j.mailer && j.from) {
+          rows.push(`<li>${mark(true)} <b>Sender</b> — ${esc(j.from)}</li>`);
+        }
+
+        box.innerHTML = `<span class="dg-state ${j.subscribed ? "dg-on" : "dg-off"}">${
+          j.subscribed ? "Weekly email is on." : "Weekly email is off."}</span><ul class="dg-checks">${rows.join("")}</ul>`;
+      }
+
+      // What actually lands in the inbox, rather than a description of it. The HTML goes in an
+      // iframe: the email carries its own inline styling written for a white background, so rendering
+      // it inside the app would both distort it and leak its styles into the settings panel.
+      // Sandboxed with no allow-scripts — this is a document to look at, not to run. `allow-same-origin`
+      // is only there so the frame can be measured and sized to its content.
+      function showDigestPreview(digest) {
+        const box = document.getElementById("digestBox");
+        if (!box) return;
+
+        const tabs = document.createElement("div");
+        tabs.className = "dg-tabs";
+        tabs.innerHTML = `<button data-v="html" class="on">Email</button><button data-v="text">Plain text</button>`;
+
+        const frame = document.createElement("iframe");
+        frame.className = "dg-frame";
+        frame.setAttribute("sandbox", "allow-same-origin");
+        frame.setAttribute("title", "Preview of the digest email");
+        frame.srcdoc = digest.html || "";
+        // Grow to the mail's own height so short digests aren't a mostly-empty box and long ones
+        // don't hide their ending. Capped, since the panel still has to be scrollable itself.
+        frame.onload = () => {
+          try {
+            const h = frame.contentDocument.body.scrollHeight;
+            if (h) frame.style.height = `${Math.min(Math.max(h + 24, 180), 520)}px`;
+          } catch {}   // measurement is a nicety; the fixed height is a fine fallback
+        };
+
+        const text = document.createElement("div");
+        text.className = "dg-preview";
+        text.textContent = digest.text || "";
+        text.hidden = true;
+
+        tabs.querySelectorAll("button").forEach((b) => (b.onclick = () => {
+          const wantHtml = b.dataset.v === "html";
+          tabs.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+          frame.hidden = !wantHtml;
+          text.hidden = wantHtml;
+        }));
+
+        box.append(tabs, frame, text);
+      }
+
       function digestAddress() {
         const f = document.getElementById("digestEmail");
         const v = (f && f.value || "").trim();
@@ -2817,14 +2910,23 @@
           // The state line is repainted first and awaited: it rewrites the box, so appending the
           // preview before it lands would wipe the preview out again.
           await renderDigestState();
-          const box = document.getElementById("digestBox");
-          if (box) box.insertAdjacentHTML("beforeend", `<div class="dg-preview">${esc(j.text || "")}</div>`);
+          showDigestPreview(j);
         };
         document.getElementById("digestSend").onclick = async () => {
           const email = digestAddress(); if (!email) return;
           digestSay("Sending…");
           const { ok, j } = await digestPost({ games: lsGet(STATS_KEY), to: email });
-          if (!ok) return digestSay(j.error || "Couldn't send — the digest service didn't answer.", "off");
+          if (!ok) {
+            // `detail` is the mail provider's own words, and it's usually the whole answer — an
+            // unverified domain, or the shared sender refusing an address that isn't the account's.
+            // It used to be dropped, which left "couldn't send" with no way to find out why.
+            await renderDigestState();
+            const box = document.getElementById("digestBox");
+            if (box) box.insertAdjacentHTML("beforeend",
+              `<div class="dg-preview"><b>Couldn't send.</b> ${esc(j.error || "The digest service didn't answer.")}` +
+              (j.detail ? `\n\n${esc(j.detail)}` : "") + `</div>`);
+            return;
+          }
           digestSay(`Sent to ${email} — “${j.subject}”.`, "on");
         };
       }

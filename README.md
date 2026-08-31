@@ -410,9 +410,17 @@ both a meaningful size and enough games either side of the comparison before it
 is reported, and one technique slipping across several difficulties is rolled up
 into a single row rather than three.
 
-**Preview** and **Send now** analyse the games on the device you're holding, so
+**Preview** shows the actual email — the HTML that lands in the inbox, rendered
+in an isolated frame, with a **Plain text** tab for the fallback some clients
+show. Preview and **Send now** analyse the games on the device you're holding, so
 they work with no store connected. The weekly job reads from the store, so it
 needs cross-device sync above.
+
+The panel also lists **what a delivery needs**, one line each — mail sending,
+the cloud store, the subscription, and the sender address — because when the
+email doesn't arrive those failures are indistinguishable from in the app. A
+failed **Send now** shows the mail provider's own words, which is usually the
+whole answer.
 
 To set it up:
 
@@ -420,9 +428,12 @@ To set it up:
 2. Add `RESEND_API_KEY` from [Resend](https://resend.com) in your Vercel
    project's **Environment Variables**. Without it the endpoint still analyses
    and previews, and the Settings panel says sending isn't configured.
-3. Optionally set `DIGEST_FROM` (e.g. `Sudoku Coach <coach@yourdomain>`). The
-   default is Resend's shared onboarding sender, which only delivers to the
-   email on your own Resend account.
+3. Set `DIGEST_FROM` (e.g. `Sudoku Coach <coach@yourdomain>`) to an address on
+   a domain you've verified with Resend. Nominally optional, but the default is
+   Resend's shared `onboarding@resend.dev`, which **only delivers to the address
+   on your own Resend account** — any other address is accepted by the API and
+   never arrives. That's the usual reason a digest that looks configured never
+   turns up, so the Settings panel flags it explicitly.
 4. Optionally set `CRON_SECRET`; when it's set, the scheduled `GET /api/digest`
    must present it as a bearer token. Vercel supplies this header automatically.
 5. **Redeploy.** `vercel.json` schedules the job for Mondays at 14:00 UTC.
