@@ -205,6 +205,15 @@ answer.
       where you stall and what it costs. Tapping a difficulty in the legend
       hides it from both this chart and the per-move one.
 
+    **When you play** is its own section: every solved game plotted against the
+    hour you started it, measured as a percentage of that difficulty's own
+    average so an Easy game and a Hard one sit on the same axis. A bar across
+    each stretch of the day (morning / afternoon / evening / night) gives your
+    level for that stretch, a table under it breaks the raw average solve time
+    down per difficulty per stretch, and a closing line names your quickest and
+    slowest part of the day. Games are banded by when they **started**, so one
+    that runs past midnight counts to the band you sat down in.
+
     There's also a **technique time over time** sparkline per technique, each
     tagged with a faster/slower badge so you can see whether you're improving.
     It also has a
