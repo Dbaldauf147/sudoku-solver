@@ -29,7 +29,8 @@ const redis = REST_URL && REST_TOKEN ? new Redis({ url: REST_URL, token: REST_TO
 
 const SUBS_KEY = "sudoku-coach:digest-subs";
 const STATS_KEY = "sudoku-coach:stats";
-const FROM = process.env.DIGEST_FROM || "Sudoku Coach <onboarding@resend.dev>";
+const SHARED_SENDER = "Sudoku Coach <onboarding@resend.dev>";
+const FROM = process.env.DIGEST_FROM || SHARED_SENDER;
 
 // Same charset restriction the games endpoint uses, so a profile id can't reach other keys.
 const cleanProfile = (v) => String(v || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
@@ -75,14 +76,32 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, sent: true, to: to.trim(), subject: digest.subject });
     }
 
-    // Everything below needs the store.
-    if (!redis) return res.status(501).json({ error: "Cloud sync not configured", configured: false });
+    // Everything below needs the store. The mailer config is reported anyway: it doesn't depend on
+    // Redis, and the Settings panel would otherwise have to guess at it — saying "no mail key" when
+    // it can't actually tell is worse than saying nothing.
+    if (!redis) {
+      return res.status(501).json({
+        error: "Cloud sync not configured", configured: false,
+        store: false, subscribed: false,
+        mailer: !!process.env.RESEND_API_KEY, from: FROM, sharedSender: FROM === SHARED_SENDER,
+      });
+    }
 
     const profile = cleanProfile(req.query.profile);
 
     if (req.method === "GET" && req.query.status) {
       const sub = (await readSubs()).find((s) => s.profile === profile);
-      return res.status(200).json({ subscribed: !!sub, email: sub ? sub.email : null, mailer: !!process.env.RESEND_API_KEY });
+      return res.status(200).json({
+        subscribed: !!sub,
+        email: sub ? sub.email : null,
+        mailer: !!process.env.RESEND_API_KEY,
+        store: true,   // this branch is only reached with the store connected
+        from: FROM,
+        // Resend's shared onboarding sender only delivers to the address on the Resend account
+        // itself. Everything looks configured and mail silently goes nowhere else, so it's called
+        // out rather than left to be discovered.
+        sharedSender: FROM === SHARED_SENDER,
+      });
     }
 
     if (req.method === "POST") {
