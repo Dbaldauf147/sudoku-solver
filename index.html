@@ -1316,6 +1316,11 @@
         }
         return null;
       }
+      // A naked pair's two cells always share some unit, but *which* changes how you hunt for it: both
+      // inside one box is a compact 3×3 scan, while a pair spread along a row or column runs across three
+      // boxes and is the easier of the two to walk past. The elimination is identical, so these are one
+      // technique reported two ways rather than two techniques.
+      const NP_BOX = "Naked pair (same box)", NP_LINE = "Naked pair (across boxes)";
       function nakedPair(M, grid) {
         for (const u of UNITS) {
           const twos = u.cells.filter(([r, c]) => grid[r][c] === 0 && M[r][c].size === 2);
@@ -1327,7 +1332,17 @@
                 if ((r === r1 && c === c1) || (r === r2 && c === c2) || grid[r][c] !== 0) continue;
                 for (const n of a) if (M[r][c].has(n)) elims.push([r, c, n]);
               }
-              if (elims.length) return { elims, highlight: [[r1, c1], [r2, c2]], tech: "Naked pair", reason: `${loc(r1, c1)} and ${loc(r2, c2)} in ${u.name} can only hold {${a.join(", ")}}, so those digits are removed from the rest of the ${u.kind}.` };
+              if (elims.length) {
+                const sameBox = boxIndex(r1, c1) === boxIndex(r2, c2);
+                // A same-box pair that also shares a line clears both units, but only one per step: UNITS
+                // runs rows and columns before boxes, so the line goes first and the box falls out of the
+                // next scan. Saying so keeps the "same box" label from reading as a wrong unit name.
+                const alsoBox = sameBox && u.kind !== "box"
+                  ? ` Both cells sit in box ${boxIndex(r1, c1)}, so this pair clears the rest of that box too on your next scan.`
+                  : "";
+                return { elims, highlight: [[r1, c1], [r2, c2]], tech: sameBox ? NP_BOX : NP_LINE,
+                  reason: `${loc(r1, c1)} and ${loc(r2, c2)} in ${u.name} can only hold {${a.join(", ")}}, so those digits are removed from the rest of the ${u.kind}.${alsoBox}` };
+              }
             }
           }
         }
@@ -1736,7 +1751,7 @@
       // one function per position rather than all eighteen — and a label with no rule behind it
       // (Mistake, Forced, Advanced) isn't in here at all, so the hunt can be called off immediately.
       const ELIM_TECH_FN = { "Pointing pair": lockedCandidates, "Pointing triple": lockedCandidates, "Locked candidate": lockedCandidates,
-        "Naked pair": nakedPair, "Hidden pair": hiddenPair, "Naked triple": nakedTriple, "Hidden triple": hiddenTriple,
+        "Naked pair": nakedPair, [NP_BOX]: nakedPair, [NP_LINE]: nakedPair, "Hidden pair": hiddenPair, "Naked triple": nakedTriple, "Hidden triple": hiddenTriple,
         "Naked quad": nakedQuad, "Hidden quad": hiddenQuad, "X-wing": xWing, "Skyscraper": skyscraper, "Two-string kite": twoStringKite,
         "XY-wing": xyWing, "XYZ-wing": xyzWing, "W-wing": wWing, "Swordfish": swordfish, "Jellyfish": jellyfish,
         "Simple colouring": simpleColoring, "Remote pairs": remotePairs, "XY-chain": xyChain };
@@ -1764,12 +1779,14 @@
       // before still grades Easy.
       const TECH_RANK = { "Full house": 1, "Naked single": 1, "Hidden single (box)": 2, "Hidden single (row/column)": 2.5, "Hidden single": 2,
         "Pointing pair": 3, "Pointing triple": 3, "Locked candidate": 3,
-        "Naked pair": 4, "Hidden pair": 4, "Naked triple": 5, "Hidden triple": 5, "Naked quad": 5, "Hidden quad": 5,
+        "Naked pair": 4, "Naked pair (same box)": 4, "Naked pair (across boxes)": 4.5, "Hidden pair": 4, "Naked triple": 5, "Hidden triple": 5, "Naked quad": 5, "Hidden quad": 5,
         "X-wing": 6, "XY-wing": 6, "Skyscraper": 6, "Two-string kite": 6,
         "Swordfish": 7, "XYZ-wing": 7, "Jellyfish": 7, "W-wing": 7, "Simple colouring": 7, "Remote pairs": 7, "XY-chain": 8,
         "Advanced": 9, "Forced": 9 };
       // Both hidden singles (ranks 2 and 2.5) sit in the Easy band; every other rank is a whole number,
-      // so the 2.5 cut leaves every previously graded puzzle in the tier it already had.
+      // so the 2.5 cut leaves every previously graded puzzle in the tier it already had. The naked pair
+      // split works the same way: 4 and 4.5 are both inside Medium (tierForRank cuts at 5), so the
+      // across-boxes pair wins the "hardest step" label over a same-box one without moving any grade.
       function tierForRank(rank) { return rank <= 2.5 ? "Easy" : rank <= 5 ? "Medium" : "Hard"; }
       // Solve using only the techniques we can name, keeping a persistent candidate map so elimination
       // techniques stack, and record the hardest technique the solution required.
@@ -4675,7 +4692,12 @@
       // Techniques we can drill, easiest → hardest (bank insertion order), skipping empty buckets.
       const TRAINER_TECHS = Object.keys(TRAINER_BANK).filter((t) => (TRAINER_BANK[t] || []).length);
       // Both hidden-single labels drill from the one hidden-single bank — its puzzles throw up both kinds.
-      function drillKey(tech) { return tech && tech.startsWith("Hidden single") ? "Hidden single" : tech; }
+      function drillKey(tech) {
+        if (!tech) return tech;
+        if (tech.startsWith("Hidden single")) return "Hidden single";
+        if (tech.startsWith("Naked pair")) return "Naked pair";   // its bank throws up both kinds
+        return tech;
+      }
       function loadDrill(tech) {
         const bank = TRAINER_BANK[tech]; if (!bank || !bank.length) return;
         closeLibrary(); document.getElementById("exModal").hidden = true;
@@ -4736,7 +4758,7 @@
       const TECH_COLORS = { "Full house": "#86efac", "Naked single": "#4ade80",
         "Hidden single (box)": "#6ea8fe", "Hidden single (row/column)": "#818cf8", "Hidden single": "#6ea8fe", "Pointing pair": "#f59e0b",
         "Pointing triple": "#f59e0b", "Locked candidate": "#f59e0b", "Box/line reduction": "#f59e0b",
-        "Naked pair": "#a78bfa", "Hidden pair": "#a78bfa", "Naked triple": "#7c3aed", "Hidden triple": "#7c3aed",
+        "Naked pair": "#a78bfa", "Naked pair (same box)": "#a78bfa", "Naked pair (across boxes)": "#c084fc", "Hidden pair": "#a78bfa", "Naked triple": "#7c3aed", "Hidden triple": "#7c3aed",
         "Naked quad": "#6d28d9", "Hidden quad": "#6d28d9",
         "X-wing": "#ec4899", "Swordfish": "#db2777", "Jellyfish": "#be185d",
         "Skyscraper": "#0ea5e9", "Two-string kite": "#0284c7",
@@ -5206,6 +5228,14 @@
         "Naked pair": { focus: ["0,0", "0,1"], elim: ["0,3", "0,5"],
           marks: { "0,0": [4, 5], "0,1": [4, 5], "0,3": [4, 5, 6], "0,5": [2, 4, 5] }, struck: { "0,3": [4, 5], "0,5": [4, 5] },
           caption: "These two cells can only hold 4 or 5, so the pair belongs to them. 4 and 5 are removed from the rest of the row (crossed out) — a naked pair." },
+        // The two boards differ in where the pair sits, not in what it does — so each shows the shape you
+        // actually scan for: one compact inside a box, one strung along a row across three of them.
+        "Naked pair (same box)": { focus: ["0,0", "1,1"], elim: ["0,2", "2,0"],
+          marks: { "0,0": [4, 5], "1,1": [4, 5], "0,2": [4, 5, 6], "2,0": [2, 4, 5] }, struck: { "0,2": [4, 5], "2,0": [4, 5] },
+          caption: "Both highlighted cells are in the same box, and between them they can only hold 4 and 5 — so those two digits are spoken for. 4 and 5 come out of the box's other cells (crossed out). Here the pair shares no row or column, so the box is the only unit it clears." },
+        "Naked pair (across boxes)": { focus: ["0,0", "0,4"], elim: ["0,6", "0,8"],
+          marks: { "0,0": [3, 7], "0,4": [3, 7], "0,6": [3, 7, 8], "0,8": [1, 3, 7] }, struck: { "0,6": [3, 7], "0,8": [3, 7] },
+          caption: "The same rule, but the two cells sit in different boxes — only the row ties them together. Between them they hold just 3 and 7, so those digits leave the rest of the row (crossed out). Nothing can be said about either box: the pair is split between them. This is the version that's easy to miss, because the two cells are never in view at the same time during a box scan." },
         "Hidden pair": { focus: ["0,0", "0,1"],
           marks: { "0,0": [2, 3, 6, 8], "0,1": [2, 3, 9] }, struck: { "0,0": [6, 8], "0,1": [9] },
           caption: "2 and 3 appear only in these two cells of the row, so they must fill them. Every other candidate in the pair is removed (crossed out) — a hidden pair." },
@@ -5365,7 +5395,7 @@
       const TECH_CATALOG = [
         ["Basics", ["Full house", "Naked single", "Hidden single (box)", "Hidden single (row/column)", "Hidden single"]],
         ["Intersections", ["Pointing pair", "Pointing triple", "Locked candidate"]],
-        ["Naked subsets", ["Naked pair", "Naked triple", "Naked quad"]],
+        ["Naked subsets", ["Naked pair (same box)", "Naked pair (across boxes)", "Naked pair", "Naked triple", "Naked quad"]],
         ["Hidden subsets", ["Hidden pair", "Hidden triple", "Hidden quad"]],
         ["Fish", ["X-wing", "Swordfish", "Jellyfish"]],
         ["Single-digit & colouring", ["Skyscraper", "Two-string kite", "Simple colouring"]],
@@ -5382,7 +5412,9 @@
         "Pointing pair": "A digit confined to one row or column within a box, removing it from that line outside the box.",
         "Pointing triple": "The three-cell version of a pointing pair.",
         "Locked candidate": "A digit confined to one box within a row or column, removing it elsewhere in that box (claiming).",
-        "Naked pair": "Two cells in a unit holding the same two candidates, clearing those digits from the rest of the unit.",
+        "Naked pair (same box)": "Two cells of one box holding the same two candidates. Compact — the whole pattern is inside a 3×3.",
+        "Naked pair (across boxes)": "The same pair, but the two cells sit in different boxes and share only a row or column. Spread over three boxes, so it's the easier one to walk past.",
+        "Naked pair": "The pre-split label, kept for games logged before same-box and across-boxes pairs were counted separately.",
         "Naked triple": "Three cells that share just three candidates between them.",
         "Naked quad": "Four cells that share just four candidates between them.",
         "Hidden pair": "Two candidates that appear only in the same two cells of a unit.",

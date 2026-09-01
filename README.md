@@ -30,9 +30,22 @@ answer.
     first, since they're the easier spot. Both stay in the Easy band, so no
     puzzle's difficulty rating changes; games logged before the split keep their
     old "Hidden single" label and still show up in stats.
+  - **Naked pairs are split the same way**, for the same reason. Two cells
+    holding the same two candidates always share *some* unit, but where they
+    sit changes how you hunt for them: **Naked pair (same box)** is a compact
+    3×3 scan, while **Naked pair (across boxes)** has the two cells in
+    different boxes tied only by a row or column — strung over three boxes, and
+    the one that's easy to walk past, since the two cells are never in view
+    together during a box scan. The elimination is identical either way, so
+    it's one rule reported two ways: separate colours, worked boards, and
+    counts, both drilling from the same practice bank. A same-box pair that
+    also shares a line says so, since it clears that box on your next scan
+    as well. Both sit inside the Medium band, so no puzzle's rating changes,
+    and games logged before the split keep their old "Naked pair" label.
   - **Hint** finds the next cell you can logically prove, explains it (and
     names the technique — naked single, hidden single in a box or a
-    row/column, pointing pair, box/line reduction, naked pair, hidden pair,
+    row/column, pointing pair, box/line reduction, naked pair in a box or
+    across boxes, hidden pair,
     X-wing), and offers to place it for you.
   - **Hints you can see, not just read.** Every hint carries a **Show me on a
     board** button that lays the same reasoning out step by step on a read-only
