@@ -218,6 +218,15 @@ answer.
       where you stall and what it costs. Tapping a difficulty in the legend
       hides it from both this chart and the per-move one.
 
+    **Notes &amp; candidates** splits each difficulty into the games you played
+    with pencil marks and the games you played without, and shows win rate,
+    average solve and accuracy for each side, with a line naming the gap once
+    there are two games either way. A game counts as "with notes" if you
+    toggled any candidate in Candidate mode or pressed **Auto notes** to fill
+    them. Games recorded before this was added carry no trace of their marks,
+    so they're counted separately and left out rather than being filed under
+    "no notes".
+
     **When you play** is its own section: every solved game plotted against the
     hour you started it, measured as a percentage of that difficulty's own
     average so an Easy game and a Hard one sit on the same axis. A bar across

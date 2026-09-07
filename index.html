@@ -357,6 +357,14 @@
       .avg-row .avg-d { font-weight: 700; }
       .avg-row .avg-note { font-size: 0.82rem; text-align: right; }
       .avg-row .avg-figs { margin-top: 2px; line-height: 1.55; }
+      /* With-notes vs without, per difficulty. */
+      .notes-card .notes-head { margin-bottom: 7px; }
+      .notes-side { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; padding: 5px 0;
+        border-top: 1px solid var(--line); font-size: 0.88rem; }
+      .notes-side .notes-lab { flex: 0 0 96px; font-weight: 700; white-space: nowrap; }
+      .notes-side .notes-figs { flex: 1 1 170px; }
+      .notes-side.empty { color: var(--muted); }
+      .notes-verdict { margin-top: 7px; font-size: 0.85rem; }
       /* Time-of-day bands under the "when you play" chart. */
       .tod-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 7px 0;
         border-top: 1px solid var(--line); font-size: 0.88rem; }
@@ -1125,6 +1133,9 @@
         if (givens[r][c] || inputs[r][c].value) return;
         pushUndo({ r, c });
         marks[r][c].has(n) ? marks[r][c].delete(n) : marks[r][c].add(n);
+        // Counted so a finished game can say whether it was solved with pencil marks or in your head.
+        // Clearing a mark counts too: you were still working in notes to do it.
+        if (session) session.noteEdits = (session.noteEdits || 0) + 1;
         renderPencils();
       }
 
@@ -2393,7 +2404,7 @@
         document.body.classList.add("solving");
         clearHighlights(); renderPencils();
         undoStack = []; redoStack = []; errorsEl.textContent = "0";
-        session = { difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, hintsBy: {}, moves: [], missed: {} };
+        session = { difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, hintsBy: {}, moves: [], missed: {}, noteEdits: 0, noteFills: 0 };
         startTimer();
         const first = (() => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) return [r, c]; return [0, 0]; })();
         select(first[0], first[1]);
@@ -3028,6 +3039,7 @@
           if (givens[r][c] || inputs[r][c].value) continue;
           marks[r][c] = any ? new Set() : new Set(candidates(grid, r, c));
         }
+        if (!any && session) session.noteFills = (session.noteFills || 0) + 1;
         renderPencils();
         showExplain(any ? "Notes cleared" : "Notes filled", any ? "Pencil marks removed." : "Filled every empty cell with its possible digits. Switch to Candidate mode to refine them.", "info");
       });
@@ -3235,7 +3247,7 @@
         // Fresh session: timer restarts from zero, errors and move log wiped.
         clearInterval(timerId); timerId = null;
         undoStack = []; redoStack = []; lastHint = null;
-        session = { difficulty: session.difficulty, source: session.source, startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, hintsBy: {}, moves: [], missed: {} };
+        session = { difficulty: session.difficulty, source: session.source, startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, hintsBy: {}, moves: [], missed: {}, noteEdits: 0, noteFills: 0 };
         errorsEl.textContent = "0"; pauseModal.hidden = true;
         clearHighlights(); setMode("normal"); startTimer(); renderPencils();
         syncAutoPause();   // if a panel happens to be covering the board, keep the fresh timer paused
@@ -3371,7 +3383,7 @@
           solution,
           elapsed: activeElapsed(),
           manualPaused: !!(session.pauseStart && session.manualPaused),
-          session: { difficulty: session.difficulty, source: session.source, errors: session.errors || 0, hints: session.hints || 0, hintsBy: session.hintsBy || {}, lastT: session.lastT || 0, moves: session.moves || [], missed: session.missed || {} },
+          session: { difficulty: session.difficulty, source: session.source, errors: session.errors || 0, hints: session.hints || 0, hintsBy: session.hintsBy || {}, lastT: session.lastT || 0, moves: session.moves || [], missed: session.missed || {}, noteEdits: session.noteEdits || 0, noteFills: session.noteFills || 0 },
           savedAt: Date.now(),
         };
       }
@@ -3394,7 +3406,7 @@
         }
         // Time away from the app doesn't count: rebase so active time resumes from where it stood.
         const elapsed = Math.max(0, st.elapsed || 0), now = Date.now();
-        session = { difficulty: st.session.difficulty, source: st.session.source, startedAt: now - elapsed, pausedMs: 0, pauseStart: null, manualPaused: false, errors: st.session.errors || 0, hints: st.session.hints || 0, hintsBy: st.session.hintsBy || {}, lastT: st.session.lastT || 0, moves: st.session.moves || [], missed: st.session.missed || {} };
+        session = { difficulty: st.session.difficulty, source: st.session.source, startedAt: now - elapsed, pausedMs: 0, pauseStart: null, manualPaused: false, errors: st.session.errors || 0, hints: st.session.hints || 0, hintsBy: st.session.hintsBy || {}, lastT: st.session.lastT || 0, moves: st.session.moves || [], missed: st.session.missed || {}, noteEdits: st.session.noteEdits || 0, noteFills: st.session.noteFills || 0 };
         solving = true; setMode("normal"); syncModeButtons(); document.body.classList.add("solving");
         difficultyEl.value = session.difficulty; sourceEl.value = session.source;
         errorsEl.textContent = session.errors;
@@ -5208,6 +5220,61 @@
         <div class="card takeaway">${takeaway}</div>`;
       }
 
+
+      // ---- notes & candidates ----
+      // Whether a game was played with pencil marks is only known for games recorded after this was
+      // added: an older record holds no trace of its marks, so there's nothing to infer it from.
+      // Those games are counted and set aside rather than quietly filed under "no notes", which
+      // would invent a result the data can't support.
+      const notesRecorded = (g) => typeof g.noteEdits === "number" || typeof g.noteFills === "number";
+      const notesUsed = (g) => (g.noteEdits || 0) > 0 || (g.noteFills || 0) > 0;
+      function notesGroup(gs) {
+        const solved = gs.filter((g) => g.solved), times = solved.map((g) => g.totalMs);
+        const moves = gs.flatMap((g) => g.moves || []);
+        return {
+          n: gs.length, solved: solved.length,
+          win: gs.length ? Math.round((solved.length / gs.length) * 100) : 0,
+          avg: times.length ? mean(times) : null,
+          acc: moves.length ? Math.round((moves.filter((m) => m.correct).length / moves.length) * 100) : null,
+        };
+      }
+      function notesUsageHTML(games, diffs) {
+        const known = games.filter(notesRecorded), unknown = games.length - known.length;
+        const foot = unknown
+          ? `<p class="hintline">${unknown} earlier game${unknown === 1 ? "" : "s"} predate${unknown === 1 ? "s" : ""} this being recorded, so ${unknown === 1 ? "it's" : "they're"} left out rather than counted as played without notes.</p>`
+          : "";
+        if (!known.length) {
+          return `<div class="card">Nothing recorded yet. From here on, every game notes whether you used pencil marks — through Candidate mode or Auto notes — and this will break it down by difficulty.</div>${foot}`;
+        }
+        const side = (label, s, color) => s.n
+          ? `<div class="notes-side"><span class="notes-lab" style="color:${color}">${esc(label)}</span>
+              <span class="notes-figs"><b>${s.n}</b> <span class="k">game${s.n === 1 ? "" : "s"}</span> · <b>${s.win}%</b> <span class="k">win</span>${s.avg != null ? ` · <b>${fmtTime(s.avg)}</b> <span class="k">avg</span>` : ""}${s.acc != null ? ` · <b>${s.acc}%</b> <span class="k">accurate</span>` : ""}</span></div>`
+          : `<div class="notes-side empty"><span class="notes-lab">${esc(label)}</span><span class="k">none yet</span></div>`;
+        let rows = "";
+        for (const d of diffs) {
+          const gs = known.filter((g) => g.difficulty === d);
+          if (!gs.length) continue;
+          const on = notesGroup(gs.filter(notesUsed)), off = notesGroup(gs.filter((g) => !notesUsed(g)));
+          // A verdict needs both sides to exist and to have solved something to compare, and two games
+          // a side before it's worth reading as anything but noise.
+          let verdict = `<span class="k">Play a couple each way and the difference will show here.</span>`;
+          if (on.n >= 2 && off.n >= 2 && on.avg != null && off.avg != null) {
+            const gap = off.avg - on.avg, pct = Math.round((Math.abs(gap) / Math.max(on.avg, off.avg)) * 100);
+            verdict = pct < 5
+              ? `<span class="trend flat">Much the same either way (${pct}% apart).</span>`
+              : gap > 0
+              ? `<span class="trend down">▼ ${fmtTime(Math.abs(gap))} faster with notes (${pct}%).</span>`
+              : `<span class="trend up">▲ ${fmtTime(Math.abs(gap))} faster without notes (${pct}%).</span>`;
+          }
+          rows += `<div class="card notes-card"><div class="notes-head"><b style="color:${DIFF_COLORS[d] || "var(--accent)"}">${esc(d)}</b> <span class="k">${gs.length} recorded game${gs.length === 1 ? "" : "s"}</span></div>
+            ${side("With notes", on, "var(--accent)")}
+            ${side("No notes", off, "var(--muted)")}
+            <div class="notes-verdict">${verdict}</div></div>`;
+        }
+        if (!rows) rows = `<div class="card">No games recorded against a difficulty yet.</div>`;
+        return rows + foot;
+      }
+
       // ---- visual technique examples (shown from the stats technique table) ----
       const TECH_EXAMPLES = {
         "Naked single": { givens: { "0,4": 4, "1,4": 5, "2,4": 6, "3,3": 7, "3,5": 8, "4,0": 1, "4,1": 2, "4,2": 3 },
@@ -6166,6 +6233,7 @@
           <div class="card takeaway">${takeaway}</div>
           ${recDrills ? `<h3>Recommended drills for you</h3>${recDrills}` : ""}
           <h3>By difficulty</h3>${summary || '<div class="card">No solved games yet.</div>'}
+          <h3>Notes &amp; candidates</h3>${notesUsageHTML(games, diffs)}
           <h3>Solve time trends</h3>
           ${avgPanel}
           <div class="chart-toggle">
