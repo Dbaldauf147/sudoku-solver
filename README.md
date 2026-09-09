@@ -227,6 +227,23 @@ answer.
     so they're counted separately and left out rather than being filed under
     "no notes".
 
+    **Solved, finished &amp; candidates over time** charts three rates on one
+    0–100% axis, each point a trailing window of games so a rate has a trend in
+    it rather than flipping between 0% and 100% game by game. The three lines
+    keep deliberately different denominators, because each answers a different
+    question: **Solved** is the share of the games you *finished* that you
+    solved rather than revealed; **Finished** is the share of the games you
+    *started* that reached an end at all; **Used candidates** is the share of
+    the games that recorded it where you used pencil marks. A game counts as
+    left when you press **Edit puzzle**, clear the board, or load another puzzle
+    over one in progress — but not when you fix a misread clue in the first half
+    minute with nothing placed yet, and not on **Restart**, which is the same
+    puzzle again. Games you walk away from were only recorded from the day this
+    landed, so the **Finished** line stays blank until its window has cleared
+    the games that predate it: a 100% back there would mean nothing but "nobody
+    was counting". Walking away from a game on your phone counts on your laptop
+    too — these sync like the rest of your history.
+
     **When you play** is its own section: every solved game plotted against the
     hour you started it, measured as a percentage of that difficulty's own
     average so an Easy game and a Hard one sit on the same axis. A bar across
@@ -333,7 +350,8 @@ answer.
   (Claude Vision reads the grid; you fix any misreads before starting).
 
 - **`api/games.js`** — optional cross-device sync for the saved library, play
-  history, and the **game currently in progress**, backed by a Redis store. When
+  history, the games you started and walked away from, and the **game currently
+  in progress**, backed by a Redis store. When
   a store is connected these sync across devices — start a puzzle on the website
   and pick it up right where you left off in the installed app (or vice-versa),
   with the most recently touched copy winning. When it isn't connected, the front
@@ -404,8 +422,8 @@ To sync saved puzzles across devices, connect a Redis store:
    integration also sets `UPSTASH_REDIS_REST_*`; `api/games.js` accepts either).
 3. **Redeploy** so the function picks up the new variables.
 
-The library, history, the in-progress game, and the deletion tombstones are each
-stored under their own key (namespaced per profile when you sign in), with no
+The library, history, the games you walked away from, the in-progress game, and
+the deletion tombstones are each stored under their own key (namespaced per profile when you sign in), with no
 per-user auth, which is fine for a personal tool — add auth before sharing it
 broadly.
 

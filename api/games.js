@@ -5,8 +5,8 @@
 // collection. If no store is connected the endpoint replies 501 and the front
 // end silently falls back to per-device localStorage.
 //
-//   GET  /api/games?collection=library|stats|active|deleted            -> { games: [...] }
-//   PUT  /api/games?collection=library|stats|active|deleted  { games }  -> { ok: true, count }
+//   GET  /api/games?collection=library|stats|abandoned|active|deleted           -> { games: [...] }
+//   PUT  /api/games?collection=library|stats|abandoned|active|deleted  { games } -> { ok: true, count }
 //
 // The `active` collection holds the single in-progress game (a 0-or-1-element
 // array) so it can be resumed on any device; the rest are ordinary lists.
@@ -30,6 +30,9 @@ const COLLECTIONS = {
   // undone by the next sync from another. Each delete records `{ kind, key, at }`
   // here, and every device drops what a tombstone covers.
   deleted: "sudoku-coach:deleted",
+  // Games that were started and walked away from — never solved, never revealed. Kept apart from
+  // `stats` (finished games only) so neither list has to be filtered before it can be counted.
+  abandoned: "sudoku-coach:abandoned",
   share: "sudoku-coach:share", // shared catalogues, keyed by a share code (passed as `profile`)
 };
 
