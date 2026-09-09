@@ -200,7 +200,11 @@ answer.
       redistributed NYT content, so keep them out of catalogues you share.
   - **Stats** opens a deep-dive: solve times and accuracy **per difficulty**,
     plus **over-time trends** that chart how your numbers move from game to
-    game. A **Your averages** panel heads the trends section — average solve,
+    game. **All games** is split into six sub-tabs — **Overview**,
+    **Finished**, **Moves**, **Times**, **Techniques** and **Deep dive** — so
+    one section is on screen at a time instead of a single page you scroll
+    past; the sub-tab you were last reading is remembered along with the tab
+    itself. A **Your averages** panel heads the trends section — average solve,
     the last five, your best and your typical time per move for each
     difficulty, with how the recent five compare — and under it are three
     full-size charts you switch between (the one you pick is remembered):
@@ -217,6 +221,28 @@ answer.
       marks each difficulty's worst stretch, and a sentence per lane says
       where you stall and what it costs. Tapping a difficulty in the legend
       hides it from both this chart and the per-move one.
+
+    **Finished** asks the same question the rate chart asks, but **per
+    difficulty** — because "I never finish a Hard" is the useful version of
+    that sentence, and a pooled rate hides it behind however many Easy games
+    you got through. Each difficulty gets its finish rate, a bar split three
+    ways (**solved** / **revealed** / **left unfinished**) and the counts
+    behind it, with a line naming the difficulty you're most likely to walk
+    away from once you've played three of them. Only games started since
+    walk-aways began being recorded are counted: an older finished game would
+    push the rate towards 100% on the strength of nobody having been counting,
+    so those sit out and the footnote says how many.
+
+    **Moves** breaks down how many moves a game takes at each difficulty. A
+    move is one digit placed, the ones you took back and replaced included.
+    Finished games get their average, fewest and most, and — because a
+    flawless run places exactly one digit per empty cell — how far the average
+    runs **over the cells the puzzle asked you to fill**, which is your
+    re-work: corrections and second guesses. A game you left keeps a count
+    rather than a move log, so its line reports the digits still standing when
+    you stopped and how much of the grid that filled. A closing line names the
+    difficulty costing you the most re-work, the one figure here you can drive
+    to zero.
 
     **Notes &amp; candidates** splits each difficulty into the games you played
     with pencil marks and the games you played without, and shows win rate,
@@ -315,7 +341,9 @@ answer.
   - A **History** tab on the main page lists every game you've finished (or
     revealed), grouped by date, with its difficulty, source, time, and error
     count — tap **Details** on any entry to jump straight to that game's
-    move-by-move breakdown in Stats.
+    move-by-move breakdown in Stats. Games you started and walked away from
+    aren't listed here: they're counted in **Stats → Finished** rather than
+    kept move by move.
   - Finishing a puzzle pops a **celebration screen** with your time and error
     count.
   - Wrong entries are flagged with the reason they can't work — without

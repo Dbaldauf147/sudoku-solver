@@ -225,6 +225,12 @@
       .stab { flex: 1 1 0; text-align: center; }
       .stab.on { background: var(--sel); border-color: var(--accent); color: var(--text); font-weight: 600; }
       .tabpane[hidden] { display: none; }
+      /* Second row of tabs inside "All games" — six sections of stats, one on screen at a time.
+         They wrap rather than shrink, so a narrow phone gets two rows of readable labels. */
+      .stats-subs { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 14px; }
+      .stats-subs .ssub { flex: 1 1 92px; text-align: center; font-size: 0.82rem; padding: 7px 6px; }
+      .stats-subs .ssub.on { background: var(--sel); border-color: var(--accent); color: var(--text); font-weight: 600; }
+      .subpane[hidden] { display: none; }
       .statgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
       .statgrid .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 8px; text-align: center; }
       .statgrid .stat b { display: block; font-size: 1.3rem; line-height: 1.2; }
@@ -365,6 +371,28 @@
       .notes-side .notes-figs { flex: 1 1 170px; }
       .notes-side.empty { color: var(--muted); }
       .notes-verdict { margin-top: 7px; font-size: 0.85rem; }
+      /* Did you finish it? One bar per difficulty, split solved / revealed / walked away. */
+      .comp-card .comp-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+      .comp-card .comp-rate { font-weight: 800; }
+      .cbar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; background: var(--line); margin: 7px 0; }
+      .cbar span { display: block; min-width: 2px; }
+      .cbar .done { background: var(--ok); }
+      .cbar .told { background: var(--warn); }
+      .cbar .left { background: var(--bad); }
+      .comp-legend { display: flex; flex-wrap: wrap; gap: 2px 14px; font-size: 0.85rem; }
+      .comp-legend .lgd::before { content: "\25cf"; margin-right: 5px; }
+      .comp-legend .lgd.done::before { color: var(--ok); }
+      .comp-legend .lgd.told::before { color: var(--warn); }
+      .comp-legend .lgd.left::before { color: var(--bad); }
+      .comp-legend .lgd.zero { color: var(--muted); }
+      /* Moves per game, per difficulty — same shape as the notes breakdown above it. */
+      .mvs-card .mvs-head { margin-bottom: 7px; }
+      .mvs-side { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px; padding: 5px 0;
+        border-top: 1px solid var(--line); font-size: 0.88rem; }
+      .mvs-side:first-of-type { border-top: none; }
+      .mvs-side .mvs-lab { flex: 0 0 104px; font-weight: 700; white-space: nowrap; }
+      .mvs-side .mvs-figs { flex: 1 1 170px; line-height: 1.55; }
+      .mvs-side.empty { color: var(--muted); }
       /* Time-of-day bands under the "when you play" chart. */
       .tod-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 7px 0;
         border-top: 1px solid var(--line); font-size: 0.88rem; }
@@ -3310,6 +3338,7 @@
           startedAt: session.startedAt, abandonedAt: Date.now(),
           difficulty: session.difficulty, source: session.source,
           totalMs, placed, errors: session.errors || 0,
+          cells: givens.flat().filter((x) => !x).length,   // cells this puzzle asked you to fill, so `placed` can read as a share of it
           noteEdits: session.noteEdits || 0, noteFills: session.noteFills || 0,
         }, ...lsGet(ABANDON_KEY)].slice(0, MAX_ABANDONED);
         lsSet(ABANDON_KEY, kept); cloudSave("abandoned", kept);
@@ -4184,6 +4213,7 @@
       }
       function openGameDeepDive(i) {
         closeLibrary(); closeTechniques();
+        statsTab = "all"; statsSub = "deep";   // Details means this game's timeline, not wherever Stats was left
         renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none";
         const pick = document.getElementById("gamePick");
         if (pick) { pick.value = String(i); renderDeepDive(lsGet(STATS_KEY)[i]); }
@@ -5472,6 +5502,115 @@
           </div>${foot}`;
       }
 
+      // ---- did you finish it? ----
+      // The rate chart plots all three difficulties as one line; this is the same question asked per
+      // difficulty, because "I never finish a Hard" is the useful version of that sentence and a
+      // pooled rate hides it behind however many Easy games you got through. Finished games come from
+      // `stats` and walk-aways from their own store, so nothing here re-points an existing total.
+      //
+      // Only games started since walk-aways began being recorded can be counted: before that an
+      // abandoned game left no trace, so an older finished game would push the rate towards 100% on
+      // the strength of nobody having been counting. Those sit out, and the footnote says how many.
+      function completionRow(games, aband, d) {
+        const tracked = games.filter((g) => g.difficulty === d && (g.startedAt || 0) >= abandonSince);
+        const solved = tracked.filter((g) => g.solved).length;
+        const revealed = tracked.length - solved;
+        const walked = aband.filter((g) => g.difficulty === d).length;
+        const n = tracked.length + walked;
+        return { d, n, solved, revealed, walked, pct: n ? Math.round((solved / n) * 100) : 0 };
+      }
+      function completionHTML(games, aband, diffs) {
+        const rows = diffs.map((d) => completionRow(games, aband, d)).filter((r) => r.n);
+        const before = games.filter((g) => (g.startedAt || 0) < abandonSince).length;
+        const foot = `<p class="hintline">A game counts as started once you place a digit or spend half a minute on it, so loading a puzzle and picking a different one doesn't count against you; Restart hands back the same puzzle, so it isn't one you left either.${before ? ` The ${before} game${before === 1 ? "" : "s"} you finished before ${new Date(abandonSince).toLocaleDateString()} predate${before === 1 ? "s" : ""} walk-aways being recorded and sit out — counting them would read as a finish rate nobody was measuring.` : ""}</p>`;
+        if (!rows.length) return `<div class="card">Nothing recorded yet. From here on, every game you start is counted as finished, revealed, or left unfinished, and this breaks it down by difficulty.</div>${foot}`;
+        const tot = rows.reduce((a, r) => ({ n: a.n + r.n, solved: a.solved + r.solved }), { n: 0, solved: 0 });
+        const head = `<div class="statgrid">
+            <div class="stat"><b>${tot.n}</b><span class="k">started</span></div>
+            <div class="stat"><b>${tot.solved}</b><span class="k">finished</span></div>
+            <div class="stat"><b>${Math.round((tot.solved / tot.n) * 100)}%</b><span class="k">finish rate</span></div>
+          </div>`;
+        const seg = (n, cls) => (n ? `<span class="${cls}" style="flex:${n}"></span>` : "");
+        const leg = (n, cls, label) => `<span class="lgd ${cls}${n ? "" : " zero"}">${n} ${label}</span>`;
+        const cards = rows.map((r) => `<div class="card comp-card">
+            <div class="comp-head"><b style="color:${DIFF_COLORS[r.d] || "var(--accent)"}">${esc(r.d)}</b>
+              <span><span class="comp-rate">${r.pct}%</span> <span class="k">finished · ${r.n} started</span></span></div>
+            <div class="cbar">${seg(r.solved, "done")}${seg(r.revealed, "told")}${seg(r.walked, "left")}</div>
+            <div class="comp-legend">${leg(r.solved, "done", "solved")}${leg(r.revealed, "told", "revealed")}${leg(r.walked, "left", "left unfinished")}</div>
+          </div>`).join("");
+        // Comparing three cards by eye is the reader's job only if nobody does it for them. Two games
+        // a difficulty isn't a habit, so the sentence waits for three before naming a worst one.
+        const enough = rows.filter((r) => r.n >= 3);
+        const worst = enough.length ? enough.reduce((a, r) => (r.pct < a.pct ? r : a)) : null;
+        const best = enough.length ? enough.reduce((a, r) => (r.pct > a.pct ? r : a)) : null;
+        let verdict = `<div class="card">Play three games at a difficulty and this will say which one you're most likely to leave unfinished.</div>`;
+        if (worst && best && best.pct - worst.pct >= 10) {
+          verdict = `<div class="card takeaway">You see <b style="color:${DIFF_COLORS[best.d] || "var(--accent)"}">${esc(best.d)}</b> through ${best.pct}% of the time but <b style="color:${DIFF_COLORS[worst.d] || "var(--accent)"}">${esc(worst.d)}</b> only ${worst.pct}% — ${worst.n - worst.solved} of your ${worst.n} ${esc(worst.d.toLowerCase())} games ended without a solve.</div>`;
+        } else if (worst) {
+          verdict = `<div class="card takeaway">You finish much the same share of every difficulty you play — ${tot.solved} of ${tot.n} games overall.</div>`;
+        }
+        return head + cards + verdict + foot;
+      }
+
+      // ---- moves a game ----
+      // A move is one digit placed on the board, the ones you took back and replaced included — those
+      // are moves you spent time on. A flawless run places exactly one digit per empty cell, so the
+      // gap between your average and the grid's own cell count is what a difficulty costs you in
+      // re-work: corrections, second guesses, digits typed over.
+      //
+      // A walk-away keeps a count rather than a move log, so its line counts the digits that were
+      // still standing when you stopped — how far into the puzzle you got, not how much you typed.
+      function movesRow(games, aband, d) {
+        const fin = games.filter((g) => g.difficulty === d && (g.moves || []).length);
+        const left = aband.filter((g) => g.difficulty === d);
+        const counts = fin.map((g) => g.moves.length);
+        // Only games that kept their clue grid know how many cells they actually asked you to fill;
+        // the oldest records don't, and guessing it from their moves would just restate the average.
+        const sized = fin.filter((g) => g.grid || typeof g.cells === "number");
+        const share = left.filter((g) => g.cells > 0);
+        return {
+          d, n: fin.length + left.length,
+          fin: counts.length ? {
+            n: counts.length, avg: mean(counts), min: Math.min(...counts), max: Math.max(...counts),
+            cells: sized.length ? mean(sized.map(puzzleCells)) : 0,
+            extra: sized.length ? mean(sized.map((g) => g.moves.length - puzzleCells(g))) : null,
+          } : null,
+          left: left.length ? {
+            n: left.length, avg: mean(left.map((g) => g.placed || 0)),
+            filled: share.length ? mean(share.map((g) => Math.min(1, (g.placed || 0) / g.cells))) : null,
+          } : null,
+        };
+      }
+      function avgMovesHTML(games, aband, diffs) {
+        const rows = diffs.map((d) => movesRow(games, aband, d)).filter((r) => r.n);
+        if (!rows.length) return `<div class="card">No moves recorded against a difficulty yet — play a puzzle and this fills in.</div>`;
+        const cards = rows.map((r) => {
+          const f = r.fin, u = r.left;
+          const extra = f && f.extra != null
+            ? f.extra < 0.05
+              ? ` · <b>no</b> <span class="k">wasted moves — one a cell</span>`
+              : ` · <b>+${f.extra.toFixed(1)}</b> <span class="k">over the ${Math.round(f.cells)} cells to fill</span>`
+            : "";
+          const finLine = f
+            ? `<div class="mvs-side"><span class="mvs-lab">Finished</span><span class="mvs-figs"><b>${f.avg.toFixed(1)}</b> <span class="k">moves a game across ${f.n} game${f.n === 1 ? "" : "s"}</span> · <b>${f.min}</b> <span class="k">fewest</span> · <b>${f.max}</b> <span class="k">most</span>${extra}</span></div>`
+            : `<div class="mvs-side empty"><span class="mvs-lab">Finished</span><span class="k">none finished yet</span></div>`;
+          const leftLine = u
+            ? `<div class="mvs-side"><span class="mvs-lab">Unfinished</span><span class="mvs-figs"><b>${u.avg.toFixed(1)}</b> <span class="k">digits standing when you stopped, across ${u.n} game${u.n === 1 ? "" : "s"}</span>${u.filled != null ? ` · <b>${Math.round(u.filled * 100)}%</b> <span class="k">of the grid filled</span>` : ""}</span></div>`
+            : `<div class="mvs-side empty"><span class="mvs-lab">Unfinished</span><span class="k">you finished every one</span></div>`;
+          return `<div class="card mvs-card"><div class="mvs-head"><b style="color:${DIFF_COLORS[r.d] || "var(--accent)"}">${esc(r.d)}</b> <span class="k">${r.n} game${r.n === 1 ? "" : "s"} recorded</span></div>${finLine}${leftLine}</div>`;
+        }).join("");
+        // The re-work figure is the one worth pointing at: it's the difference between knowing the
+        // technique and trusting it, and it's the only one here you can drive to zero.
+        const rework = rows.filter((r) => r.fin && r.fin.extra != null && r.fin.n >= 2);
+        const top = rework.length ? rework.reduce((a, r) => (r.fin.extra > a.fin.extra ? r : a)) : null;
+        const verdict = top && top.fin.extra >= 1
+          ? `<div class="card takeaway">Your <b style="color:${DIFF_COLORS[top.d] || "var(--accent)"}">${esc(top.d)}</b> games take <b>${top.fin.extra.toFixed(1)}</b> more moves than the puzzle has cells to fill — that's corrections and second guesses, and it's the cheapest time on the board to win back.</div>`
+          : top
+          ? `<div class="card takeaway">Your games land within a move of one per cell at every difficulty — almost nothing is going back on the board twice.</div>`
+          : "";
+        return cards + verdict + `<p class="hintline">A move is one digit placed, corrections included, so a game can run past the number of cells the puzzle asks you to fill. A game you left keeps a count rather than a move log, so it reports the digits still standing when you stopped.</p>`;
+      }
+
       // ---- visual technique examples (shown from the stats technique table) ----
       const TECH_EXAMPLES = {
         "Naked single": { givens: { "0,4": 4, "1,4": 5, "2,4": 6, "3,3": 7, "3,5": 8, "4,0": 1, "4,1": 2, "4,2": 3 },
@@ -6087,12 +6226,32 @@
       // whichever one you read your times from is the one you want up next time too.
       let timeChartMode = "overtime"; // "overtime" · "permove" · "clusters"
       try { const m = localStorage.getItem("sudoku-coach:timechart"); if (m) timeChartMode = m; } catch {}
+      // "All games" is a dozen sections of numbers, and reading any one of them used to mean
+      // scrolling past the rest. They sit behind their own row of tabs instead — one section on
+      // screen at a time, and the one you were last reading is remembered like the tab is.
+      const STATS_SUBS = [
+        { k: "overview", label: "Overview" },
+        { k: "finish", label: "Finished" },
+        { k: "moves", label: "Moves" },
+        { k: "times", label: "Times" },
+        { k: "techniques", label: "Techniques" },
+        { k: "deep", label: "Deep dive" },
+      ];
+      let statsSub = "overview";
+      try { const v = localStorage.getItem("sudoku-coach:statssub"); if (STATS_SUBS.some((x) => x.k === v)) statsSub = v; } catch {}
       function setStatsTab(tab) {
         statsTab = tab;
         statsEl.querySelectorAll(".stab").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
         const t = document.getElementById("tabThis"), a = document.getElementById("tabAll");
         if (t) t.hidden = tab !== "this";
         if (a) a.hidden = tab !== "all";
+      }
+      function setStatsSub(sub) {
+        if (!STATS_SUBS.some((x) => x.k === sub)) sub = "overview";
+        statsSub = sub;
+        try { localStorage.setItem("sudoku-coach:statssub", sub); } catch {}
+        statsEl.querySelectorAll(".ssub").forEach((b) => b.classList.toggle("on", b.dataset.sub === sub));
+        statsEl.querySelectorAll(".subpane").forEach((pane) => (pane.hidden = pane.dataset.sub !== sub));
       }
       // ---- the moves that ran past your target pace ----
       // A target is a whole-game goal; spread over the cells the puzzle asks you to fill it becomes a
@@ -6426,31 +6585,43 @@
         games.forEach((g, i) => { opts += `<option value="${i}">${esc(g.source)} · ${esc(g.difficulty)} · ${new Date(g.startedAt).toLocaleDateString()} · ${fmtTime(g.totalMs)} ${g.solved ? "✓" : "▢"}</option>`; });
 
         const recDrills = recommendedDrillsHTML(games);
-        const allPane = games.length ? `
-          <h3>Overview</h3>${overview}
-          <h3>Personal records</h3><div class="card">${prRows}</div>
-          <div class="card takeaway">${takeaway}</div>
-          ${recDrills ? `<h3>Recommended drills for you</h3>${recDrills}` : ""}
-          <h3>By difficulty</h3>${summary || '<div class="card">No solved games yet.</div>'}
-          <h3>Notes &amp; candidates</h3>${notesUsageHTML(games, diffs)}
-          <h3>Solved, finished &amp; candidates over time</h3>${rateTrend}
-          <h3>Solve time trends</h3>
-          ${avgPanel}
-          <div class="chart-toggle">
-            <button class="ctog" data-mode="overtime">Over time</button>
-            <button class="ctog" data-mode="permove">Per move</button>
-            <button class="ctog" data-mode="clusters">Slow-down clusters</button>
-          </div>
-          <div id="timeChartBox"></div>
-          <h3>When you play</h3>${timeOfDayHTML(games, diffs)}
-          <h3>Where you spend time</h3>${techTable}
-          <p class="sub" style="margin:8px 0 0">Typical = median time between your choices, so a long pause stands out without one outlier skewing it.</p>
-          ${overTargetAllHTML(games)}
-          ${practicePane}
-          <h3>Technique time over time</h3>${techTrend}
-          <h3>Deep dive — a single game</h3>
-          <select id="gamePick" style="width:100%;margin-bottom:10px">${opts}</select>
-          <div id="deepDive"></div>`
+        const subPanes = {
+          overview: `
+            <h3>Overview</h3>${overview}
+            <h3>Personal records</h3><div class="card">${prRows}</div>
+            <div class="card takeaway">${takeaway}</div>
+            ${recDrills ? `<h3>Recommended drills for you</h3>${recDrills}` : ""}
+            <h3>By difficulty</h3>${summary || '<div class="card">No solved games yet.</div>'}`,
+          finish: `
+            <h3>Did you finish it?</h3>${completionHTML(games, abandoned, diffs)}
+            <h3>Solved, finished &amp; candidates over time</h3>${rateTrend}`,
+          moves: `
+            <h3>Moves a game</h3>${avgMovesHTML(games, abandoned, diffs)}
+            <h3>Notes &amp; candidates</h3>${notesUsageHTML(games, diffs)}`,
+          times: `
+            <h3>Solve time trends</h3>
+            ${avgPanel}
+            <div class="chart-toggle">
+              <button class="ctog" data-mode="overtime">Over time</button>
+              <button class="ctog" data-mode="permove">Per move</button>
+              <button class="ctog" data-mode="clusters">Slow-down clusters</button>
+            </div>
+            <div id="timeChartBox"></div>
+            <h3>When you play</h3>${timeOfDayHTML(games, diffs)}`,
+          techniques: `
+            <h3>Where you spend time</h3>${techTable}
+            <p class="sub" style="margin:8px 0 0">Typical = median time between your choices, so a long pause stands out without one outlier skewing it.</p>
+            ${overTargetAllHTML(games)}
+            ${practicePane}
+            <h3>Technique time over time</h3>${techTrend}`,
+          deep: `
+            <h3>Deep dive — a single game</h3>
+            <select id="gamePick" style="width:100%;margin-bottom:10px">${opts}</select>
+            <div id="deepDive"></div>`,
+        };
+        const allPane = games.length
+          ? `<div class="stats-subs">${STATS_SUBS.map((x) => `<button class="ssub" data-sub="${x.k}">${esc(x.label)}</button>`).join("")}</div>`
+            + STATS_SUBS.map((x) => `<div class="subpane" data-sub="${x.k}" hidden>${subPanes[x.k]}</div>`).join("")
           : '<div class="card">No finished games yet — solve one and your totals, records, and trends will appear here.</div>';
 
         statsEl.innerHTML = `<button id="sb">← Back</button><h2>Your stats</h2>
@@ -6462,6 +6633,7 @@
           <div id="tabAll" class="tabpane">${allPane}</div>`;
         document.getElementById("sb").onclick = () => document.getElementById("statsBtn").click();
         statsEl.querySelectorAll(".stab").forEach((btn) => { btn.onclick = () => setStatsTab(btn.dataset.tab); });
+        statsEl.querySelectorAll(".ssub").forEach((btn) => { btn.onclick = () => setStatsSub(btn.dataset.sub); });
         // A row carrying data-move is one specific move (the over-pace list) — open that move's own
         // proof; every other row is a technique row and opens the worked example.
         const paneGame = thisPaneGame;   // the game those rows were rendered from
@@ -6481,6 +6653,7 @@
         const auditOpen = document.getElementById("auditOpen");
         if (auditOpen) auditOpen.onclick = () => openAudit(thisPaneGame);
         setStatsTab(statsTab);   // apply the remembered tab
+        setStatsSub(statsSub);   // …and the remembered section within "All games"
         // Solve-time trends toggle: over time · per move · slow-down clusters. The per-move and cluster charts
         // is re-rendered on each paint rather than reused, since hiding a difficulty rescales it.
         const timeCharts = {
