@@ -222,29 +222,27 @@ answer.
       where you stall and what it costs. Tapping a difficulty in the legend
       hides it from both this chart and the per-move one.
 
-    **Finished** answers "do I actually finish what I start?" — per
-    difficulty, since a lifetime win rate hides "I never finish a Hard" behind
-    however many Easy games you got through. Every game you start is recorded
-    with how it ended: **solved**, **revealed** (you asked to see the answer),
-    or **left unfinished** (you put it down and started something else). Each
-    difficulty gets its finish rate, a bar split three ways, and the counts
+    **Finished** asks the same question the rate chart asks, but **per
+    difficulty** — because "I never finish a Hard" is the useful version of
+    that sentence, and a pooled rate hides it behind however many Easy games
+    you got through. Each difficulty gets its finish rate, a bar split three
+    ways (**solved** / **revealed** / **left unfinished**) and the counts
     behind it, with a line naming the difficulty you're most likely to walk
-    away from once you've played three of them. A game counts as started once
-    you place a digit or spend half a minute on it, so loading a puzzle and
-    picking a different one doesn't count against you — and a game you put
-    down and later came back to and finished is one row, not two. Games
-    recorded before this was added were never logged when abandoned, so they
-    can only show as solved or revealed; the section says how many those are.
+    away from once you've played three of them. Only games started since
+    walk-aways began being recorded are counted: an older finished game would
+    push the rate towards 100% on the strength of nobody having been counting,
+    so those sit out and the footnote says how many.
 
     **Moves** breaks down how many moves a game takes at each difficulty. A
     move is one digit placed, the ones you took back and replaced included.
     Finished games get their average, fewest and most, and — because a
     flawless run places exactly one digit per empty cell — how far the average
     runs **over the cells the puzzle asked you to fill**, which is your
-    re-work: corrections and second guesses. Unfinished games get their own
-    line: the moves you made before stopping, and how much of the grid that
-    filled. A closing line names the difficulty costing you the most re-work,
-    the one figure here you can drive to zero.
+    re-work: corrections and second guesses. A game you left keeps a count
+    rather than a move log, so its line reports the digits still standing when
+    you stopped and how much of the grid that filled. A closing line names the
+    difficulty costing you the most re-work, the one figure here you can drive
+    to zero.
 
     **Notes &amp; candidates** splits each difficulty into the games you played
     with pencil marks and the games you played without, and shows win rate,
@@ -254,6 +252,23 @@ answer.
     them. Games recorded before this was added carry no trace of their marks,
     so they're counted separately and left out rather than being filed under
     "no notes".
+
+    **Solved, finished &amp; candidates over time** charts three rates on one
+    0–100% axis, each point a trailing window of games so a rate has a trend in
+    it rather than flipping between 0% and 100% game by game. The three lines
+    keep deliberately different denominators, because each answers a different
+    question: **Solved** is the share of the games you *finished* that you
+    solved rather than revealed; **Finished** is the share of the games you
+    *started* that reached an end at all; **Used candidates** is the share of
+    the games that recorded it where you used pencil marks. A game counts as
+    left when you press **Edit puzzle**, clear the board, or load another puzzle
+    over one in progress — but not when you fix a misread clue in the first half
+    minute with nothing placed yet, and not on **Restart**, which is the same
+    puzzle again. Games you walk away from were only recorded from the day this
+    landed, so the **Finished** line stays blank until its window has cleared
+    the games that predate it: a 100% back there would mean nothing but "nobody
+    was counting". Walking away from a game on your phone counts on your laptop
+    too — these sync like the rest of your history.
 
     **When you play** is its own section: every solved game plotted against the
     hour you started it, measured as a percentage of that difficulty's own
@@ -323,13 +338,12 @@ answer.
     example. Labels that name no rule (a mistake, a forced move) don't offer
     the button rather than inventing a lesson. **Practice this** sits right
     there in the panel, so you can go from seeing the pattern to drilling it.
-  - A **History** tab on the main page lists every game you've played,
-    grouped by date, with its difficulty, source, time, error count and how it
-    ended — **✓ solved**, **▢ revealed**, or **↩ left unfinished** for one you
-    started and walked away from. Tap **Details** on any entry to jump
-    straight to that game's move-by-move breakdown in Stats; an unfinished
-    game keeps its clue grid and solution like any other, so the part of it
-    you did play can still be explained move by move and re-timed.
+  - A **History** tab on the main page lists every game you've finished (or
+    revealed), grouped by date, with its difficulty, source, time, and error
+    count — tap **Details** on any entry to jump straight to that game's
+    move-by-move breakdown in Stats. Games you started and walked away from
+    aren't listed here: they're counted in **Stats → Finished** rather than
+    kept move by move.
   - Finishing a puzzle pops a **celebration screen** with your time and error
     count.
   - Wrong entries are flagged with the reason they can't work — without
@@ -364,7 +378,8 @@ answer.
   (Claude Vision reads the grid; you fix any misreads before starting).
 
 - **`api/games.js`** — optional cross-device sync for the saved library, play
-  history, and the **game currently in progress**, backed by a Redis store. When
+  history, the games you started and walked away from, and the **game currently
+  in progress**, backed by a Redis store. When
   a store is connected these sync across devices — start a puzzle on the website
   and pick it up right where you left off in the installed app (or vice-versa),
   with the most recently touched copy winning. When it isn't connected, the front
@@ -435,8 +450,8 @@ To sync saved puzzles across devices, connect a Redis store:
    integration also sets `UPSTASH_REDIS_REST_*`; `api/games.js` accepts either).
 3. **Redeploy** so the function picks up the new variables.
 
-The library, history, the in-progress game, and the deletion tombstones are each
-stored under their own key (namespaced per profile when you sign in), with no
+The library, history, the games you walked away from, the in-progress game, and
+the deletion tombstones are each stored under their own key (namespaced per profile when you sign in), with no
 per-user auth, which is fine for a personal tool — add auth before sharing it
 broadly.
 
