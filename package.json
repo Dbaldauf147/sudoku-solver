@@ -2,9 +2,11 @@
   "name": "sudoku-solver",
   "version": "1.0.0",
   "private": true,
-  "description": "Import a screenshot of a Sudoku puzzle and solve it — Claude Vision reads the grid, you fix any misreads, and a backtracking solver finishes it.",
+  "description": "Import a screenshot of a Sudoku puzzle and solve it \u2014 Claude Vision reads the grid, you fix any misreads, and a backtracking solver finishes it.",
   "scripts": {
     "dev": "vercel dev",
+    "build": "node scripts/check.mjs",
+    "test": "node scripts/check.mjs",
     "deploy": "vercel deploy --prod"
   },
   "dependencies": {
