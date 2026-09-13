@@ -600,8 +600,6 @@
         font-size: clamp(1.2rem, 5.6vw, 1.45rem); line-height: 1.35; max-width: 12em; margin: 0 auto 10px; }
       .win-sheet .win-line b { font-weight: 700; }
       .win-sheet .win-target { font-size: 0.85rem; font-weight: 600; margin: 8px 0 0; }
-      .win-sheet .pr-badge { margin: 0 auto 14px; padding: 6px 14px; font-size: 0.78rem; max-width: 100%;
-        background: #fbe08a; box-shadow: none; }
       .win-actions { display: flex; flex-direction: column; align-items: stretch; gap: 12px;
         max-width: 400px; margin: 30px auto 0; }
       .win-primary { align-self: center; background: #121212; color: #ffffff; border: none;
@@ -902,7 +900,6 @@
               <svg width="30" height="30" viewBox="0 0 24 24" fill="#ffffff" aria-hidden="true"><path d="M12 2.2l2.95 6.15 6.55.85-4.8 4.72 1.2 6.83L12 17.55 6.1 20.75l1.2-6.83-4.8-4.72 6.55-.85z"/></svg>
             </div>
           </div>
-          <div id="winPR" class="pr-badge" hidden></div>
           <h2 id="winTitle">Congratulations!</h2>
           <p id="winMsg" class="win-line"></p>
           <p id="winTarget" class="win-target" hidden></p>
@@ -2293,16 +2290,10 @@
         celebrate(ms, diff);
       }
       function celebrate(ms, diff) {
+        // The card says the same thing however the solve went; a record shows up only in the
+        // bigger confetti burst below, and in Stats and the audit afterwards.
         const pr = lastWasPR;
-        // The headline doesn't change with the result — a record announces itself in the badge below it.
         document.getElementById("winTitle").textContent = "Congratulations!";
-        const badge = document.getElementById("winPR");
-        if (pr) {
-          badge.hidden = false;
-          badge.textContent = lastPRKind === "first"
-            ? `Your first ${diff || ""} solve — a record to beat!`.replace(/\s+/g, " ")
-            : `Fastest ${diff || ""} solve yet — ${fmtTime(ms)}!`.replace(/\s+/g, " ");
-        } else badge.hidden = true;
         // "You finished a medium puzzle in 23:17." — assembled from nodes rather than a template
         // string, so a difficulty label can never arrive as markup inside the sheet.
         const msg = document.getElementById("winMsg");
@@ -2495,7 +2486,7 @@
         return b;
       }
       // Set by finalizeSession so the celebration knows whether a solve was a personal best.
-      let lastWasPR = false, lastPRKind = "";
+      let lastWasPR = false;
       function finalizeSession(solved) {
         if (!session) return;
         if (session.pauseStart) { session.pausedMs += Date.now() - session.pauseStart; session.pauseStart = null; }
@@ -2509,11 +2500,10 @@
         lastTotalMs = session.totalMs;
         // Personal-record check: is this the fastest solve yet for this difficulty? (compare against
         // prior solves before this game is added). The first solve of a difficulty sets the record too.
-        lastWasPR = false; lastPRKind = "";
+        lastWasPR = false;
         if (solved) {
           const prior = lsGet(STATS_KEY).filter((g) => g.solved && g.difficulty === session.difficulty).map((g) => g.totalMs);
-          if (!prior.length) { lastWasPR = true; lastPRKind = "first"; }
-          else if (session.totalMs < Math.min(...prior)) { lastWasPR = true; lastPRKind = "best"; }
+          if (!prior.length || session.totalMs < Math.min(...prior)) lastWasPR = true;
           session.isPR = lastWasPR;
         }
         const stats = lsGet(STATS_KEY); stats.unshift(session); lsSet(STATS_KEY, stats); cloudSave("stats", stats);
