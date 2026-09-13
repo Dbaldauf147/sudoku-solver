@@ -599,8 +599,6 @@
       .win-sheet .win-line { font-family: Georgia, "Times New Roman", serif;
         font-size: clamp(1.2rem, 5.6vw, 1.45rem); line-height: 1.35; max-width: 12em; margin: 0 auto 10px; }
       .win-sheet .win-line b { font-weight: 700; }
-      .win-sheet .win-sub { color: #5b6472; font-size: 0.85rem; margin: 4px 0 0; }
-      .win-sub[hidden] { display: none; }
       .win-sheet .win-target { font-size: 0.85rem; font-weight: 600; margin: 8px 0 0; }
       .win-sheet .pr-badge { margin: 0 auto 14px; padding: 6px 14px; font-size: 0.78rem; max-width: 100%;
         background: #fbe08a; box-shadow: none; }
@@ -907,7 +905,6 @@
           <div id="winPR" class="pr-badge" hidden></div>
           <h2 id="winTitle">Congratulations!</h2>
           <p id="winMsg" class="win-line"></p>
-          <p id="winSub" class="win-sub" hidden></p>
           <p id="winTarget" class="win-target" hidden></p>
           <div class="win-actions">
             <button id="winAgain" class="win-primary">Play another Sudoku</button>
@@ -2290,12 +2287,12 @@
       function checkComplete() {
         const grid = readGrid();
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] !== solution[r][c]) return;
-        const ms = activeElapsed(), errs = session ? session.errors || 0 : 0, diff = session ? session.difficulty : "";
+        const ms = activeElapsed(), diff = session ? session.difficulty : "";
         finalizeSession(true);
         showExplain("🎉 Solved!", `Every cell is correct in ${fmtTime(ms)}. Open Stats for your deep dive.`, "ok");
-        celebrate(ms, errs, diff);
+        celebrate(ms, diff);
       }
-      function celebrate(ms, errs, diff) {
+      function celebrate(ms, diff) {
         const pr = lastWasPR;
         // The headline doesn't change with the result — a record announces itself in the badge below it.
         document.getElementById("winTitle").textContent = "Congratulations!";
@@ -2317,10 +2314,6 @@
           d.textContent = label;
           msg.append("You finished a ", d, " puzzle in ", time, ".");
         } else msg.append("You finished this puzzle in ", time, ".");
-        // The error count keeps its place, one size down, so the sentence above stays the NYT one.
-        const sub = document.getElementById("winSub");
-        sub.hidden = false;
-        sub.textContent = errs ? `${errs} mistake${errs === 1 ? "" : "s"} along the way.` : "No mistakes.";
         // The grid stays visible above the sheet, so drop the solving highlights and scroll it into view.
         clearBoardHighlights();
         try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch { window.scrollTo(0, 0); }
