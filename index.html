@@ -152,6 +152,9 @@
         font-size: 1.1rem; background: var(--panel); border: 1px solid var(--line);
         border-radius: 8px; padding: 6px 12px; }
       .timer b { color: var(--accent); }
+      /* `display: inline-flex` above outranks the browser's own [hidden] rule — the clock needs this
+         to actually disappear when the Show timer setting is off. */
+      .timer[hidden] { display: none; }
 
       .board {
         display: grid; grid-template-columns: repeat(9, 1fr); aspect-ratio: 1;
@@ -686,7 +689,7 @@
           <button id="modeNormal" class="on">Normal</button>
           <button id="modeCandidate">Candidate</button>
           <span class="meters">
-            <span class="timer">⏱ <b id="timer">0:00</b></span>
+            <span class="timer" id="timerWrap">⏱ <b id="timer">0:00</b></span>
             <span class="timer">✗ <b id="errors">0</b></span>
           </span>
         </div>
@@ -943,6 +946,7 @@
       const settingsPanel = document.getElementById("settings");
       const auditPanel = document.getElementById("audit");
       const timerEl = document.getElementById("timer");
+      const timerWrapEl = document.getElementById("timerWrap");
       const errorsEl = document.getElementById("errors");
       const inputs = [], cellEls = [], pencils = [], marks = [];
       let solving = false, solution = null, givens = blank(false), lastHint = null;
@@ -954,6 +958,11 @@
       // Error highlighting: when on, wrong entries flag red and clashing units highlight. Default on.
       let errorFlags = true;
       try { errorFlags = localStorage.getItem("sudoku-coach:errorflags") !== "off"; } catch {}
+      // Show timer: when off, the clock is hidden from the board and the finish sheet drops the time,
+      // so a solve reads as untimed. The clock itself keeps running — Stats, targets and the audit all
+      // need the times, and hiding a number is not the same as not recording it. Default on.
+      let showTimer = true;
+      try { showTimer = localStorage.getItem("sudoku-coach:showtimer") !== "off"; } catch {}
       // Profile/storage keys are declared up here, before any load-time code (e.g. the "Playing as"
       // chip) reads `profile` — a `let` read before its declaration throws and would halt the script.
       const PROFILE_KEY = "sudoku-coach:profile";
@@ -2290,7 +2299,7 @@
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] !== solution[r][c]) return;
         const ms = activeElapsed(), diff = session ? session.difficulty : "";
         finalizeSession(true);
-        showExplain("🎉 Solved!", `Every cell is correct in ${fmtTime(ms)}. Open Stats for your deep dive.`, "ok");
+        showExplain("🎉 Solved!", showTimer ? `Every cell is correct in ${fmtTime(ms)}. Open Stats for your deep dive.` : "Every cell is correct. Open Stats for your deep dive.", "ok");
         celebrate(ms, diff);
       }
       function celebrate(ms, diff) {
@@ -2307,15 +2316,17 @@
         if (label) {
           const d = document.createElement("b");
           d.textContent = label;
-          msg.append("You finished a ", d, " puzzle in ", time, ".");
-        } else msg.append("You finished this puzzle in ", time, ".");
+          if (showTimer) msg.append("You finished a ", d, " puzzle in ", time, ".");
+          else msg.append("You finished a ", d, " puzzle.");
+        } else if (showTimer) msg.append("You finished this puzzle in ", time, ".");
+        else msg.append("You finished this puzzle.");
         // The grid stays visible above the sheet, so drop the solving highlights and scroll it into view.
         clearBoardHighlights();
         try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch { window.scrollTo(0, 0); }
         // How the solve landed against the target set for this difficulty, if there is one.
         const tEl = document.getElementById("winTarget"), tMs = targetFor(diff), late = ms - tMs;
-        tEl.hidden = !tMs;
-        if (tMs) {
+        tEl.hidden = !tMs || !showTimer;
+        if (tMs && showTimer) {
           tEl.className = "win-target " + (late <= 0 ? "beat" : "miss");
           tEl.textContent = late <= 0
             ? `🎯 Target ${fmtTime(tMs)} — beaten by ${fmtTime(-late)}!`
@@ -2410,6 +2421,10 @@
         if (m) return Number(m[1]) * 1000;
         return null;
       }
+      // The clock's visibility, applied from the setting. Re-timing shows it whatever the setting says
+      // — that drill is a race against your own recorded time, so it sets the element itself.
+      function applyTimerVisibility() { timerWrapEl.hidden = !showTimer; }
+      applyTimerVisibility();
       function activeElapsed() {
         if (!session) return 0;
         const now = Date.now();
@@ -2896,6 +2911,16 @@
           autoUpdateNotes ? "Placing a digit now clears it from the notes of its row, column, and box automatically. Press Auto notes to fill them in first." : "Pencil marks stay exactly as you leave them.", "info");
       }
 
+      // Show timer: hides the clock (and the time on the finish sheet) without stopping it, for solving
+      // without a number ticking at you. Everything that records time carries on recording it.
+      function toggleShowTimer() {
+        showTimer = !showTimer;
+        try { localStorage.setItem("sudoku-coach:showtimer", showTimer ? "on" : "off"); } catch {}
+        applyTimerVisibility();
+        showExplain(showTimer ? "Timer shown" : "Timer hidden",
+          showTimer ? "The clock is back on the board, and the finish sheet names your time again." : "Solve without a clock. Your time is still recorded — Stats, targets and the audit are unchanged.", "info");
+      }
+
       // Each row: the label, how to read the current value, what to run on tap, and the sentence
       // explaining what it changes. Adding a setting means adding a line here.
       const SETTINGS = [
@@ -2905,6 +2930,8 @@
           about: "Flags a wrong entry in red as soon as you make it — with the clashing row, column, or box. Turn it off for an unassisted solve; Check entries and Hint still work." },
         { name: "Auto-update notes", get: () => autoUpdateNotes, toggle: toggleAutoUpdateNotes,
           about: "Placing a digit clears it from the pencil marks of every cell in its row, column, and box, so your notes stay current without redoing them by hand. Undo puts them back." },
+        { name: "Show timer", get: () => showTimer, toggle: toggleShowTimer,
+          about: "The clock beside the keypad, and the time on the finish sheet. Turn it off to solve untimed — the time is still recorded, so Stats, targets and the audit are unaffected. Re-timing a move always shows its clock." },
       ];
       function renderSettings() {
         if (settingsPanel.hidden) return;
@@ -7136,6 +7163,7 @@
 
       function startRetimeTimer() {
         clearInterval(timerId);
+        timerWrapEl.hidden = false;   // a re-time is timed by definition, whatever the setting says
         const paint = () => { timerEl.textContent = fmtTime(Date.now() - retime.startAt); };
         paint();
         timerId = setInterval(paint, 250);
@@ -7299,6 +7327,7 @@
         retime = { active: false };
         retimeLoadModal.hidden = true; retimeSummaryModal.hidden = true;
         clearInterval(timerId); timerId = null;
+        applyTimerVisibility();
         resetToEdit();
         if (restore) applyGameState(restore);
       }
