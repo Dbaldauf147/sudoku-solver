@@ -231,6 +231,10 @@
       .stats-subs .ssub { flex: 1 1 92px; text-align: center; font-size: 0.82rem; padding: 7px 6px; }
       .stats-subs .ssub.on { background: var(--sel); border-color: var(--accent); color: var(--text); font-weight: 600; }
       .subpane[hidden] { display: none; }
+      /* Game picker at the top of the "This game" tab — same shape as the library's day picker. */
+      .game-pick { display: flex; gap: 6px; align-items: center; margin: 0 0 12px; }
+      .game-pick select { flex: 1; min-width: 0; }
+      .game-pick button { padding: 6px 12px; font-size: 0.85rem; }
       .statgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
       .statgrid .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 8px; text-align: center; }
       .statgrid .stat b { display: block; font-size: 1.3rem; line-height: 1.2; }
@@ -4301,6 +4305,7 @@
       function openGameDeepDive(i) {
         closeLibrary(); closeTechniques();
         statsTab = "all"; statsSub = "deep";   // Details means this game's timeline, not wherever Stats was left
+        thisPickKey = null;
         renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none";
         const pick = document.getElementById("gamePick");
         if (pick) { pick.value = String(i); renderDeepDive(lsGet(STATS_KEY)[i]); }
@@ -5875,7 +5880,7 @@
       document.getElementById("exModal").addEventListener("click", (e) => { if (e.target.id === "exModal") e.currentTarget.hidden = true; });
       function closeStats() { if (!statsEl.hidden) { statsEl.hidden = true; boardEl.style.display = ""; document.querySelector(".pad").style.display = ""; syncAutoPause(); } }
       document.getElementById("statsBtn").addEventListener("click", () => {
-        if (statsEl.hidden) { closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); viewOpenedAt = Date.now(); syncStores(); renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
+        if (statsEl.hidden) { closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit(); viewOpenedAt = Date.now(); syncStores(); thisPickKey = null; renderStats(); statsEl.hidden = false; boardEl.style.display = "none"; document.querySelector(".pad").style.display = "none"; syncAutoPause(); }
         else closeStats();
       });
 
@@ -6452,18 +6457,49 @@
       }
       // The game the "This game" pane last rendered — live or finished — so its timeline can be wired up.
       let thisPaneGame = null;
-      // "This game" pane: the live game if one's in progress, else the most recently recorded game.
-      // Mirrors every section of the "All games" tab, scoped to this single game.
+      // What the picker at the top of the tab is offering, in the order it offers it.
+      let thisPanePicks = [];
+      // Which game the tab is pinned to. null means "whatever is current" — the live game if one's
+      // running, else the newest recorded one — so a game you finish takes the tab over by itself.
+      // Picking from the list pins it to that game until Stats is closed and reopened.
+      let thisPickKey = null;
+      // Identity that survives a re-render: games shift index as new ones are recorded, and the live
+      // game has no timestamps of its own yet.
+      function pickKeyOf(g) { return g.live ? "live" : `${g.startedAt || 0}:${g.finishedAt || 0}`; }
+      function pickLabel(g) {
+        if (g.live) return `In progress · ${g.difficulty || "—"} · ${fmtTime(g.totalMs || 0)}`;
+        const when = new Date(g.finishedAt || g.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        return `${when} · ${g.difficulty || "—"} · ${fmtTime(g.totalMs || 0)} ${g.solved ? "✓" : "▢"} · ${g.source || "—"}`;
+      }
+      // "This game" pane: whichever single game the picker is on — the live one, or any game played
+      // before it. Mirrors every section of the "All games" tab, scoped to that one game.
       function thisGamePane(games) {
-        const g = session
+        const live = session
           ? { difficulty: session.difficulty, source: session.source, totalMs: activeElapsed(), errors: session.errors || 0, hints: session.hints || 0, hintsBy: session.hintsBy || {}, moves: session.moves || [], missed: session.missed || {}, live: true,
               cells: givens.flat().filter((x) => !x).length,   // cells still to fill when this game began
               grid: clueGridNow(), solution: solution ? clone(solution) : null }   // lets a move in progress be explained
-          : games[0];
+          : null;
+        // The live game leads, then every recorded game newest first — the order the picker reads in.
+        const picks = (live ? [live] : []).concat(games);
+        thisPanePicks = picks;
+        // A pinned game that's no longer in the list (the live one just finished, or the profile
+        // changed under us) quietly falls back to whatever is current.
+        const g = (thisPickKey && picks.find((x) => pickKeyOf(x) === thisPickKey)) || picks[0] || null;
         thisPaneGame = g;
         if (!g) return '<div class="card">No game yet. Start a puzzle and its live stats — time, errors, hints, and techniques — show here.</div>';
+        const at = picks.indexOf(g);
+        const picker = picks.length > 1
+          ? `<div class="game-pick">
+              <button id="thisNewer"${at <= 0 ? " disabled" : ""} title="Newer game">‹</button>
+              <select id="thisPick" title="Read any game you've played">${picks.map((x, i) =>
+                `<option value="${i}"${i === at ? " selected" : ""}>${esc(pickLabel(x))}</option>`).join("")}</select>
+              <button id="thisOlder"${at >= picks.length - 1 ? " disabled" : ""} title="Older game">›</button>
+            </div>`
+          : "";
         const d = g.difficulty || "";
         const status = g.live ? "in progress" : (g.solved ? "solved" : "revealed");
+        // Which game you're reading, spelled out — the picker's label is easy to lose track of.
+        const when = g.live ? "" : ` · <span class="k">${new Date(g.finishedAt || g.startedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</span>`;
         const moves = g.moves || [];
         const errs = errorsIn(g), hints = g.hints || 0, movesN = moves.length;
         const correct = moves.filter((m) => m.correct).length;
@@ -6545,8 +6581,8 @@
         // The audit needs a finished game's full record; a game still in progress has no route to compare yet.
         const auditBtn = !g.live && canExplainMove(g)
           ? `<button id="auditOpen" style="width:100%;margin:2px 0 12px">Audit: your solve vs the solver</button>` : "";
-        return `${prLine}
-          <div class="card"><b>${esc(d || "—")}</b> · ${esc(g.source || "—")} · <span class="k">${status}</span></div>
+        return `${picker}${prLine}
+          <div class="card"><b>${esc(d || "—")}</b> · ${esc(g.source || "—")} · <span class="k">${status}</span>${when}</div>
           ${auditBtn}
           ${overview}
           ${targetCard}
@@ -6732,8 +6768,20 @@
         statsEl.querySelectorAll(".drill-play").forEach((b) => (b.onclick = () => loadDrill(b.dataset.t)));
         const pick = document.getElementById("gamePick");
         if (pick) { pick.onchange = () => renderDeepDive(games[Number(pick.value)]); renderDeepDive(games[0]); }
-        // Wire re-timing on the "This game" timeline (uses the most recent finished game; a live game isn't retimable).
-        if (!session && games[0]) wireRetimeControls(document.getElementById("thisTimeline"), games[0]);
+        // The picker re-reads the whole panel for the game you chose — every section of the tab is
+        // that one game's, so there's nothing to update in isolation.
+        const thisPick = document.getElementById("thisPick");
+        if (thisPick) {
+          const goTo = (i) => { const x = thisPanePicks[i]; if (!x) return; thisPickKey = pickKeyOf(x); renderStats(); };
+          thisPick.onchange = () => goTo(Number(thisPick.value));
+          const at = thisPanePicks.indexOf(thisPaneGame);
+          const newer = document.getElementById("thisNewer"), older = document.getElementById("thisOlder");
+          if (newer) newer.onclick = () => goTo(at - 1);
+          if (older) older.onclick = () => goTo(at + 1);
+        }
+        // Wire re-timing on the "This game" timeline — whichever game is showing, as long as it's
+        // finished (a live game isn't retimable).
+        if (thisPaneGame && !thisPaneGame.live) wireRetimeControls(document.getElementById("thisTimeline"), thisPaneGame);
         // Press-and-hold works on either — including the game in progress, which carries its own clue
         // grid and solution precisely so its moves can be explained mid-game.
         wireMoveDetail(document.getElementById("thisTimeline"), thisPaneGame);
