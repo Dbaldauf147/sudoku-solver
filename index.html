@@ -177,6 +177,9 @@
         z-index: 2;
       }
       .cell-input.given { color: var(--num); font-weight: 700; cursor: default; pointer-events: none; }
+      /* "Match clue style": a clue and an entry already share a colour, so the bold weight is the whole
+         difference. Wrong entries keep their red — that's the error setting's job, not this one's. */
+      .board.clue-style .cell-input { font-weight: 700; }
       .cell-input.wrong { color: var(--bad); }
       .cell-input.solved { color: var(--num); }
       .pencil {
@@ -958,6 +961,13 @@
       // Error highlighting: when on, wrong entries flag red and clashing units highlight. Default on.
       let errorFlags = true;
       try { errorFlags = localStorage.getItem("sudoku-coach:errorflags") !== "off"; } catch {}
+      // Match clue style: when on, the digits you enter are drawn exactly like the puzzle's clues
+      // (the clues' bold weight — the colour is already shared), so the board reads as one grid rather
+      // than clues plus your answers. Default off: telling the two apart is the usual expectation.
+      let clueStyleEntries = false;
+      try { clueStyleEntries = localStorage.getItem("sudoku-coach:cluestyle") === "on"; } catch {}
+      function applyClueStyle() { boardEl.classList.toggle("clue-style", clueStyleEntries); }
+      applyClueStyle();
       // Show timer: when off, the clock is hidden from the board and the finish sheet drops the time,
       // so a solve reads as untimed. The clock itself keeps running — Stats, targets and the audit all
       // need the times, and hiding a number is not the same as not recording it. Default on.
@@ -2921,6 +2931,16 @@
           showTimer ? "The clock is back on the board, and the finish sheet names your time again." : "Solve without a clock. Your time is still recorded — Stats, targets and the audit are unchanged.", "info");
       }
 
+      // Match clue style: draws your entries in the clues' weight. Purely how the board is painted —
+      // nothing about which cells are locked, checked or recorded changes with it.
+      function toggleClueStyle() {
+        clueStyleEntries = !clueStyleEntries;
+        try { localStorage.setItem("sudoku-coach:cluestyle", clueStyleEntries ? "on" : "off"); } catch {}
+        applyClueStyle();
+        showExplain(clueStyleEntries ? "Matching the clue style" : "Entries look like entries again",
+          clueStyleEntries ? "Your digits are now drawn like the puzzle's own — you won't be able to tell them apart at a glance." : "Your digits are lighter than the clues again, so the numbers you added stand out.", "info");
+      }
+
       // Each row: the label, how to read the current value, what to run on tap, and the sentence
       // explaining what it changes. Adding a setting means adding a line here.
       const SETTINGS = [
@@ -2930,6 +2950,8 @@
           about: "Flags a wrong entry in red as soon as you make it — with the clashing row, column, or box. Turn it off for an unassisted solve; Check entries and Hint still work." },
         { name: "Auto-update notes", get: () => autoUpdateNotes, toggle: toggleAutoUpdateNotes,
           about: "Placing a digit clears it from the pencil marks of every cell in its row, column, and box, so your notes stay current without redoing them by hand. Undo puts them back." },
+        { name: "Match clue style", get: () => clueStyleEntries, toggle: toggleClueStyle,
+          about: "Draws the digits you enter in the same bold weight as the puzzle's clues, so the finished board reads as one grid. The trade-off is that you can no longer see at a glance which numbers you added — the clues are still locked, and a wrong entry still flags red." },
         { name: "Show timer", get: () => showTimer, toggle: toggleShowTimer,
           about: "The clock beside the keypad, and the time on the finish sheet. Turn it off to solve untimed — the time is still recorded, so Stats, targets and the audit are unaffected. Re-timing a move always shows its clock." },
       ];
