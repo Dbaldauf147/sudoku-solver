@@ -3033,8 +3033,8 @@
         const rows = [];
 
         rows.push(`<li>${mark(j.mailer)} <b>Mail sending</b> — ${j.mailer
-          ? "configured."
-          : "no <code>RESEND_API_KEY</code> on this deployment, so nothing can be delivered. Preview still works."}</li>`);
+          ? (j.provider === "gmail" ? "Gmail, over SMTP." : j.provider === "resend" ? "Resend." : "configured.")
+          : "no mail credentials on this deployment, so nothing can be delivered. Set <code>GMAIL_USER</code> and <code>GMAIL_APP_PASSWORD</code>, or <code>RESEND_API_KEY</code>. Preview still works."}</li>`);
 
         rows.push(`<li>${mark(j.store)} <b>Cloud store</b> — ${j.store
           ? "connected, so the Monday job can read your games."
@@ -3046,9 +3046,13 @@
             : "off. Add an address and turn it on."}</li>`);
         }
 
-        // Everything above can read as configured while mail still goes nowhere: Resend's shared
-        // sender only delivers to the address on the Resend account itself.
-        if (j.mailer && j.sharedSender) {
+        // Which address it will arrive from. On Resend this is where everything above can read as
+        // configured while mail still goes nowhere — its shared sender only delivers to the address
+        // on the Resend account itself — so that case gets a warning rather than a tick.
+        if (j.mailer && j.provider === "gmail" && j.from) {
+          rows.push(`<li>${mark(true)} <b>Sender</b> — ${esc(j.from)}. Gmail sends as the account that
+            authenticated, so this is the address it arrives from whatever else is configured.</li>`);
+        } else if (j.mailer && j.sharedSender) {
           rows.push(`<li><span class="warn">!</span> <b>Sender</b> — using Resend's shared
             <code>onboarding@resend.dev</code>, which only delivers to the address on your own Resend
             account. Any other address is accepted and never arrives. Set <code>DIGEST_FROM</code> to

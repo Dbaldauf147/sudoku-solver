@@ -493,27 +493,55 @@ show. Preview and **Send now** analyse the games on the device you're holding, s
 they work with no store connected. The weekly job reads from the store, so it
 needs cross-device sync above.
 
-The panel also lists **what a delivery needs**, one line each — mail sending,
-the cloud store, the subscription, and the sender address — because when the
-email doesn't arrive those failures are indistinguishable from in the app. A
+The panel also lists **what a delivery needs**, one line each — mail sending
+(naming which transport is configured), the cloud store, the subscription, and
+the sender address — because when the email doesn't arrive those failures are
+indistinguishable from in the app. A
 failed **Send now** shows the mail provider's own words, which is usually the
 whole answer.
 
-To set it up:
+There are two ways to send it. Set up either — Gmail is picked when both are
+configured, since it's the one that can't half-work.
+
+**Gmail (SMTP).** Nothing to register and no domain of your own; mail arrives
+from the Google account that sent it.
 
 1. Connect the Redis store as for sync (the subscriptions live there too).
-2. Add `RESEND_API_KEY` from [Resend](https://resend.com) in your Vercel
-   project's **Environment Variables**. Without it the endpoint still analyses
-   and previews, and the Settings panel says sending isn't configured.
+2. On the Google account, turn on **2-Step Verification**, then create an **App
+   password** (Google Account → Security → 2-Step Verification → App passwords).
+   The ordinary account password will not work: SMTP refuses it on any account
+   with 2FA.
+3. Add `GMAIL_USER` (the address) and `GMAIL_APP_PASSWORD` (that 16-character
+   password) in your Vercel project's **Environment Variables**. Google prints
+   it in groups of four; the spaces are stripped, so paste it either way.
+4. **Redeploy**, then ⚙ → Settings → Weekly email digest → address → **Send
+   now** to confirm before turning the weekly on.
+
+This route uses `nodemailer`, which needs **Node 20 or newer** — Vercel's
+current default, but worth checking under Project Settings → Node.js Version on
+an older project.
+
+Mail from this route is always from the account that authenticated — Gmail
+rewrites the `From` header unless the address is a verified alias — so there's
+no sender setting on this path and `DIGEST_FROM` is ignored.
+
+**Resend (HTTPS API).** Better suited to mailing addresses that aren't your own.
+
+1. Connect the Redis store, as above.
+2. Add `RESEND_API_KEY` from [Resend](https://resend.com). Without it the
+   endpoint still analyses and previews, and the Settings panel says sending
+   isn't configured.
 3. Set `DIGEST_FROM` (e.g. `Sudoku Coach <coach@yourdomain>`) to an address on
    a domain you've verified with Resend. Nominally optional, but the default is
    Resend's shared `onboarding@resend.dev`, which **only delivers to the address
    on your own Resend account** — any other address is accepted by the API and
    never arrives. That's the usual reason a digest that looks configured never
    turns up, so the Settings panel flags it explicitly.
-4. Optionally set `CRON_SECRET`; when it's set, the scheduled `GET /api/digest`
-   must present it as a bearer token. Vercel supplies this header automatically.
-5. **Redeploy.** `vercel.json` schedules the job for Mondays at 14:00 UTC.
+4. **Redeploy.**
+
+Either way, optionally set `CRON_SECRET`; when it's set, the scheduled
+`GET /api/digest` must present it as a bearer token, which Vercel supplies
+automatically. `vercel.json` schedules the job for Mondays at 14:00 UTC.
 
 ## Local development
 
@@ -605,6 +633,9 @@ a function under `api/`.
 1. Add `ANTHROPIC_API_KEY` in your Vercel project's **Environment Variables**.
 2. Add `CRON_SECRET` (any long random string) if you want the daily NYT capture
    or the weekly digest — both scheduled jobs authenticate with it.
+   For the digest's own mail credentials — `GMAIL_USER` +
+   `GMAIL_APP_PASSWORD`, or `RESEND_API_KEY` — see
+   [the digest section](#weekly-whats-slipping-email-optional).
 3. Deploy:
 
    ```bash
@@ -696,7 +727,9 @@ Errors come back as `{ "error": "<message>" }` with a 4xx/5xx status.
 { "unsubscribe": true }          // -> { "ok": true, "subscribed": false }
 ```
 
-`GET /api/digest?status=1&profile=<id>` → `{ subscribed, email, mailer }`.
+`GET /api/digest?status=1&profile=<id>` → `{ subscribed, email, mailer, provider, from, sharedSender, store }`,
+where `provider` is `"gmail"`, `"resend"` or `null`. This is what the Settings
+checklist reads.
 
 `GET /api/digest` with no query is the cron entry point: it mails every
 subscriber, reading each profile's history from the store, and returns a
