@@ -50,6 +50,16 @@
         --num: #1d2330;
       }
       * { box-sizing: border-box; }
+      /* No double-tap zoom on phones. Solving is a stream of quick taps in the same small area — a
+         cell then its digit, a digit then the next cell — and a phone reads enough of those pairs as
+         a double-tap to zoom the page mid-solve, leaving the board half off-screen. `manipulation`
+         drops that one gesture only: pinch-zoom and scrolling still work, so the page can still be
+         zoomed by anyone who needs it. Touch behaviour is the intersection of the target's value and
+         its ancestors', so setting it here covers the board, the keypad and every panel. */
+      html, body { touch-action: manipulation; }
+      /* Safari has a history of not honouring an ancestor's touch-action for this gesture, so the tap
+         targets themselves say it too — that's every control a solve actually double-taps. */
+      button, input, select, textarea, .cell, .cell-input { touch-action: manipulation; }
       body {
         margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
         background: var(--bg); color: var(--text);
