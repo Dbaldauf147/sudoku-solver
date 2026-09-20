@@ -492,6 +492,16 @@
       .sync-actions button { flex: 1 1 0; text-align: center; }
       /* Weekly email digest */
       #digestEmail { width: 100%; margin: 8px 0; }
+      /* When it goes out. The two controls sit on one line and wrap to two on a narrow phone
+         rather than shrinking to the point where the time is hard to hit. */
+      .dg-when { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
+      .dg-when label { color: var(--muted); font-size: 0.85rem; flex: 0 0 auto; }
+      .dg-when select { flex: 1 1 130px; min-width: 130px; }
+      /* Matched to the select beside it: a native time field is otherwise the only control in the
+         panel wearing the browser's own chrome. */
+      .dg-when input[type="time"] { flex: 0 1 auto; background: var(--panel); color: var(--text);
+        border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px; font-size: 0.95rem;
+        font-family: inherit; }
       #digestBox { line-height: 1.5; }
       #digestBox .dg-state { font-weight: 600; }
       #digestBox .dg-on { color: var(--ok); }
@@ -2996,9 +3006,15 @@
           `<h3>Sync</h3><div id="syncDiag" class="card">Checking…</div>
            <div class="sync-actions"><button id="syncNowBtn">Sync now</button><button id="syncPushBtn">Upload this device</button><button id="syncRecheck">Re-check</button></div>
            <h3>Weekly email digest</h3>
-           <p class="hintline">A Monday email naming what has slipped — the difficulties, techniques and stall patterns where your recent games are slower or less accurate than the ones before. Improvements get a line at the end; the body is the part you'd otherwise miss.</p>
+           <p class="hintline">A weekly email naming what has slipped — the difficulties, techniques and stall patterns where your recent games are slower or less accurate than the ones before. Improvements get a line at the end; the body is the part you'd otherwise miss.</p>
            <div id="digestBox" class="card">Checking…</div>
            <input id="digestEmail" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" value="${esc(digestEmail)}">
+           <div class="dg-when">
+             <label for="digestDay">Send</label>
+             <select id="digestDay">${DAY_NAMES.map((d, i) => `<option value="${i}">${d}s</option>`).join("")}</select>
+             <label for="digestTime">at</label>
+             <input id="digestTime" type="time" value="08:00">
+           </div>
            <div class="sync-actions"><button id="digestSave" class="primary">Turn on</button><button id="digestPreview">Preview</button><button id="digestSend">Send now</button><button id="digestOff">Turn off</button></div>`;
         document.getElementById("setBack").onclick = closeSettings;
         settingsPanel.querySelectorAll(".sw").forEach((btn) => {
@@ -3024,8 +3040,33 @@
       // The address is remembered on this device so the field refills; whether the weekly mail is
       // actually on lives in the store, since that's what the scheduled job reads.
       const DIGEST_EMAIL_KEY = "sudoku-coach:digest-email";
+      const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
       let digestEmail = "";
       try { digestEmail = localStorage.getItem(DIGEST_EMAIL_KEY) || ""; } catch {}
+      // Whether the store currently holds a subscription, so changing a picker knows whether there
+      // is anything to change or whether it's just setting up what Turn on will carry.
+      let digestSubscribed = false;
+
+      // "08:00" in whatever this device writes times as.
+      function fmtClock(hhmm) {
+        const [h, m] = String(hhmm || "").split(":").map(Number);
+        if (!Number.isFinite(h) || !Number.isFinite(m)) return String(hhmm || "");
+        return new Date(2000, 0, 2, h, m).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      }
+      // The day and time as set on this device's clock, which is the zone the picker means.
+      function digestSchedule() {
+        const d = document.getElementById("digestDay");
+        const t = document.getElementById("digestTime");
+        let tz;
+        try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch {}
+        return {
+          day: d ? Number(d.value) : undefined,
+          // Some browsers hand back seconds on a time field; the API wants HH:MM and quietly keeps
+          // the old value for anything else, which would look like the save hadn't worked.
+          time: t && t.value ? t.value.slice(0, 5) : undefined,
+          tz,
+        };
+      }
       function digestSay(msg, kind) {
         const box = document.getElementById("digestBox");
         if (box) box.innerHTML = `<span class="dg-state ${kind === "on" ? "dg-on" : kind === "off" ? "dg-off" : ""}">${esc(msg)}</span>`;
@@ -3043,12 +3084,52 @@
           digestChecks(j);
           const f = document.getElementById("digestEmail");
           if (j.subscribed && f && !f.value) f.value = j.email;
-          // Once it's on, the same button is how you move it to a different address.
+          // The pickers are repainted from the store on every check, which is also what makes a
+          // saved change show up as the schedule the server actually recorded rather than the one
+          // that was typed at it.
+          const day = document.getElementById("digestDay");
+          const time = document.getElementById("digestTime");
+          if (day && Number.isInteger(j.day)) day.value = String(j.day);
+          if (time && j.time) time.value = j.time;
+          digestSubscribed = !!j.subscribed;
+          // Once it's on, the same button is how you move the address or the schedule.
           const save = document.getElementById("digestSave");
-          if (save) save.textContent = j.subscribed ? "Update address" : "Turn on";
+          if (save) save.textContent = j.subscribed ? "Save changes" : "Turn on";
         } catch { digestSay("Couldn't reach the digest service.", "off"); }
       }
-      // A Monday email needs three separate things, and when it doesn't arrive they all look the
+      // What the schedule will actually do, rather than what was asked of it. The cron is the limit:
+      // Vercel Hobby fires a job once a day, so a time that run can't reach lands on the next one
+      // instead. That gap is stated here because the alternative is finding it out by waiting for an
+      // email that turned up a morning late. `nextSendAt` is the server's own answer — the rule that
+      // decides it lives in api/digest.js, and nothing here second-guesses it.
+      function digestScheduleRow(j) {
+        const asked = `${DAY_NAMES[j.day] || "Sunday"}s at ${fmtClock(j.time)}`;
+        const zone = j.tz ? ` (${j.tz})` : "";
+        if (!j.nextSendAt) return `<li><span class="warn">!</span> <b>Schedule</b> — ${esc(asked)}${esc(zone)}.</li>`;
+
+        const at = new Date(j.nextSendAt);
+        const tz = j.tz || undefined;
+        const lands = at.toLocaleString([], { timeZone: tz, weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+        // How far the run that will carry it sits from the time that was asked for, measured on the
+        // subscriber's own clock, since that's what the picker was set against.
+        const p = {};
+        for (const part of new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(at)) p[part.type] = part.value;
+        const [h, m] = String(j.time || "").split(":").map(Number);
+        const drift = ((Number(p.hour) % 24) * 60 + Number(p.minute)) - (h * 60 + m);
+        const onTheDay = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][j.day] === p.weekday;
+
+        if (onTheDay && drift >= 0 && drift <= 90) {
+          return `<li><span class="yes">✓</span> <b>Schedule</b> — ${esc(asked)}${esc(zone)}. Next one lands ${esc(lands)}.</li>`;
+        }
+        return `<li><span class="warn">!</span> <b>Schedule</b> — you asked for ${esc(asked)}${esc(zone)}, but the
+          digest job runs once a day and that run has already passed by then, so the next one lands
+          <b>${esc(lands)}</b> instead. Pick a time within an hour of that to get the day you wanted — or, on a
+          Vercel plan that allows an hourly cron, set the <code>/api/digest</code> schedule in
+          <code>vercel.json</code> to <code>0 * * * *</code> and <code>CRON_UTC_HOUR</code> in
+          <code>api/digest.js</code> to <code>null</code>, and any time is honoured exactly.</li>`;
+      }
+
+      // A weekly email needs three separate things, and when it doesn't arrive they all look the
       // same from in here: no mailer key, no store for the scheduled job to read, or simply not
       // turned on. Each is stated on its own line with what to do about it, rather than folded into
       // one sentence that can only describe the first problem it finds.
@@ -3063,13 +3144,16 @@
           : "no mail credentials on this deployment, so nothing can be delivered. Set <code>GMAIL_USER</code> and <code>GMAIL_APP_PASSWORD</code>, or <code>RESEND_API_KEY</code>. Preview still works."}</li>`);
 
         rows.push(`<li>${mark(j.store)} <b>Cloud store</b> — ${j.store
-          ? "connected, so the Monday job can read your games."
+          ? "connected, so the weekly job can read your games."
           : "not connected. The weekly job has nothing to read and can't hold a subscription. Preview and Send now still work — they use this device's games."}</li>`);
 
         if (j.store) {
           rows.push(`<li>${mark(j.subscribed)} <b>Weekly email</b> — ${j.subscribed
-            ? `on, going to ${esc(j.email)} every Monday.`
-            : "off. Add an address and turn it on."}</li>`);
+            ? `on, going to ${esc(j.email)}.`
+            : "off. Pick a day and time, add an address, and turn it on."}</li>`);
+          // Only once there's a subscription: before that the pickers are a proposal, and the store
+          // holds no date for this profile to be the next one.
+          if (j.subscribed) rows.push(digestScheduleRow(j));
         }
 
         // Which address it will arrive from. On Resend this is where everything above can read as
@@ -3156,11 +3240,26 @@
         if (!save) return;
         save.onclick = async () => {
           const email = digestAddress(); if (!email) return;
-          digestSay("Turning on…");
-          const { ok, status, j } = await digestPost({ email });
+          digestSay(digestSubscribed ? "Saving…" : "Turning on…");
+          const { ok, status, j } = await digestPost({ email, ...digestSchedule() });
           if (!ok) return digestSay(j.error || (status === 501 ? "No cloud store connected, so the weekly job has nothing to read." : "Couldn't turn the digest on."), "off");
           renderDigestState();
         };
+        // Changing the day or the time saves straight away once the digest is on — the alternative
+        // is a picker that silently shows a schedule the store never heard about. With it off they
+        // are just the values Turn on will carry.
+        for (const id of ["digestDay", "digestTime"]) {
+          const el = document.getElementById(id);
+          if (!el) continue;
+          el.onchange = async () => {
+            if (!digestSubscribed) return;
+            const email = digestAddress(); if (!email) return;
+            digestSay("Saving…");
+            const { ok, j } = await digestPost({ email, ...digestSchedule() });
+            if (!ok) return digestSay(j.error || "Couldn't change when the digest is sent.", "off");
+            renderDigestState();
+          };
+        }
         document.getElementById("digestOff").onclick = async () => {
           digestSay("Turning off…");
           const { ok, j } = await digestPost({ unsubscribe: true });

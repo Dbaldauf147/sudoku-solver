@@ -104,6 +104,32 @@ if (json["vercel.json"]) {
   }
 }
 
+// ---- the digest's cron hour has to match the one api/digest.js quotes to the app ----
+// Settings tells you when the weekly mail will land, and it works that out from CRON_UTC_HOUR in
+// api/digest.js — while the schedule in vercel.json is what actually decides. Nothing at runtime
+// can see the two disagree, so the panel would just state the wrong time, confidently, until
+// somebody compared it against an inbox. `CRON_UTC_HOUR = null` means the cron runs hourly, which
+// is the one arrangement where every chosen time is honoured exactly.
+if (json["vercel.json"]) {
+  const cron = (json["vercel.json"].crons || []).find((c) => String(c.path).startsWith("/api/digest"));
+  const declared = read("api/digest.js").match(/const CRON_UTC_HOUR = (\d+|null);/);
+  if (!cron) fail("vercel.json", "no cron for /api/digest, so the weekly email would never be sent.");
+  else if (!declared) fail("api/digest.js", "couldn't find CRON_UTC_HOUR — this check needs updating alongside it.");
+  else {
+    const [minute, hour, ...rest] = String(cron.schedule).trim().split(/\s+/);
+    const want = declared[1] === "null" ? "*" : declared[1];
+    if (hour !== want) {
+      fail("vercel.json", `the /api/digest cron runs at hour ${hour}, but api/digest.js declares CRON_UTC_HOUR = ${declared[1]}, which is the hour Settings tells you to expect the mail at. Change both, or set CRON_UTC_HOUR = null for an hourly cron.`);
+    }
+    if (rest.join(" ") !== "* * *") {
+      fail("vercel.json", `the /api/digest cron is "${cron.schedule}". The schedule picker assumes it runs at least daily; anything narrower strands every subscriber whose chosen day the cron never falls on.`);
+    }
+    if (minute !== "0") {
+      fail("vercel.json", `the /api/digest cron starts at minute ${minute}. Keep it at 0 — Settings quotes the hour on its own.`);
+    }
+  }
+}
+
 // ---- the service worker's shell has to exist, since the worker itself won't say so ----
 {
   const sw = read("sw.js");
