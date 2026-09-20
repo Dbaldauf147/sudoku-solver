@@ -487,6 +487,16 @@ both a meaningful size and enough games either side of the comparison before it
 is reported, and one technique slipping across several difficulties is rolled up
 into a single row rather than three.
 
+Under the findings the email carries **your solve times**, one card per
+difficulty in the same shape as the Stats screen's: the heading and its trend,
+the chart, and the four figures — average, last five, best, most recent. The
+chart is the same picture, redrawn for email. Mail clients throw `<svg>` away,
+so each game is a column of coloured blocks: the line and the area under it,
+the gridlines, and your average and best laid across them. Only the newest
+games are plotted (the caption says how many of how many), because a longer
+history would mean columns too thin to read in a window that can't scroll
+sideways, and an email that Gmail would clip.
+
 **Preview** shows the actual email — the HTML that lands in the inbox, rendered
 in an isolated frame, with a **Plain text** tab for the fallback some clients
 show. Preview and **Send now** analyse the games on the device you're holding, so
