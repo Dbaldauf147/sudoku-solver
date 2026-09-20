@@ -5,8 +5,8 @@
 // collection. If no store is connected the endpoint replies 501 and the front
 // end silently falls back to per-device localStorage.
 //
-//   GET  /api/games?collection=library|stats|abandoned|active|deleted           -> { games: [...] }
-//   PUT  /api/games?collection=library|stats|abandoned|active|deleted  { games } -> { ok: true, count }
+//   GET  /api/games?collection=library|stats|abandoned|active|deleted|meta           -> { games: [...] }
+//   PUT  /api/games?collection=library|stats|abandoned|active|deleted|meta  { games } -> { ok: true, count }
 //
 // The `active` collection holds the single in-progress game (a 0-or-1-element
 // array) so it can be resumed on any device; the rest are ordinary lists.
@@ -33,6 +33,11 @@ const COLLECTIONS = {
   // Games that were started and walked away from — never solved, never revealed. Kept apart from
   // `stats` (finished games only) so neither list has to be filtered before it can be counted.
   abandoned: "sudoku-coach:abandoned",
+  // Profile-wide bookkeeping that isn't a list of games — currently just `abandonedSince`, the moment
+  // this profile started recording walk-aways. It belongs to the profile, not to a device: stamped per
+  // device it made every device's finish rate a different number. Stored as a 0-or-1-element array so
+  // it fits the same `{ games: [...] }` contract as the rest.
+  meta: "sudoku-coach:meta",
   share: "sudoku-coach:share", // shared catalogues, keyed by a share code (passed as `profile`)
 };
 
@@ -47,7 +52,13 @@ export default async function handler(req, res) {
       .json({ error: "Cloud sync not configured", configured: false });
   }
 
-  const base = COLLECTIONS[req.query.collection] || COLLECTIONS.library;
+  // An unknown name used to fall through to the library key, so a single typo in a collection name
+  // would have a write quietly overwrite the saved puzzles. Name one that exists or get a 400.
+  const requested = req.query.collection == null ? "library" : String(req.query.collection);
+  const base = COLLECTIONS[requested];
+  if (!base) {
+    return res.status(400).json({ error: `Unknown collection "${requested}"` });
+  }
   // Per-profile namespacing: the client sends an opaque id (derived from name + passphrase).
   // Restrict to a safe charset so it can't reach other keys.
   const profile = String(req.query.profile || "").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
