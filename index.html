@@ -580,9 +580,6 @@
       #exGames .ex-game-row:last-child { border-bottom: none; }
       #exGames .ex-game-row .k { color: var(--muted); }
 
-      .confetti { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-      .confetti i { position: absolute; top: -14px; width: 9px; height: 9px; border-radius: 2px; animation: cfall linear forwards; }
-      @keyframes cfall { to { transform: translateY(110vh) rotate(720deg); opacity: 0.9; } }
       .pr-badge { display: inline-block; margin: 0 auto 14px; padding: 8px 15px; border-radius: 999px;
         font-weight: 800; font-size: 0.9rem; color: #7a4d00; letter-spacing: 0.01em;
         background: linear-gradient(90deg, #fde68a, #fbbf24, #f59e0b); box-shadow: 0 4px 16px rgba(245, 158, 11, 0.45);
@@ -919,7 +916,6 @@
       </div>
 
       <div id="winModal" class="overlay sheet" hidden>
-        <div class="confetti" id="confetti"></div>
         <div class="modal win-sheet" role="dialog" aria-modal="true" aria-labelledby="winTitle">
           <button id="winClose" class="sheet-close" aria-label="Close">✕</button>
           <div class="win-star" aria-hidden="true">
@@ -2351,8 +2347,8 @@
         document.body.classList.remove("finished");
       }
       function fillWinSheet(ms, diff) {
-        // The card says the same thing however the solve went; a record shows up only in the
-        // bigger confetti burst below, and in Stats and the audit afterwards.
+        // The card says the same thing however the solve went; a record shows up in Stats and
+        // in the audit afterwards, not here.
         document.getElementById("winTitle").textContent = "Congratulations!";
         // "You finished a medium puzzle in 23:17." — assembled from nodes rather than a template
         // string, so a difficulty label can never arrive as markup inside the sheet.
@@ -2385,7 +2381,6 @@
       }
       let winShownAt = 0;
       function celebrate(ms, diff) {
-        const pr = lastWasPR;
         lastWin = { ms, diff };
         markFinished(diff);
         fillWinSheet(ms, diff);
@@ -2393,11 +2388,10 @@
         clearBoardHighlights();
         try { window.scrollTo({ top: 0, behavior: "smooth" }); } catch { window.scrollTo(0, 0); }
         playWinSound();
-        launchConfetti(pr);
         showWinSheet();
       }
-      // Bring the same sheet back for a solve already celebrated — no chime, no confetti, since
-      // this is a second look rather than the moment itself.
+      // Bring the same sheet back for a solve already celebrated — no chime, since this is a
+      // second look rather than the moment itself.
       function reopenWinSheet() {
         if (!lastWin) return false;
         fillWinSheet(lastWin.ms, lastWin.diff);
@@ -2420,23 +2414,6 @@
         selected = null;
         for (const row of cellEls) for (const el of row)
           el.classList.remove("selected", "same", "peer", "hint", "hint-unit", "conflict", "conflict-unit", "conflict-src");
-      }
-      function launchConfetti(strong) {
-        const cc = document.getElementById("confetti"); cc.innerHTML = "";
-        // A personal record gets a bigger, gold-tinted burst.
-        const colors = strong
-          ? ["#f59e0b", "#fbbf24", "#fde68a", "#facc15", "#eab308", "#16a34a", "#2563eb", "#fff7cc"]
-          : ["#2563eb", "#16a34a", "#f59e0b", "#ec4899", "#a78bfa", "#dc2626"];
-        const count = strong ? 120 : 60;
-        for (let i = 0; i < count; i++) {
-          const s = document.createElement("i");
-          s.style.left = Math.random() * 100 + "%";
-          s.style.background = colors[i % colors.length];
-          s.style.animationDuration = (1.5 + Math.random() * 1.8) + "s";
-          s.style.animationDelay = (Math.random() * (strong ? 0.9 : 0.6)) + "s";
-          cc.appendChild(s);
-        }
-        setTimeout(() => { cc.innerHTML = ""; }, strong ? 5200 : 4200);
       }
       document.getElementById("winAgain").addEventListener("click", () => { document.getElementById("winModal").hidden = true; resetToEdit(); maybeRemindBackup(); });
       // ✕ (and a tap on the dimmed strip above the sheet) dismisses the card and leaves the solved
