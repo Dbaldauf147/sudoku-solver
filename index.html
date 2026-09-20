@@ -1010,11 +1010,29 @@
       applyProfileKeys();
       // Stamped on first run so the finish rate knows how far back it can honestly look. Switching
       // profiles reloads the page, so reading it once here keeps it in step with the active profile.
+      //
+      // This belongs to the *profile*, not to this device: it says when walk-aways started being
+      // recorded at all, and every device that has been playing since then holds the walk-aways to
+      // prove it. Stamped per device and left there, a phone installed months into a profile dated
+      // its own first launch, threw out every finished game older than that, and counted all the
+      // synced walk-aways against the handful that survived — the website showing a 63% finish rate
+      // while the app showed 0%, off identical history. It syncs with the rest now (collection
+      // `meta`), earliest stamp winning, so both devices answer the question the same way.
       let abandonSince = 0;
       try {
         abandonSince = Number(localStorage.getItem(ABANDON_SINCE_KEY)) || 0;
         if (!abandonSince) { abandonSince = Date.now(); localStorage.setItem(ABANDON_SINCE_KEY, String(abandonSince)); }
       } catch { abandonSince = Date.now(); }
+      // Pull the stamp back to `ts` if that's earlier than what this device holds. Only ever earlier:
+      // a device joining a long-running profile must not shorten the window the others already cover.
+      // Returns whether anything moved, so a caller can publish a stamp its own data just pulled back.
+      function adoptAbandonSince(ts) {
+        const t = Number(ts) || 0;
+        if (!t || (abandonSince && t >= abandonSince)) return false;
+        abandonSince = t;
+        try { localStorage.setItem(ABANDON_SINCE_KEY, String(t)); } catch {}
+        return true;
+      }
       // Whole-game goal per difficulty, in ms — { Easy: 480000, … }. Switching profiles reloads the
       // page, so reading these once at load keeps them in step with the active profile.
       let targets = {};
@@ -2735,11 +2753,9 @@
             const mAb = mergeSynced("abandoned", lsGet(ABANDON_KEY), ab).slice(0, MAX_ABANDONED);
             lsSet(ABANDON_KEY, mAb); cloudSave("abandoned", mAb);
           }
-          // Keep the earlier of the two stamps, so restored games aren't dismissed as predating it.
-          if (data.abandonedSince && (!abandonSince || data.abandonedSince < abandonSince)) {
-            abandonSince = data.abandonedSince;
-            try { localStorage.setItem(ABANDON_SINCE_KEY, String(abandonSince)); } catch {}
-          }
+          // Keep the earlier of the two stamps, so restored games aren't dismissed as predating it —
+          // and push it, since a backup reaching further back is news for your other devices as well.
+          if (adoptAbandonSince(data.abandonedSince)) cloudSave("meta", [{ abandonedSince: abandonSince }]);
           // Restore an in-progress game from the backup only if there isn't one locally already.
           if (data.active && !localStorage.getItem(ACTIVE_KEY)) { try { localStorage.setItem(ACTIVE_KEY, JSON.stringify(data.active)); } catch {} }
           // NYT days merge rather than replace, so restoring an older backup can only ever add days
@@ -3885,6 +3901,17 @@
         const s = COLLECTION_SPEC[kind];
         return applyTombstones(mergeCollections(local, cloud, s.key, s.sort, s.stamp), kind, s.key, s.stamp);
       }
+      // Profile-wide bookkeeping (the walk-away watermark). Not a collection of games, so it merges by
+      // its own rule rather than through mergeCollections: the earliest stamp wins, because the profile
+      // has been recording walk-aways since whichever of its devices started first, and every game
+      // played after that moment on any of them is covered.
+      function reconcileMeta(entry) {
+        const theirs = Number(entry && entry.abandonedSince) || 0;
+        adoptAbandonSince(theirs);
+        // Seed the cloud when it holds nothing, and correct it when this device knows of an earlier
+        // start — otherwise the next device to join would inherit the later one.
+        if (!theirs || abandonSince < theirs) cloudSave("meta", [{ abandonedSince: abandonSince }]);
+      }
 
       // Pull every collection, merge it into what's here, push the union back.
       //
@@ -3912,6 +3939,12 @@
               const merged = mergeTombstones(loadTombs(), cloud);
               lsSet(tombKey(), merged); cloudSave("deleted", merged);
             }
+          } catch {}
+          try {
+            // The walk-away watermark, before the stats it gates: this device may only have learned
+            // just now that the profile has been counting since long before it was set up.
+            const cloud = await cloudLoad("meta");
+            if (cloud) { reached = true; reconcileMeta(cloud[0] || null); }
           } catch {}
           try {
             const cloud = await cloudLoad("library");
@@ -3982,7 +4015,7 @@
         const total = (arr, f) => arr.reduce((n, x) => n + (f(x) || 0) + (x.updatedAt || 0), 0);
         const lib = lsGet(STORE_KEY), st = lsGet(STATS_KEY), ab = lsGet(ABANDON_KEY);
         return `${lib.length}:${total(lib, (g) => g.savedAt)}|${st.length}:${total(st, (g) => g.finishedAt || g.startedAt)}`
-          + `|${ab.length}:${total(ab, (g) => g.abandonedAt || g.startedAt)}`;
+          + `|${ab.length}:${total(ab, (g) => g.abandonedAt || g.startedAt)}|${abandonSince}`;
       }
       // Catch up whenever this device might have missed something. SYNC_MIN_GAP_MS keeps these
       // overlapping triggers from turning into a burst of requests.

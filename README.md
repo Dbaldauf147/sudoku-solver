@@ -231,7 +231,11 @@ answer.
     away from once you've played three of them. Only games started since
     walk-aways began being recorded are counted: an older finished game would
     push the rate towards 100% on the strength of nobody having been counting,
-    so those sit out and the footnote says how many.
+    so those sit out and the footnote says how many. That cut-off belongs to
+    the **profile**, not to the device you're reading it on, and syncs with
+    everything else — the earliest start any of your devices recorded is the
+    one they all use, so the website and the installed app give the same
+    answer rather than each dating the window from its own first launch.
 
     **Moves** breaks down how many moves a game takes at each difficulty. A
     move is one digit placed, the ones you took back and replaced included.
@@ -450,12 +454,15 @@ To sync saved puzzles across devices, connect a Redis store:
    integration also sets `UPSTASH_REDIS_REST_*`; `api/games.js` accepts either).
 3. **Redeploy** so the function picks up the new variables.
 
-The library, history, the games you walked away from, the in-progress game, and
-the deletion tombstones are each stored under their own key (namespaced per profile when you sign in), with no
+The library, history, the games you walked away from, the in-progress game, the
+deletion tombstones, and a small `meta` record (the date walk-aways started
+being recorded, which the finish rate reads) are each stored under their own key
+(namespaced per profile when you sign in), with no
 per-user auth, which is fine for a personal tool — add auth before sharing it
 broadly.
 
-**If two devices show different history**, they're almost certainly on different
+**If two devices show different history** — as opposed to the same history
+counted differently — they're almost certainly on different
 profiles. A profile is `name + passphrase`, so the same name with a different
 passphrase is a different account with its own history. The sync line under the
 board shows a short **profile code** — if it differs between your phone and your
