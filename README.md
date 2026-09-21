@@ -489,7 +489,7 @@ Browser ──(base64 image)──▶ /api/parse-sudoku-image ──▶ Claude V
 
 ### Weekly "what's slipping" email (optional)
 
-⚙ → **Settings → Weekly email digest** turns on a Monday email that names the
+⚙ → **Settings → Weekly email digest** turns on a weekly email that names the
 parts of your game that have **got worse** — the difficulties, techniques,
 stall patterns, mistake rates and hint counts where your recent games trail the
 ones before them. Improvements get a short closing list; the body is the
@@ -511,6 +511,24 @@ the gridlines, and your average and best laid across them. Only the newest
 games are plotted (the caption says how many of how many), because a longer
 history would mean columns too thin to read in a window that can't scroll
 sideways, and an email that Gmail would clip.
+
+**When it arrives** is yours to set: pick a day and a time in Settings and the
+schedule is stored with your subscription, in your own timezone, which the
+browser supplies. Out of the box that's **Sundays at 8am Eastern**.
+
+The cron is the limit on how exact that can be. Vercel Hobby fires a job once a
+day, so `vercel.json` runs the digest daily and each subscriber is mailed on the
+first run at or after their chosen moment — a time near that run lands on the day
+you asked for, within the hour; a time the run has already passed arrives on the
+next day's run instead. Settings works the real answer out and shows it (*"Next
+one lands Sunday, Sep 27, 9:00 AM"*), and says so plainly when the time you chose
+isn't one a daily cron can reach. Nothing is ever silently skipped: the schedule
+is a weekly slot, and a missed moment sends late rather than not at all.
+
+On a plan with hourly crons, set the `/api/digest` schedule to `0 * * * *` and
+`CRON_UTC_HOUR` in `api/digest.js` to `null`; every chosen time is then exact.
+`scripts/check.mjs` fails the build if those two ever disagree, since Settings
+quotes the second to tell you when to expect the first.
 
 **Preview** shows the actual email — the HTML that lands in the inbox, rendered
 in an isolated frame, with a **Plain text** tab for the fallback some clients
@@ -566,7 +584,11 @@ no sender setting on this path and `DIGEST_FROM` is ignored.
 
 Either way, optionally set `CRON_SECRET`; when it's set, the scheduled
 `GET /api/digest` must present it as a bearer token, which Vercel supplies
-automatically. `vercel.json` schedules the job for Mondays at 14:00 UTC.
+automatically. `vercel.json` runs the job daily at 13:00 UTC — the hour that
+puts it at 8am Eastern in winter and 9am in summer, i.e. at or just after the
+default send time and never before it, which is what keeps the digest on the day
+you picked instead of slipping to the next one. Who is actually due on a given
+run is decided per subscriber, from the day and time set in Settings.
 
 ## Local development
 
@@ -748,18 +770,27 @@ Errors come back as `{ "error": "<message>" }` with a 4xx/5xx status.
 // -> { "ok": true, "sent": true, "to": "...", "subject": "..." }
 
 // subscribe / unsubscribe the weekly job (needs ?profile=<id>)
-{ "email": "you@example.com" }   // -> { "ok": true, "subscribed": true }
+{ "email": "you@example.com",    // -> { "ok": true, "subscribed": true, … }
+  "day": 0,                      //    0 = Sunday. Omitted fields keep what was
+  "time": "08:00",               //    already stored, so a request carrying only
+  "tz": "America/New_York" }     //    an address changes only the address.
 { "unsubscribe": true }          // -> { "ok": true, "subscribed": false }
 ```
 
-`GET /api/digest?status=1&profile=<id>` → `{ subscribed, email, mailer, provider, from, sharedSender, store }`,
-where `provider` is `"gmail"`, `"resend"` or `null`. This is what the Settings
-checklist reads.
+`GET /api/digest?status=1&profile=<id>` → `{ subscribed, email, day, time, tz,
+runsAtUtcHour, nextSendAt, lastSentAt, mailer, provider, from, sharedSender,
+store }`, where `provider` is `"gmail"`, `"resend"` or `null`, `day` is a JS day
+index (0 = Sunday) and `time` is `"HH:MM"` in `tz`. `nextSendAt` is when the mail
+will really go out, which is the first cron run at or after that moment — the
+Settings checklist reads all of it.
 
 `GET /api/digest` with no query is the cron entry point: it mails every
-subscriber, reading each profile's history from the store, and returns a
-per-subscriber result list. Subscribers with no recorded games are skipped
-rather than mailed an empty week.
+subscriber **who is due**, reading each profile's history from the store, and
+returns a per-subscriber result list. Subscribers with no recorded games are
+skipped rather than mailed an empty week, and that still uses up the week — so
+the first game of a quiet week can't trigger a digest on a day nobody chose.
+Only a delivered mail moves a subscriber on, so a mailer that was briefly down
+is retried on the next run rather than costing the week.
 
 `GET /api/nyt-sudoku?difficulty=easy|medium|hard`
 
