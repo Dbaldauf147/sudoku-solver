@@ -433,6 +433,14 @@ answer.
   undone by them, and on a collision the **most recently edited copy wins**, so
   re-labelling a game on one device isn't reverted by another holding the old one.
 
+  The union applies to **writes as well as reads**. A save replaces the whole
+  collection in the store, so a device pushing its own list would otherwise delete
+  every game another device had added since it last pulled — which is what left a
+  phone and a laptop showing different numbers of games played. Each save now
+  merges the stored copy in first, and pulls anything new it finds back onto the
+  device that saved. The one in-progress game is exempt, since there the newest
+  write is the answer and a union would resurrect a game you'd just cleared.
+
   Your game data is protected by four backup layers: (1) primary
   `localStorage`; (2) cloud sync — coalesced and **retried with backoff**, and
   re-pushed when the network reconnects; (3) **rolling local snapshots** (the

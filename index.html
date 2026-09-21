@@ -2750,7 +2750,7 @@
           const ab = Array.isArray(data.abandoned) ? data.abandoned : [];
           if (ab.length) {
             forgetTombstonesFor("abandoned", ab);
-            const mAb = mergeSynced("abandoned", lsGet(ABANDON_KEY), ab).slice(0, MAX_ABANDONED);
+            const mAb = mergeForCloud("abandoned", lsGet(ABANDON_KEY), ab);
             lsSet(ABANDON_KEY, mAb); cloudSave("abandoned", mAb);
           }
           // Keep the earlier of the two stamps, so restored games aren't dismissed as predating it —
@@ -3773,13 +3773,35 @@
         cloudBusy[collection] = true;
         const items = cloudQueue[collection];
         const w = (cloudWrite[collection] ||= {});
+        let gained = 0;
         try {
-          const body = JSON.stringify({ games: items });
+          let payload = items;
+          // Merge the stored copy in before overwriting it.
+          //
+          // A PUT replaces the collection wholesale, so a device pushing its own list deletes every
+          // game another device has added since this one last pulled. Reads have always merged as a
+          // union; writes have to as well. Without this the union only put those games back if the
+          // other device happened to sync again — and while it hadn't, the two devices disagreed
+          // about how many games you'd played; if it never did, they were gone for good.
+          //
+          // It costs a read before each write. Only the collections with a merge rule get it:
+          // `active` is the single game in progress, where the newest write is the answer and a
+          // union would resurrect a game that was just cleared, and `deleted` has to be able to
+          // shrink — dropping a tombstone is how re-importing a puzzle you deleted last month
+          // sticks instead of vanishing again.
+          if (COLLECTION_SPEC[collection]) {
+            const cloud = await cloudLoad(collection);
+            // 501 — no store on this deployment, so there's nothing to merge with or write to.
+            if (!cloud) { delete cloudQueue[collection]; return; }
+            payload = mergeForCloud(collection, items, cloud);
+            gained = payload.length - items.length;
+          }
+          const body = JSON.stringify({ games: payload });
           w.bytes = body.length;
           const r = await fetch(`/api/games?collection=${collection}${profileParam()}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body });
           if (!r.ok) throw new Error("HTTP " + r.status);
           cloudRetry[collection] = 0;
-          w.failing = false; w.error = ""; w.lastOkAt = Date.now(); w.count = items.length;
+          w.failing = false; w.error = ""; w.lastOkAt = Date.now(); w.count = payload.length;
           if (cloudQueue[collection] === items) delete cloudQueue[collection]; // nothing newer arrived while saving
         } catch (e) {
           const n = (cloudRetry[collection] = (cloudRetry[collection] || 0) + 1);
@@ -3789,6 +3811,11 @@
         } finally {
           cloudBusy[collection] = false;
           if (collection in cloudQueue && cloudQueue[collection] !== items && !cloudRetry[collection]) scheduleCloudFlush(collection, 0);
+          // The merge found games this device didn't have. Pull them in through the ordinary sync
+          // rather than writing them straight to localStorage from inside a save — that path
+          // already knows how to merge every collection and repaint what's on screen. The delay is
+          // so it lands after any sync still in flight, which would otherwise turn it away.
+          if (gained > 0) setTimeout(() => syncStores({ retry: true }), 1500);
         }
       }
       // Re-push anything still pending the moment the network comes back — and pull too, since whatever
@@ -3901,10 +3928,19 @@
         const s = COLLECTION_SPEC[kind];
         return applyTombstones(mergeCollections(local, cloud, s.key, s.sort, s.stamp), kind, s.key, s.stamp);
       }
+      // The union of what this device holds and what the store holds, as it should be written back
+      // to both. One definition, because the read path and the write path drifting apart is exactly
+      // how the two ended up disagreeing: `abandoned` is capped, and a cap applied on the way in but
+      // not on the way out would grow the stored copy without limit.
+      function mergeForCloud(kind, local, cloud) {
+        const merged = mergeSynced(kind, local, cloud);
+        return kind === "abandoned" ? merged.slice(0, MAX_ABANDONED) : merged;
+      }
       // Profile-wide bookkeeping (the walk-away watermark). Not a collection of games, so it merges by
       // its own rule rather than through mergeCollections: the earliest stamp wins, because the profile
       // has been recording walk-aways since whichever of its devices started first, and every game
-      // played after that moment on any of them is covered.
+      // played after that moment on any of them is covered. It has no COLLECTION_SPEC entry, so a save
+      // of it overwrites rather than unions — which is what that rule needs.
       function reconcileMeta(entry) {
         const theirs = Number(entry && entry.abandonedSince) || 0;
         adoptAbandonSince(theirs);
@@ -3950,7 +3986,7 @@
             const cloud = await cloudLoad("library");
             if (cloud) {
               reached = true;
-              const merged = mergeSynced("library", lsGet(STORE_KEY), cloud);
+              const merged = mergeForCloud("library", lsGet(STORE_KEY), cloud);
               lsSet(STORE_KEY, merged); cloudSave("library", merged);
             }
           } catch {}
@@ -3958,7 +3994,7 @@
             const cloud = await cloudLoad("stats");
             if (cloud) {
               reached = true;
-              const merged = mergeSynced("stats", lsGet(STATS_KEY), cloud);
+              const merged = mergeForCloud("stats", lsGet(STATS_KEY), cloud);
               lsSet(STATS_KEY, merged); cloudSave("stats", merged);
             }
           } catch {}
@@ -3966,7 +4002,7 @@
             const cloud = await cloudLoad("abandoned");
             if (cloud) {
               reached = true;
-              const merged = mergeSynced("abandoned", lsGet(ABANDON_KEY), cloud).slice(0, MAX_ABANDONED);
+              const merged = mergeForCloud("abandoned", lsGet(ABANDON_KEY), cloud);
               lsSet(ABANDON_KEY, merged); cloudSave("abandoned", merged);
             }
           } catch {}
