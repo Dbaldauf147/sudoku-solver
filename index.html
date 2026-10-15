@@ -5322,6 +5322,65 @@
         </div>`;
       }
 
+      // ---- one game's time per move, against the difficulty's average at each move ----
+      // The "This game" counterpart of the chart above: this game's own pause before every move,
+      // with your other games of the same difficulty averaged at each move position beneath it, so
+      // a stretch where this game ran slow (or quick) reads against how that stretch usually goes.
+      function gameMovePaceChart(g, games) {
+        const moves = (g.moves || []).filter((m) => typeof m.dt === "number");
+        if (moves.length < 2) return "";
+        const d = g.difficulty || "";
+        const color = DIFF_COLORS[d] || "var(--accent)";
+        const others = games.filter((x) => x !== g && !x.live);
+        const avgPts = d ? movePaceSeries(others, d) : [];
+        const avgGames = others.filter((x) => x.difficulty === d && (x.moves || []).length).length;
+        // Indexed by position in the full move list, the same way movePaceSeries counts them.
+        const pts = (g.moves || []).map((m, i) => ({ x: i + 1, v: m.dt, m })).filter((p) => typeof p.v === "number");
+        // One long pause (a phone call, a walk away) would flatten everything else into the floor, so
+        // the scale tops out a little past the 95th-percentile move of either line; anything taller is
+        // clamped to the top, and this game's are marked there with an arrow and their real time.
+        const p95 = (vs) => { const s = [...vs].sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.floor(s.length * 0.95))] : 0; };
+        const maxY = Math.max(1000, 1.25 * Math.max(p95(pts.map((p) => p.v)), p95(avgPts.map((p) => p.v))));
+        const maxX = Math.max(2, pts[pts.length - 1].x, ...avgPts.map((p) => p.x));
+        const { W, H, padL, padR, padT, padB } = CHART;
+        const plotW = W - padL - padR, plotH = H - padT - padB;
+        const sx = (x) => padL + ((x - 1) / (maxX - 1)) * plotW;
+        const sy = (v) => padT + (1 - Math.min(v, maxY) / maxY) * plotH;
+        const grid = chartGrid([0, 1, 2, 3, 4].map((i) => (maxY * i) / 4), sy, fmtDt);
+        let xaxis = "";
+        for (const t of [...new Set([1, Math.round(maxX / 4), Math.round(maxX / 2), Math.round((maxX * 3) / 4), maxX])]) {
+          xaxis += `<text x="${sx(t).toFixed(1)}" y="${H - padB + 15}" text-anchor="middle" font-size="9" fill="var(--muted)">${t}</text>`;
+        }
+        xaxis += `<text x="${(padL + plotW / 2).toFixed(1)}" y="${H - 4}" text-anchor="middle" font-size="9" fill="var(--muted)">move number</text>`;
+        const path = (ps) => ps.map((p) => `${sx(p.x).toFixed(1)},${sy(p.v).toFixed(1)}`).join(" ");
+        const avgLine = avgPts.length > 1
+          ? `<polyline points="${path(avgPts)}" fill="none" stroke="var(--text)" stroke-opacity="0.55" stroke-width="1.5" stroke-dasharray="5 4" stroke-linejoin="round"></polyline>`
+          : "";
+        const line = `<polyline points="${path(pts)}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>`;
+        // Mistakes and off-the-scale moves get a mark of their own; ordinary moves are just the line.
+        let marks = "";
+        for (const p of pts) {
+          const x = sx(p.x).toFixed(1), y = sy(p.v).toFixed(1);
+          const tip = `<title>#${p.x} ${esc(p.m.tech || "")} · ${esc(fmtDt(p.v))}</title>`;
+          if (p.v > maxY) marks += `<path d="M${x} ${padT - 2}l-4 6h8z" fill="${p.m.correct === false ? "var(--bad)" : color}">${tip}</path>`;
+          else if (p.m.correct === false) marks += `<circle cx="${x}" cy="${y}" r="3" fill="var(--bad)">${tip}</circle>`;
+          else marks += `<circle cx="${x}" cy="${y}" r="6" fill="transparent">${tip}</circle>`;
+        }
+        const avgMs = mean(pts.map((p) => p.v));
+        const legend = `<div class="chart-legend">
+            <span class="lg"><span class="lgdot" style="background:${color}"></span>This game <span class="k">avg ${esc(fmtDt(avgMs))}</span></span>
+            ${avgPts.length ? `<span class="lg"><span class="lgdot" style="background:var(--muted)"></span>Your ${esc(d)} average <span class="k">${avgGames} game${avgGames === 1 ? "" : "s"} · ${esc(fmtDt(mean(avgPts.map((p) => p.v))))}</span></span>` : ""}
+          </div>`;
+        const note = avgPts.length
+          ? `The pause before each move this game, against your average at that move across your other ${esc(d)} games (dashed). Red dots are mistakes; arrows at the top ran off the scale — hover or long-press for the time.`
+          : `The pause before each move this game. Finish another ${esc(d || "game of this difficulty")} and your average at each move will chart alongside it.`;
+        return `<h3>Time per move</h3><div class="card">
+          <svg viewBox="0 0 ${W} ${H}" class="pace-chart" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Time per move this game${avgPts.length ? `, with your ${esc(d)} average at each move` : ""}.">${grid}${avgLine}${line}${marks}${xaxis}</svg>
+          ${legend}
+          <span class="k">${note}</span>
+        </div>`;
+      }
+
       // ---- where in a game you slow down (the cluster chart) ----
       // "Slow" is judged inside each game against that game's own median pause, so a hard puzzle
       // that simply runs slower throughout doesn't read as one long slowdown. What's left is the
@@ -6721,6 +6780,7 @@
           ${compare}
           ${takeaway}
           ${techTable}
+          ${gameMovePaceChart(g, games)}
           ${overTargetThisHTML(g)}
           ${practice}
           ${timeline}`;
