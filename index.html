@@ -630,6 +630,9 @@
       .win-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
         border: none; border-radius: 8px; padding: 14px 16px; background: #eef0f3; color: #121212; }
       .win-card.yellow { background: #f7da21; }
+      a.win-card { text-decoration: none; }
+      .win-card[hidden] { display: none; }
+      .win-card-icon.bee { font-size: 1.6rem; line-height: 1; }
       .win-card:hover { filter: brightness(0.96); }
       .win-card-icon { flex: 0 0 auto; display: flex; }
       .win-card-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -948,6 +951,11 @@
               <span class="win-card-text"><b>Audit my solve</b><span>See how every move landed</span></span>
               <span class="win-card-go" aria-hidden="true">›</span>
             </button>
+            <a id="winBee" class="win-card yellow" href="https://www.nytimes.com/puzzles/spelling-bee" target="_blank" rel="noopener" hidden>
+              <span class="win-card-icon bee" aria-hidden="true">🐝</span>
+              <span class="win-card-text"><b>Spelling Bee</b><span>Tackle today's puzzle</span></span>
+              <span class="win-card-go" aria-hidden="true">›</span>
+            </a>
             <button id="winStats" class="win-card">
               <span class="win-card-icon" aria-hidden="true">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 20.5h18"/><path d="M6 20.5V12"/><path d="M12 20.5V4.5"/><path d="M18 20.5v-5.5"/></svg>
@@ -2365,6 +2373,10 @@
         overlay.classList.toggle("replay", !!game);
         wb.hidden = !game; wb.textContent = "";
         if (game) wb.append(finishedBoardEl(game));
+        // The finished-board view is just the board, the time and what to play next: no audit or stats.
+        document.getElementById("winAudit").hidden = !!game;
+        document.getElementById("winStats").hidden = !!game;
+        document.getElementById("winBee").hidden = !game;
         // The card says the same thing however the solve went; a record shows up only in the
         // bigger confetti burst below, and in Stats and the audit afterwards.
         const pr = lastWasPR;
