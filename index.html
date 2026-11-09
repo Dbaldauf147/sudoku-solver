@@ -636,6 +636,19 @@
       .win-card-text b { font-size: 1rem; font-weight: 700; }
       .win-card-text span { font-size: 0.88rem; color: #3f4652; }
       .win-card-go { flex: 0 0 auto; font-size: 1.3rem; line-height: 1; color: #121212; }
+      /* "View finished board": your last solve, any time no game is in progress — the grid on its own
+         at the top (every digit the one dark colour, clues bold) and the same finish card under it. */
+      .finish-btn { display: block; width: 100%; margin-top: 12px; padding: 12px; font-weight: 700; }
+      .finish-btn[hidden] { display: none; }
+      /* The board sits at full size and the page scrolls to the card, rather than squeezing either. */
+      .overlay.sheet.replay { flex-direction: column; align-items: stretch; justify-content: flex-start;
+        overflow-y: auto; background: var(--bg); }
+      .win-board { flex: 0 0 auto; width: 100%; padding: 16px; }
+      .win-board[hidden] { display: none; }
+      .win-board .miniboard { margin: 0 auto; max-width: 420px; }
+      .win-board .mcell { font-size: clamp(0.85rem, 4.4vw, 1.4rem); font-weight: 400; }
+      .win-board .mcell.clue { font-weight: 700; }
+      .overlay.sheet.replay .win-sheet { flex: 0 0 auto; max-height: none; overflow: visible; margin: auto auto 0; }
       footer { margin-top: 18px; color: var(--muted); font-size: 0.8rem; line-height: 1.5; }
     </style>
   </head>
@@ -713,6 +726,8 @@
         <p class="title">Enter your puzzle</p>
         <p class="body">Type the givens or import a screenshot, then press <strong>Start solving</strong>.</p>
       </div>
+
+      <button id="finishBtn" class="finish-btn" hidden>🏆 View finished board</button>
 
       <div id="stats" class="stats" hidden></div>
       <div id="gameLibrary" class="stats" hidden></div>
@@ -913,6 +928,7 @@
 
       <div id="winModal" class="overlay sheet" hidden>
         <div class="confetti" id="confetti"></div>
+        <div id="winBoard" class="win-board" hidden></div>
         <div class="modal win-sheet" role="dialog" aria-modal="true" aria-labelledby="winTitle">
           <button id="winClose" class="sheet-close" aria-label="Close">✕</button>
           <div class="win-star" aria-hidden="true">
@@ -2159,6 +2175,7 @@
       // ---- UI feedback ----
       function showExplain(title, body, kind = "info", action, tech) {
         explainEl.className = "explain " + kind; explainEl.innerHTML = "";
+        syncFinishBtn();
         const t = document.createElement("p"); t.className = "title"; t.textContent = title;
         const b = document.createElement("p"); b.className = "body";
         if (tech) { const span = document.createElement("span"); span.className = "tech"; span.textContent = tech + " — "; b.append(span, document.createTextNode(body)); }
@@ -2337,13 +2354,17 @@
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] !== solution[r][c]) return;
         const ms = activeElapsed(), diff = session ? session.difficulty : "";
         finalizeSession(true);
-        // The ✕ leaves the solved grid on screen; this button brings the finish card back over it,
-        // with the same time and difficulty, as often as you like — no chime or confetti on a replay.
-        showExplain("🎉 Solved!", showTimer ? `Every cell is correct in ${fmtTime(ms)}. Open Stats for your deep dive.` : "Every cell is correct. Open Stats for your deep dive.", "ok",
-          { label: "🏆 View finished board", onClick: () => celebrate(ms, diff, true) });
+        showExplain("🎉 Solved!", showTimer ? `Every cell is correct in ${fmtTime(ms)}. Open Stats for your deep dive.` : "Every cell is correct. Open Stats for your deep dive.", "ok");
         celebrate(ms, diff);
       }
-      function celebrate(ms, diff, replay = false) {
+      // The game the open finish card describes — what Audit opens. Null means "the one just finished".
+      let winGame = null;
+      function celebrate(ms, diff, replay = false, game = null) {
+        winGame = game;
+        const overlay = document.getElementById("winModal"), wb = document.getElementById("winBoard");
+        overlay.classList.toggle("replay", !!game);
+        wb.hidden = !game; wb.textContent = "";
+        if (game) wb.append(finishedBoardEl(game));
         // The card says the same thing however the solve went; a record shows up only in the
         // bigger confetti burst below, and in Stats and the audit afterwards.
         const pr = lastWasPR;
@@ -2419,11 +2440,40 @@
       // Straight from the celebration into the audit — the moment you're most curious how you did it.
       document.getElementById("winAudit").addEventListener("click", () => {
         document.getElementById("winModal").hidden = true;
-        const g = lsGet(STATS_KEY)[0];
+        const g = winGame || lsGet(STATS_KEY)[0];
         if (!canExplainMove(g)) return showExplain("Nothing to audit", "This game didn't record the clue grid and move log the audit needs.", "info");
         openAudit(g);
       });
       document.getElementById("winStats").addEventListener("click", () => { document.getElementById("winModal").hidden = true; statsTab = "this"; if (statsEl.hidden) document.getElementById("statsBtn").click(); else setStatsTab("this"); });
+
+      // Your most recent solve that kept its grid — what "View finished board" shows.
+      function lastFinishedGame() {
+        let best = null;
+        for (const g of lsGet(STATS_KEY)) if (g && g.solved && Array.isArray(g.grid) && Array.isArray(g.solution)
+          && (!best || (g.finishedAt || 0) > (best.finishedAt || 0))) best = g;
+        return best;
+      }
+      // The finished grid as a static board: the solution everywhere, clues bold, nothing coloured.
+      function finishedBoardEl(g) {
+        const b = document.createElement("div"); b.className = "miniboard";
+        for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+          const d = document.createElement("div");
+          d.className = "mcell" + (g.grid[r] && g.grid[r][c] ? " clue" : "");
+          d.dataset.row = r; d.dataset.col = c;
+          d.textContent = g.solution[r][c] || "";
+          b.append(d);
+        }
+        return b;
+      }
+      // Shown whenever no game is in progress and there's a solve to look back at; hidden mid-game.
+      function syncFinishBtn() {
+        const btn = document.getElementById("finishBtn");
+        try { if (btn) btn.hidden = !!session || !lastFinishedGame(); } catch {}   // early calls can precede the stores
+      }
+      document.getElementById("finishBtn").addEventListener("click", () => {
+        const g = lastFinishedGame(); if (!g) return syncFinishBtn();
+        celebrate(g.totalMs || 0, g.difficulty || "", true, g);
+      });
 
       // ---- timer + session tracking (active time only; pauses don't count) ----
       let lastTotalMs = 0;
@@ -2569,6 +2619,7 @@
         bumpBackupCounter();
         session = null; clearActiveGame();
         renderNytBar();   // a finished game may have just ticked off one of today's three
+        syncFinishBtn();
       }
 
       // ---- buttons ----
@@ -2594,7 +2645,7 @@
         clearHighlights(); renderPencils();
         undoStack = []; redoStack = []; errorsEl.textContent = "0";
         session = { difficulty: difficultyEl.value, source: (sourceEl.value || "Unknown").trim() || "Unknown", startedAt: Date.now(), lastT: 0, pausedMs: 0, pauseStart: null, manualPaused: false, errors: 0, hints: 0, hintsBy: {}, moves: [], missed: {}, noteEdits: 0, noteFills: 0 };
-        startTimer();
+        startTimer(); syncFinishBtn();
         const first = (() => { for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (!givens[r][c]) return [r, c]; return [0, 0]; })();
         select(first[0], first[1]);
         const savedNow = saveGameIfNew(grid, session.difficulty, session.source);
@@ -3520,7 +3571,7 @@
         session = null; clearInterval(timerId); timerId = null; undoStack = []; redoStack = []; activeSavedGame = null;
         solving = false; solution = null; lastHint = null; givens = blank(false); setMode("normal"); syncModeButtons();
         document.body.classList.remove("solving"); clearHighlights(); closeStats(); closeLibrary(); closeHistory(); closeTechniques(); closeWalkthrough(); closeSettings(); closeAudit();
-        pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0";
+        pauseModal.hidden = true; document.getElementById("winModal").hidden = true; timerEl.textContent = "0:00"; errorsEl.textContent = "0"; syncFinishBtn();
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) { inputs[r][c].classList.remove("given", "wrong", "solved"); marks[r][c].clear(); }
         renderPencils();
         showExplain("Enter your puzzle", "Type the givens or import a screenshot, then press Start solving.", "info");
@@ -3677,7 +3728,7 @@
         clearHighlights(); renderPencils();
         if (st.manualPaused) { pauseTimer(true); pauseModal.hidden = false; }
         else startTimer();
-        timerEl.textContent = fmtTime(elapsed);
+        timerEl.textContent = fmtTime(elapsed); syncFinishBtn();
         return elapsed;
       }
       function restoreActiveGame() {
@@ -7568,6 +7619,7 @@
       // ---- init ----
       select(0, 0);
       if (!restoreActiveGame()) renderPencils();
+      syncFinishBtn();
       syncModeButtons();   // Candidate starts disabled until a solve is in progress
       initStores().then(() => {
         // Opening a ?share=<code> link offers to import that shared catalogue.
