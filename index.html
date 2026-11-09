@@ -2337,10 +2337,13 @@
         for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (grid[r][c] !== solution[r][c]) return;
         const ms = activeElapsed(), diff = session ? session.difficulty : "";
         finalizeSession(true);
-        showExplain("🎉 Solved!", showTimer ? `Every cell is correct in ${fmtTime(ms)}. Open Stats for your deep dive.` : "Every cell is correct. Open Stats for your deep dive.", "ok");
+        // The ✕ leaves the solved grid on screen; this button brings the finish card back over it,
+        // with the same time and difficulty, as often as you like — no chime or confetti on a replay.
+        showExplain("🎉 Solved!", showTimer ? `Every cell is correct in ${fmtTime(ms)}. Open Stats for your deep dive.` : "Every cell is correct. Open Stats for your deep dive.", "ok",
+          { label: "🏆 View finished board", onClick: () => celebrate(ms, diff, true) });
         celebrate(ms, diff);
       }
-      function celebrate(ms, diff) {
+      function celebrate(ms, diff, replay = false) {
         // The card says the same thing however the solve went; a record shows up only in the
         // bigger confetti burst below, and in Stats and the audit afterwards.
         const pr = lastWasPR;
@@ -2370,8 +2373,7 @@
             ? `🎯 Target ${fmtTime(tMs)} — beaten by ${fmtTime(-late)}!`
             : `🎯 Target ${fmtTime(tMs)} — ${fmtTime(late)} over. Stats shows which moves missed the pace.`;
         }
-        playWinSound();
-        launchConfetti(pr);
+        if (!replay) { playWinSound(); launchConfetti(pr); }
         document.getElementById("winModal").hidden = false;
       }
       // Victory chime, played when a puzzle is completed. Loaded lazily and replayable.
