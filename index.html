@@ -650,15 +650,15 @@
          at the top (every digit the one dark colour, clues bold) and the same finish card under it. */
       .finish-btn { display: block; width: 100%; margin-top: 12px; padding: 12px; font-weight: 700; }
       .finish-btn[hidden] { display: none; }
-      /* The board sits at full size and the page scrolls to the card, rather than squeezing either. */
-      .overlay.sheet.replay { flex-direction: column; align-items: stretch; justify-content: flex-start;
-        overflow-y: auto; background: var(--bg); }
-      .win-board { flex: 0 0 auto; width: 100%; padding: 16px; }
+      /* The board sits at full size at the top and the card slides up over its lower rows, cutting
+         them off — the same layering as the live win. The card scrolls on its own if it's tall. */
+      .overlay.sheet.replay { overflow: hidden; background: var(--bg); }
+      .win-board { position: absolute; top: 0; left: 0; right: 0; padding: 16px; }
       .win-board[hidden] { display: none; }
       .win-board .miniboard { margin: 0 auto; max-width: 420px; }
       .win-board .mcell { font-size: clamp(0.85rem, 4.4vw, 1.4rem); font-weight: 400; }
       .win-board .mcell.clue { font-weight: 700; }
-      .overlay.sheet.replay .win-sheet { flex: 0 0 auto; max-height: none; overflow: visible; margin: auto auto 0; }
+      .overlay.sheet.replay .win-sheet { position: relative; z-index: 1; }
       footer { margin-top: 18px; color: var(--muted); font-size: 0.8rem; line-height: 1.5; }
     </style>
   </head>
