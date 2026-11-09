@@ -16,7 +16,7 @@
 //   · the shell files — cache first with a background refresh, since they change rarely and are what
 //     make a cold offline launch possible.
 // Bump VERSION when SHELL_FILES changes, so the old cache is dropped on activate.
-const VERSION = "v1";
+const VERSION = "v2";
 const SHELL = `sudoku-coach-shell-${VERSION}`;
 const PAGE = "./index.html";
 const SHELL_FILES = [
@@ -30,6 +30,8 @@ const SHELL_FILES = [
   "./assets/icon-512.png",
   "./assets/icon-512-maskable.png",
   "./assets/win.m4a",
+  "./assets/fonts/rokkitt.woff2",
+  "./assets/fonts/libre-franklin.woff2",
 ];
 
 self.addEventListener("install", (e) => {

@@ -596,6 +596,12 @@
          on show above it: serif headline, one black pill for the next puzzle, and the follow-on
          actions as tappable rows under it. It opts out of the app's modal chrome (grey panel,
          360px box, buttons in a row), so every rule it needs is restated here instead of inherited. */
+      /* The win card's two typefaces, self-hosted (font-src 'self'), SIL OFL — licences beside the files.
+         A chunky slab serif for the headline and the finish line, a gothic sans for the buttons. */
+      @font-face { font-family: "Win Slab"; src: url("assets/fonts/rokkitt.woff2") format("woff2");
+        font-weight: 100 900; font-style: normal; font-display: swap; }
+      @font-face { font-family: "Win Sans"; src: url("assets/fonts/libre-franklin.woff2") format("woff2");
+        font-weight: 100 900; font-style: normal; font-display: swap; }
       .overlay.sheet { align-items: flex-end; padding: 0; background: rgba(17, 20, 28, 0.06); }
       .win-sheet {
         background: #ffffff; color: #121212; border: none; border-radius: 18px 18px 0 0;
@@ -612,19 +618,20 @@
         background: #f2c14b; display: flex; align-items: center; justify-content: center; }
       .win-star-in { width: 54px; height: 54px; border-radius: 9px; background: #e07b26;
         display: flex; align-items: center; justify-content: center; }
-      .win-sheet h2 { font-family: Georgia, "Times New Roman", serif;
-        font-size: clamp(1.9rem, 8vw, 2.35rem); font-weight: 700; letter-spacing: -0.015em;
+      .win-sheet h2 { font-family: "Win Slab", Georgia, serif;
+        font-size: clamp(2.1rem, 9vw, 2.6rem); font-weight: 800; letter-spacing: -0.02em;
         color: #121212; margin: 0 0 16px; line-height: 1.1; }
       .win-sheet p { color: #121212; margin: 0; }
-      .win-sheet .win-line { font-family: Georgia, "Times New Roman", serif;
+      .win-sheet .win-line { font-family: "Win Slab", Georgia, serif; font-weight: 400;
         font-size: clamp(1.2rem, 5.6vw, 1.45rem); line-height: 1.35; max-width: 12em; margin: 0 auto 10px; }
-      .win-sheet .win-line b { font-weight: 700; }
+      .win-sheet .win-line b { font-weight: 800; }
+      .win-sheet .win-primary, .win-sheet .win-card, .win-sheet .win-target { font-family: "Win Sans", system-ui, sans-serif; }
       .win-sheet .win-target { font-size: 0.85rem; font-weight: 600; margin: 8px 0 0; }
       .win-actions { display: flex; flex-direction: column; align-items: stretch; gap: 12px;
         max-width: 400px; margin: 30px auto 0; }
       .win-primary { align-self: center; background: #121212; color: #ffffff; border: none;
         border-radius: 999px; padding: 16px 30px; min-width: min(280px, 100%);
-        font-size: 1rem; font-weight: 700; }
+        font-size: 0.92rem; font-weight: 700; }
       .win-primary:hover { background: #2c2c2c; }
       /* Follow-on actions borrow the "next puzzle" row: icon, two lines of text, chevron. */
       .win-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
