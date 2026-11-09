@@ -657,6 +657,14 @@
       .overlay.sheet.replay { flex-direction: column; align-items: center; justify-content: flex-start;
         overflow-y: auto; background: #ffffff; --wb: min(420px, calc(100vw - 16px)); }
       .win-board { flex: 0 0 auto; width: 100%; padding: 8px 8px 0; }
+      /* Above the board: the app's own help / settings / menu icons, then the difficulty. */
+      .win-top { flex: 0 0 auto; width: 100%; }
+      .win-top[hidden] { display: none; }
+      .win-top-bar { display: flex; justify-content: flex-end; align-items: center; gap: 6px;
+        padding: 6px 10px; border-bottom: 1px solid #e3e3e3; }
+      .win-icon { background: none; border: none; padding: 8px; color: #333333; display: flex; }
+      .win-level { margin: 8px 0 2px; text-align: center; color: #555555;
+        font-family: "Win Slab", Georgia, serif; font-size: 1.35rem; font-weight: 400; }
       .win-board[hidden] { display: none; }
       .win-board .miniboard { margin: 0 auto; max-width: 420px; }
       .win-board .mcell { font-size: clamp(0.85rem, 4.4vw, 1.4rem); font-weight: 400; }
@@ -942,6 +950,20 @@
 
       <div id="winModal" class="overlay sheet" hidden>
         <div class="confetti" id="confetti"></div>
+        <div id="winTop" class="win-top" hidden>
+          <div class="win-top-bar">
+            <button id="winHelp" class="win-icon" aria-label="Techniques" title="Techniques">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M9.2 9.2a2.9 2.9 0 0 1 5.6 1c0 1.9-2.8 2.5-2.8 4.3"/><circle cx="12" cy="17.6" r="0.4" fill="currentColor"/></svg>
+            </button>
+            <button id="winSettings" class="win-icon" aria-label="Settings" title="Settings">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L14.9 3h-4l-.4 2.7a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.4 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM12.9 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+            </button>
+            <button id="winMore" class="win-icon" aria-label="Menu" title="Menu">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+            </button>
+          </div>
+          <p id="winLevel" class="win-level"></p>
+        </div>
         <div id="winBoard" class="win-board" hidden></div>
         <div class="modal win-sheet" role="dialog" aria-modal="true" aria-labelledby="winTitle">
           <button id="winClose" class="sheet-close" aria-label="Close">✕</button>
@@ -2383,6 +2405,9 @@
         const overlay = document.getElementById("winModal"), wb = document.getElementById("winBoard");
         overlay.classList.toggle("replay", !!game);
         wb.hidden = !game; wb.textContent = "";
+        document.getElementById("winTop").hidden = !game;
+        const lv = (diff || "").trim();
+        document.getElementById("winLevel").textContent = lv ? lv[0].toUpperCase() + lv.slice(1).toLowerCase() : "";
         if (game) wb.append(finishedBoardEl(game));
         // The finished-board view is just the board, the time and what to play next: no audit or stats.
         document.getElementById("winAudit").hidden = !!game;
@@ -2401,8 +2426,9 @@
         if (label) {
           const d = document.createElement("b");
           d.textContent = label;
-          if (showTimer) msg.append("You finished a ", d, " puzzle in ", time, ".");
-          else msg.append("You finished a ", d, " puzzle.");
+          const art = /^[aeiou]/.test(label) ? "an" : "a";
+          if (showTimer) msg.append(`You finished ${art} `, d, " puzzle in ", time, ".");
+          else msg.append(`You finished ${art} `, d, " puzzle.");
         } else if (showTimer) msg.append("You finished this puzzle in ", time, ".");
         else msg.append("You finished this puzzle.");
         // The grid stays visible above the sheet, so drop the solving highlights and scroll it into view.
@@ -2493,6 +2519,11 @@
         const btn = document.getElementById("finishBtn");
         try { if (btn) btn.hidden = !!session || !lastFinishedGame(); } catch {}   // early calls can precede the stores
       }
+      // The finished-board view's top icons close it and open the app's own screens.
+      const fromFinish = (id) => (e) => { e.stopPropagation(); document.getElementById("winModal").hidden = true; document.getElementById(id).click(); };
+      document.getElementById("winHelp").addEventListener("click", fromFinish("techBtn"));
+      document.getElementById("winSettings").addEventListener("click", fromFinish("settingsBtn"));
+      document.getElementById("winMore").addEventListener("click", fromFinish("gear"));
       document.getElementById("finishBtn").addEventListener("click", () => {
         const g = lastFinishedGame(); if (!g) return syncFinishBtn();
         celebrate(g.totalMs || 0, g.difficulty || "", true, g);
